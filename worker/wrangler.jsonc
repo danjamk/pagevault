@@ -4,6 +4,11 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-01",
 
+  // Required by the `agents` SDK, which reaches for node:path / node:os / node:buffer
+  // through transitive deps. Without it the Worker builds fine in tests and fails to
+  // build in wrangler — a gap only running it for real will show you.
+  "compatibility_flags": ["nodejs_compat"],
+
   // `pagevault init` rewrites this file: it fills in the KV namespace id, the
   // custom domain, and the Access AUD tags read back from the app-create calls.
   // Editing it by hand is supported but not the intended path.

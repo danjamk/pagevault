@@ -96,13 +96,17 @@ simplification.
 ## 4. Data model (Workers KV)
 
 ```
-portal:{slug}            → JSON Portal        [+ KV key metadata]
-portal:{slug}:members    → JSON string[]      (normalized, lowercase)
-doc:{id}                 → string (the source bytes)
-meta:{id}                → JSON DocMeta       [+ KV key metadata]
-idx:portal:{slug}:{id}   → ""                 (existence = membership; no RMW race)
-pub:{token}              → string (doc id)
+portal:{slug}     → JSON Portal        [+ KV key metadata]
+members:{slug}    → JSON string[]      (normalized, lowercase)
+idx:{slug}:{id}   → ""                 (existence = membership; no RMW race)
+doc:{id}          → string (the source bytes)
+meta:{id}         → JSON DocMeta       [+ KV key metadata]
+pub:{token}       → string (doc id)
 ```
+
+**The prefixes are disjoint on purpose.** The obvious layout — `portal:{slug}:members` —
+collides with `list({ prefix: "portal:" })`: the member list comes back looking like a
+portal. Members and the index get their own namespaces instead. There is a test for it.
 
 ```ts
 type PortalKind = "private" | "restricted" | "public";
@@ -149,12 +153,16 @@ the same edge. The CLI retries before printing a URL. Nothing may depend on one.
 
 ## 5. Authorization — one function, no exceptions
 
+Pure by design — no `env`, no KV, no I/O. Everything it needs is an argument, so the
+whole matrix is exercised without a Worker, and routes come after it rather than
+alongside it.
+
 ```ts
 export function canView(
   doc: DocMeta, portal: Portal, members: string[],
-  email: string | null, env: Env,
+  email: string | null, ownerEmail: string,
 ): boolean {
-  if (email !== null && emailsMatch(email, env.OWNER_EMAIL)) return true;
+  if (emailsMatch(email, ownerEmail)) return true;
 
   // ownerOnly beats EVERY grant below. Evaluated first, deliberately.
   if (doc.ownerOnly) return false;
@@ -184,6 +192,12 @@ Invariants, each of which is a test:
    portal B. This is the threat that ends a consulting business, not a feature. Write
    that test first.
 5. `email === null` can only ever reach `public` portals and valid `/p/` tokens.
+
+**`canViewPortal()` is a separate function, and that is what keeps the index free.**
+`extraEmails` is a *document* grant, not a portal grant — someone you sent one report to
+can open that report and has no business seeing the client's whole index. So the index
+never consults `extraEmails`, which means it renders from KV key metadata with **zero
+reads**. Fold the two together for elegance and every portal page load becomes an N+1.
 
 Read-side MCP tools go through the **same function**. A token scoped to portal A must
 not be able to `search_portal("clientB")` — that is the same threat wearing a
@@ -261,7 +275,55 @@ we serve. See ADR-004.
 **The API token never touches the browser.** Not in the page, not in `localStorage`,
 not in a data attribute.
 
-## 9. Seats — and the rule that follows from them
+## 9. Deploying — what is true, verified on a real account
+
+`make provision` does the Cloudflare work: KV namespace, One-time PIN, the
+`pagevault-viewers` group, and the two Access applications. It reads the AUD tags out of
+the app-create responses, so nothing is copied out of a dashboard. It is idempotent.
+`make destroy` is its mirror — a setup path you cannot undo is a setup path you cannot
+test.
+
+**Two steps genuinely need a human**, and pretending otherwise would just move the
+surprise later:
+
+1. **Enable Zero Trust once.** The org-creation API has no plan-selection field. The
+   script detects this, deep-links the dashboard, stops, and on re-run reads the team name
+   back automatically so you never type it.
+2. **Create the API token.** There is no bootstrap API to mint a token without a token.
+
+> ⚠️ **Cloudflare's free Zero Trust plan requires payment details on file.** Confirmed on
+> a real account, not inferred from the docs. You are not charged. The README must say so
+> — "$0, no card" would be a lie people discover at step three and resent.
+
+### The things a passing test suite will not tell you
+
+Every one of these got past a green suite and was only found by deploying:
+
+- **`nodejs_compat`.** The `agents` SDK reaches for `node:path` through transitive deps.
+  Vitest does not care. Wrangler refuses to build. **Green tests are not a build.**
+- **`CF_TEAM_NAME` is the *slug*, not the domain.** Cloudflare's API returns `auth_domain`
+  as `acme.cloudflareaccess.com`. Passing that through doubles it in the JWKS URL, every
+  verification fails, and it surfaces as an opaque 404. `auth.ts` now accepts either form.
+- **🔴 One-time PIN is not enabled by default.** A fresh Zero Trust org ships with "Sign in
+  with Cloudflare" — a *password* login against a Cloudflare account — as its only method.
+  **No client will ever have one.** Asking them to make one is precisely the client-side
+  onboarding step this product's premise says must not exist. The apps, the group, and the
+  policies can all be correct while the product is broken in the only way that matters: the
+  client cannot get in. `make provision` enables OTP rather than leaving it to be found.
+- **Disable `workers.dev` and Preview URLs.** They route around Access entirely. The Worker
+  fails closed without a valid JWT, so this is not an open door — but it is a required step.
+
+### Error messages are part of the security model
+
+`/v/*` sits behind Access, so **an unauthenticated request there cannot happen unless the
+deployment is broken.** It returns a 500 naming the likely knob, not a 404 — because a bare
+404 is indistinguishable from "no such portal", which is exactly how the `CF_TEAM_NAME` bug
+above cost an afternoon.
+
+The owner is told a portal does not exist and how to create one. **A stranger still gets a
+bare 404**, because a helpful message would confirm whether a client's portal exists.
+
+## 10. Seats — and the rule that follows from them
 
 **"50 free users" means 50 distinct people who have *ever* logged in.** Not fifty
 concurrent. A seat is consumed on first authentication and **held forever**: Cloudflare
@@ -307,7 +369,7 @@ one. sharehtml burns a seat on every viewer, even link-shared ones, because thei
 
 See ADR-002.
 
-## 10. MCP — remote, not stdio
+## 11. MCP — remote, not stdio
 
 **This is the reason the project exists.** sharehtml has no MCP server; it ships a
 skill that shells out to its CLI, which only works where there is a terminal. The
@@ -342,7 +404,7 @@ Auth: bearer token today, which works in Claude Code. OAuth 2.1 is required for 
 hosted surfaces (claude.ai, Desktop, mobile) and is a **pre-launch** task, not a
 pre-validation one. See ADR-006.
 
-## 11. Explicit non-goals
+## 12. Explicit non-goals
 
 No comments, reactions, or presence — sharehtml's lane, a Durable Objects project,
 and a client reading a report does not want to leave threaded replies on it. No

@@ -183,12 +183,47 @@ describe("/v/{slug} — the portal index", () => {
     expect(res.status).toBe(404);
   });
 
-  it("404s an unauthenticated visitor to a restricted portal", async () => {
-    expect((await SELF.fetch(`${HOST}/v/realplus`)).status).toBe(404);
+  it("🔴 500s — not 404s — an unauthenticated request, because that means the DEPLOYMENT is broken", async () => {
+    // Cloudflare Access sits in front of /v/*. An unauthenticated request cannot reach this
+    // route unless something is wrong with the deployment: a bad CF_ACCESS_AUD, a bad
+    // CF_TEAM_NAME, a Worker deployed before its Access app existed.
+    //
+    // The first real deploy hit exactly that (CF_TEAM_NAME carried the full
+    // .cloudflareaccess.com domain, so the JWKS URL doubled it) and it presented as a bare
+    // "Not found" — indistinguishable from "that portal doesn't exist". An afternoon lost to
+    // a 404. Say what is actually wrong.
+    const res = await SELF.fetch(`${HOST}/v/realplus`);
+    const body = await res.text();
+
+    expect(res.status).toBe(500);
+    expect(body).toContain("misconfigured");
+    expect(body).toContain("CF_TEAM_NAME");
+
+    // But it must still not confirm whether this client's portal exists.
+    expect(body).not.toContain("realplus");
+    expect(body).not.toContain("RealPlus");
   });
 
-  it("404s a portal that does not exist", async () => {
-    expect((await SELF.fetch(`${HOST}/v/nosuchclient`, { headers: await as(OWNER) })).status).toBe(404);
+  it("tells the OWNER a portal does not exist, and how to make one", async () => {
+    // A stranger gets a bare 404 — a helpful message would confirm whether a client's portal
+    // exists. The owner already knows everything there is to know, so leaving them to guess
+    // buys no security and costs them an afternoon.
+    const res = await SELF.fetch(`${HOST}/v/nosuchclient`, { headers: await as(OWNER) });
+    const body = await res.text();
+
+    expect(res.status).toBe(404);
+    expect(body).toContain("No such portal");
+    expect(body).toContain("nosuchclient");
+    expect(body).toContain("/api/portals"); // and how to fix it
+  });
+
+  it("🔴 gives a STRANGER a bare 404 — no hint that the portal exists or does not", async () => {
+    const res = await SELF.fetch(`${HOST}/v/nosuchclient`, { headers: await as(STRANGER) });
+    const body = await res.text();
+
+    expect(res.status).toBe(404);
+    expect(body).toBe("Not found");
+    expect(body).not.toContain("nosuchclient");
   });
 
   it("⭐ renders with ZERO KV reads — the index runs off key metadata alone", async () => {
@@ -270,7 +305,18 @@ describe("/v/{slug}/{id} — the document", () => {
   });
 });
 
-describe("/v/{slug} — public portals", () => {
+describe("🔴 /pub/{slug} — the public tier lives OFF the Access path", () => {
+  // The bug this suite exists to prevent:
+  //
+  // Public portals were originally served from /v/*, which Cloudflare Access covers. Every
+  // test passed — Miniflare has no Access, so an unauthenticated request reached the Worker
+  // and canViewPortal correctly said yes. In production, an anonymous visitor to a public
+  // marketing page would have hit an OTP login wall, and completing it would permanently
+  // consume one of the 50 free Access seats. For a page that is public by design.
+  //
+  // The function was right. The deployment topology was wrong. No unit test can see that,
+  // so these tests pin the ROUTE instead.
+
   beforeEach(async () => {
     await putPortal(env, portal("marketing", "public", "Marketing"));
     await seedDoc("marketing", "pub111111111", { title: "How It Works" });
@@ -278,19 +324,56 @@ describe("/v/{slug} — public portals", () => {
   });
 
   it("serves the index with no authentication at all — and burns no Access seat", async () => {
-    const res = await SELF.fetch(`${HOST}/v/marketing`);
+    const res = await SELF.fetch(`${HOST}/pub/marketing`);
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("How It Works");
   });
 
   it("serves a document with no authentication", async () => {
-    expect((await SELF.fetch(`${HOST}/v/marketing/pub111111111`)).status).toBe(200);
+    const res = await SELF.fetch(`${HOST}/pub/marketing/pub111111111`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("<iframe"); // still the shell, still sandboxed
+  });
+
+  it("⭐ links WITHIN a public portal point at /pub, never /v", async () => {
+    // A /v/ link on a public page walks the reader into a login wall and burns a seat.
+    // Every URL we emit has to get this right, so it comes from one helper.
+    const body = await (await SELF.fetch(`${HOST}/pub/marketing`)).text();
+
+    expect(body).toContain('href="/pub/marketing/pub111111111"');
+    expect(body).not.toContain('href="/v/marketing');
+  });
+
+  it("redirects /v/{slug} to /pub/{slug} — one canonical URL", async () => {
+    const res = await SELF.fetch(`${HOST}/v/marketing`, { redirect: "manual" });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`${HOST}/pub/marketing`);
   });
 
   it("🔴 still hides ownerOnly drafts from the entire internet", async () => {
     // ownerOnly is evaluated before the public-portal check. A draft parked in the public
     // marketing portal must not be world-readable.
-    expect((await SELF.fetch(`${HOST}/v/marketing/pub222222222`)).status).toBe(404);
-    expect(await (await SELF.fetch(`${HOST}/v/marketing`)).text()).not.toContain("Unfinished");
+    expect((await SELF.fetch(`${HOST}/pub/marketing/pub222222222`)).status).toBe(404);
+    expect(await (await SELF.fetch(`${HOST}/pub/marketing`)).text()).not.toContain("Unfinished");
+  });
+
+  it("🔴 a RESTRICTED portal is a 404 through /pub — not a redirect", async () => {
+    // A redirect would confirm that a client's portal exists. And if /pub ever served a
+    // restricted portal, the whole Access gate would be bypassable by changing one path
+    // segment.
+    await putPortal(env, portal("realplus", "restricted", "RealPlus"));
+    await putMembers(env, "realplus", [REALPLUS_CTO]);
+    await seedDoc("realplus", "rp1111111111");
+
+    expect((await SELF.fetch(`${HOST}/pub/realplus`)).status).toBe(404);
+    expect((await SELF.fetch(`${HOST}/pub/realplus/rp1111111111`)).status).toBe(404);
+  });
+
+  it("🔴 a PRIVATE portal is a 404 through /pub", async () => {
+    await putPortal(env, portal("scratch", "private", "Scratch"));
+    await seedDoc("scratch", "sc1111111111");
+
+    expect((await SELF.fetch(`${HOST}/pub/scratch`)).status).toBe(404);
+    expect((await SELF.fetch(`${HOST}/pub/scratch/sc1111111111`)).status).toBe(404);
   });
 });

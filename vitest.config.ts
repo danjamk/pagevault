@@ -12,7 +12,7 @@ export default defineConfig({
       wrangler: { configPath: "./worker/wrangler.jsonc" },
 
       miniflare: {
-        // Vars are empty in the committed wrangler.jsonc (`pagevault init` fills
+        // Vars ship blank in the committed wrangler.jsonc (the provisioning script fills
         // them in), so tests supply their own. Secrets never come from the config.
         bindings: {
           OWNER_EMAIL: "owner@example.com",
@@ -21,6 +21,17 @@ export default defineConfig({
           CF_ACCESS_AUD_DOCS: "aud-docs-test",
           CF_ACCESS_AUD_ADMIN: "aud-admin-test",
           PAGEVAULT_API_TOKEN: "test-token-do-not-use-in-production",
+
+          // 🔴 Pinned OFF, explicitly.
+          //
+          // Reading wrangler.jsonc also pulls in worker/.dev.vars — so a developer with
+          // AUTH_MODE=none in their local dev config would run the entire security suite
+          // against a Worker with authentication DISABLED, and every test would still go
+          // green. That is a hole in the harness, which is worse than a hole in the code.
+          //
+          // worker/test/harness.test.ts asserts this is still off, so if the leak ever
+          // reappears it fails loudly instead of silently.
+          AUTH_MODE: "",
         },
       },
 

@@ -1,6 +1,7 @@
 import { handleApi, json } from "./api.js";
 import type { Env } from "./env.js";
-import { handlePortalRoute } from "./portal.js";
+import { handleMcp } from "./mcp.js";
+import { handlePortalRoute, handlePublicPortalRoute } from "./portal.js";
 import { getMeta, getPublicTokenTarget } from "./store.js";
 import { handleRender, renderShell } from "./viewer.js";
 
@@ -22,9 +23,16 @@ import { handleRender, renderShell } from "./viewer.js";
  *   /mcp      none      bearer token, and it CANNOT be Access-covered (ADR-006)
  */
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const { pathname } = url;
+
+    // Remote MCP, Streamable HTTP. Bearer token, and NO Cloudflare Access application —
+    // Anthropic's connectors call this from their cloud, with no browser and no way to
+    // complete an OTP login, so Access would hard-block them. See ADR-006.
+    if (pathname === "/mcp") {
+      return handleMcp(request, env, ctx);
+    }
 
     // An Access app at `/` would cover the entire host, so the console cannot live
     // there. `/` is an unauthenticated redirect. See ADR-001.
@@ -50,6 +58,14 @@ export default {
     const pub = /^\/p\/([^/]+)$/.exec(pathname);
     if (pub?.[1]) {
       return handlePublicToken(env, pub[1]);
+    }
+
+    // 🔴 The public tier. NO Access application, deliberately — an anonymous reader must
+    // never hit a login wall, and must never burn one of the 50 free Access seats on a page
+    // that is public by design. See portal.ts.
+    const pubPortal = /^\/pub\/([^/]+)(?:\/([^/]+))?\/?$/.exec(pathname);
+    if (pubPortal?.[1]) {
+      return handlePublicPortalRoute(env, pubPortal[1], pubPortal[2] ?? null);
     }
 
     // Access app A. Portal index and documents, gated by canView.

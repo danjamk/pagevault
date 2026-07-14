@@ -1,7 +1,7 @@
 import { env } from "cloudflare:test";
 import { SignJWT, type JWK, exportJWK, generateKeyPair } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { identify, resetJWKSCache, timingSafeEqual } from "../src/auth.js";
+import { identify, resetJWKSCache, teamSlug, timingSafeEqual } from "../src/auth.js";
 import type { Env } from "../src/env.js";
 
 /**
@@ -206,7 +206,10 @@ describe("🔴 identify — the dev bypass cannot escape localhost", () => {
     "enforces auth when AUTH_MODE is %o — only exact 'none' bypasses",
     async (mode) => {
       const req = request(undefined, "http://localhost:8787/v/default/abc");
-      const devEnv = testEnv(mode === undefined ? {} : { AUTH_MODE: mode });
+      // Set explicitly, including the undefined case. Relying on the var being ABSENT from
+      // the ambient env made this test depend on the developer's local .dev.vars — which is
+      // exactly how it silently started passing against a Worker with auth disabled.
+      const devEnv: Env = { ...testEnv(), AUTH_MODE: mode as string };
       expect(await identify(req, devEnv, "docs")).toBeNull();
     },
   );
@@ -229,6 +232,28 @@ describe("🔴 identify — the dev bypass cannot escape localhost", () => {
     const req = request(undefined, "http://localhost:8787/v/default/abc");
     const noOwner = testEnv({ AUTH_MODE: "none", OWNER_EMAIL: "  " });
     expect(await identify(req, noOwner, "docs")).toBeNull();
+  });
+});
+
+describe("🔴 the team name is accepted either way", () => {
+  // Cloudflare's API returns auth_domain as the FULL domain. Pasting that in and having the
+  // Worker append ".cloudflareaccess.com" builds a JWKS URL that does not exist — every
+  // login fails, and it surfaces as an opaque 404 with no clue why. This bit us on the
+  // first real deploy.
+
+  it("normalizes the slug form", () => {
+    expect(teamSlug("acme")).toBe("acme");
+  });
+
+  it("normalizes the full-domain form", () => {
+    expect(teamSlug("acme.cloudflareaccess.com")).toBe("acme");
+  });
+
+  it("verifies a real token when CF_TEAM_NAME carries the full domain", async () => {
+    const token = await mintToken();
+    const fullDomain = testEnv({ CF_TEAM_NAME: `${TEAM}.cloudflareaccess.com` });
+
+    expect(await identify(request(token), fullDomain, "docs")).toMatchObject({ email: OWNER });
   });
 });
 
