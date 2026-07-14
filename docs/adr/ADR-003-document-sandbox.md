@@ -1,7 +1,21 @@
 # ADR-003 — Serve documents into an opaque origin via CSP `sandbox`
 
-**Status:** Accepted
+**Status:** **Superseded by [ADR-007](ADR-007-viewer-shell.md)** (2026-07-14)
 **Date:** 2026-07-13
+
+> **Why it was superseded, by its own terms.** The Consequences section below says:
+> *"Any future feature that needs the document to talk back to PageVault (view
+> tracking from inside the page, an in-document share button) is blocked by this, by
+> design. Such a feature needs the iframe-wrapper design instead."* The product now
+> needs exactly that — portal navigation, PDF export, and read receipts all require
+> chrome around the document. The trigger this ADR set for itself has fired.
+>
+> **The security property is retained, not abandoned.** ADR-007 still puts the
+> artifact in an opaque origin; it gets there via `sandbox="allow-scripts"` on an
+> iframe instead of a top-level CSP header, and it *also* keeps the CSP `sandbox`
+> directive on the bytes route as a second layer. The Alternatives section below —
+> which already evaluated and deferred the iframe design — is why that decision took
+> minutes rather than a re-litigation.
 
 ## Context
 

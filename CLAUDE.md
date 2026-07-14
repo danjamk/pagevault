@@ -9,19 +9,28 @@ in `CLAUDE.local.md` (gitignored).
 
 ## Project context
 
-The problem: you generate a beautiful self-contained HTML artifact and discover
-there is no good way to hand it to another human. Drive won't render it. Gists
-are public. Netlify and Vercel paywall password protection. GitHub Pages is
-public-only. So you email a `.html` attachment like it's 2004.
+**The link is not the unit. The client is.**
+
+Over a nine-month engagement you produce fourteen artifacts for one client.
+Fourteen links, fourteen emails, and a client digging through Gmail in March for
+the architecture doc you sent in January.
 
 PageVault is one Cloudflare Worker bound to one hostname. Cloudflare Access
-answers *"who are you?"*. The Worker answers *"are you allowed to see this
-specific document?"*. Per-document sharing lives in KV, so there is **one** Access
-application per surface — not one per document.
+answers *"who are you?"*. The Worker answers *"may you see this?"* — in exactly
+one function, `canView()`. Permissions live on the **portal**, not the document,
+so adding a person to a client's team is one write, not fourteen.
 
-Read `docs/architecture.md` before changing anything. The four contested design
-decisions are recorded as ADRs in `docs/adr/`; read the relevant one before
-overturning it.
+The collection reads back. The MCP server exposes `read_document` and
+`search_portal`, so six months in, *"what did we decide about CDC on V2?"* is
+answerable from the portal. Publishing and remembering become the same act. That
+is what makes a portal worth having at one client.
+
+Read `docs/architecture.md` before changing anything. The contested decisions are
+ADRs in `docs/adr/`; read the relevant one before overturning it.
+
+PageVault owes [`jonesphillip/sharehtml`](https://github.com/jonesphillip/sharehtml)
+(Apache-2.0) three ideas: the Access-provisioning setup script, the capability-token
+model, and the sandboxed iframe. Credit them in the README.
 
 ## Prime directives
 
@@ -29,36 +38,44 @@ overturning it.
    wants that, they fork it.
 2. **Small enough to read in one sitting.** That is the entire value proposition.
    A dependency someone forking this repo has to install is a cost.
-3. **Single-file HTML only.** Inlined CSS/JS, base64 images. No asset pipeline.
-4. **`/d/*` and `/p/*` serve untrusted HTML.** Every document is assumed hostile.
-   See ADR-003. Do not weaken the sandbox to make a demo work.
-5. **The Worker verifies the JWT itself.** Never trust
-   `Cf-Access-Authenticated-User-Email` or the `CF_Authorization` cookie. See
-   ADR-004.
-6. **Ask before adding** a database, a frontend framework, a build pipeline, or
-   any dependency beyond `jose` and the MCP SDK.
+3. **Portals are invisible until needed.** `pagevault publish report.html` must
+   work without the user learning what a portal is. If the quickstart needs the
+   word "portal," it is built wrong. See ADR-005.
+4. **Every artifact is hostile.** It is LLM-generated, it runs JS, and it may come
+   from content the model didn't control. It renders in a sandboxed iframe inside
+   a trusted shell, never in our origin's document context. `allow-same-origin`
+   must never appear in this codebase — there is a test for that. See ADR-007.
+5. **One authorization function.** `canView()`. No exceptions, including for
+   read-side MCP tools. Cross-portal leakage ends a consulting business.
+6. **The Worker verifies the JWT itself.** Never trust
+   `Cf-Access-Authenticated-User-Email`, never trust the `CF_Authorization`
+   cookie, anywhere. See ADR-004.
+7. **Ask before adding** a database, a frontend framework, a build pipeline, or
+   any dependency beyond `jose`, the `agents` SDK, and the MCP SDK.
 
 ## Layout
 
 ```
 worker/          the Worker — the whole product
   src/index.ts     router
-  src/auth.ts      JWT verify, session tokens, bearer auth
-  src/store.ts     KV access
+  src/auth.ts      JWT verify, capability + session tokens, bearer auth
+  src/access.ts    canView() — the one authorization function
+  src/store.ts     KV access (portals, members, docs)
   src/api.ts       /api handlers
-  src/console.ts   /admin and /admin/upload
-cli/             `pagevault` — thin HTTP client of /api
-mcp/             `pagevault-mcp` — stdio MCP server, also a thin client
+  src/mcp.ts       /mcp — remote MCP, Streamable HTTP
+  src/viewer.ts    the trusted shell, /render
+  src/console.ts   /admin
+cli/             `pagevault` — thin HTTP client of /api  (Layer 1)
+mcp/             thin stdio bin that proxies to /mcp, for Claude Desktop
 docs/
   architecture.md      the design
-  access-setup.md      Zero Trust config walkthrough
   adr/                 decision records
   implementation/      build plans
 ```
 
-CLI and MCP ship as one npm package (`pagevault`) with two bins. Neither talks to
-KV directly — both are HTTP clients of the API, so they work identically pointed
-at anyone's deployment.
+**The MCP server is remote, not stdio** — it lives in the Worker. A stdio server
+cannot run in a browser or on a phone, which is where artifacts actually get made,
+and reaching those surfaces is the entire differentiator. See ADR-006.
 
 ## Conventions
 

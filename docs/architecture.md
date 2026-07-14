@@ -1,361 +1,354 @@
 # PageVault — Architecture
 
-The design, and why it is the way it is. Every Cloudflare behavior asserted here
-was verified against current Cloudflare documentation; the load-bearing ones are
-cited inline. The four contested decisions have their own ADRs in `docs/adr/`.
+The design, and why it is the way it is. Every Cloudflare and MCP behavior asserted
+here was verified against current documentation. The contested decisions have their
+own ADRs in `docs/adr/`; read the relevant one before overturning it.
+
+> **Revised 2026-07-14.** The original design published one document and returned one
+> link. That primitive is table stakes — six commercial products and
+> [`jonesphillip/sharehtml`](https://github.com/jonesphillip/sharehtml) (Apache-2.0,
+> a Cloudflare PM's project) already do it, several of them better. **The collection
+> is the product.** See ADR-005.
+>
+> PageVault owes sharehtml three ideas: the Access-provisioning setup script, the
+> capability-token model, and the sandboxed iframe. They are credited in the README
+> because they got there first and pretending otherwise would be both wrong and easy
+> to catch.
 
 ---
 
 ## 1. The idea
 
-Cloudflare Access answers **"who are you?"**. The Worker answers **"are you
-allowed to see this specific document?"**.
+**Cloudflare Access answers "who are you?". The Worker answers "may you see this?".**
 
-That split is the whole design. It means Access is configured **once**, and
-per-document sharing lives in KV where it belongs — instead of one Access
-application per published document, which is where every naive version of this
-ends up.
+That split is the architecture, and the Worker's half lives in **exactly one
+function** — `canView()`. One Access application per surface, configured once.
+Permissions live in KV, on the **portal**, not scattered across documents.
+
+The unit is not the link. The unit is the client.
+
+> Over a nine-month engagement you produce fourteen artifacts for one client.
+> Fourteen links, fourteen emails, and a client digging through Gmail in March for
+> the architecture doc you sent in January.
+
+One durable URL per client. Every artifact lands there — tagged, dated, gated to
+their people. Add someone to the client's team: **one write, not fourteen.**
+
+And the collection reads back. The MCP server exposes `read_document` and
+`search_portal`, so six months in, *"what did we decide about CDC on V2?"* is
+answerable from the portal. **Publishing and remembering become the same act.** That
+is what makes a portal worth having at one client, which is the number that exists
+today.
+
+## 2. Simplicity first — portals are invisible until needed
+
+Non-negotiable. The quickstart does not contain the word "portal":
+
+```bash
+pagevault publish report.html                    # private, just you
+pagevault publish report.html --emails a@x.com   # email-gated, this doc only
+pagevault publish report.html --public           # unguessable link
+```
+
+`init` creates a `default` private portal. Every document has one; the user does not
+have to know that yet. `--portal` is required **only when ambiguous** — two or more
+portals exist and no default is set. Portals appear later, in a section called *"when
+you have the same audience over and over."*
+
+**Every publish prints where it landed.** That is the actual safeguard against
+misfiling a client report, not a required flag:
 
 ```
-                    ┌──────────────────────┐
-                    │  Cloudflare Access   │  ← identity only
-                    │  (One-time PIN /     │     "prove you own this email"
-                    │   Google / GitHub)   │
-                    └──────────┬───────────┘
-                               │  Cf-Access-Jwt-Assertion
-   /d/*  /admin/*  ────────────┤
-                               ▼
-        /p/*  ─── no Access ─▶ ┌──────────────────────┐
-                               │      Worker          │  ← authorization
-        /api/* ── bearer ────▶ │  (verify JWT,        │     "is this email on
-                               │   check allowlist)   │      THIS doc's list?"
-                               └──────────┬───────────┘
-                                          ▼
-                                     Workers KV
+→ https://share.example.com/v/realplus/k3x9mq2vb7pd
+  portal: realplus · visible to: 3 members
 ```
 
-## 2. Stack
+## 3. Routes and Access topology
 
-| Concern | Choice | Why |
-|---|---|---|
-| Compute | Cloudflare Workers | Free: 100k req/day, 10ms CPU, 128MB |
-| Storage | Workers KV | Free: 100k reads, 1k writes, 1k lists/day, 1GB |
-| Identity | Cloudflare Access | Free for 50 seats. Email OTP + SSO, so we don't build it. |
-| Deploy | Wrangler 4 (Node 22+) | `wrangler deploy`, no CI needed |
-
-Cost: **$0**, plus a domain you already own. See §9 for the one honest asterisk.
-
-## 3. Routes
-
-| Route | Access app | Worker behavior |
+| Route | Access app | Worker does |
 |---|---|---|
 | `/` | none | 302 → `/admin` |
-| `/d/{id}` | **App A** (`host/d`) — Allow, Include: Group `pagevault-viewers` | Verify JWT (aud = App A) → email → load `meta:{id}` → **404** unless email ∈ allowlist → serve `doc:{id}`, sandboxed |
-| `/p/{token}` | none | `pub:{token}` → id → serve `doc:{id}`, sandboxed. No auth. |
-| `/api/*` | none | `Authorization: Bearer` — API token or console session token |
-| `/admin`, `/admin/upload` | **App B** (`host/admin`) — Allow, Include: Emails: `OWNER_EMAIL` | Verify JWT (aud = App B) → 403 unless owner → render console |
+| `/v/{slug}` | **App A** (`host/v`) | Portal index. `canView` per doc. |
+| `/v/{slug}/{id}` | **App A** | Viewer shell. `canView`, then mint a capability token. |
+| `/render/{id}?cap=` | none | **Artifact bytes.** Capability token only. Framed, never navigated. |
+| `/p/{token}` | none | Capability link → shell. No auth, no seat burned. |
+| `/pub/{slug}`, `/pub/{slug}/{id}` | none | Public portal → shell. No auth, no seat burned. |
+| `/api/*` | none | Bearer token. |
+| `/mcp` | none | **Remote MCP**, Streamable HTTP. Bearer token. See ADR-006. |
+| `/admin`, `/admin/*` | **App B** (`host/admin`) | Owner console. |
 
-Two Access applications. **Zero bypass policies.**
+**Two Access applications. Zero bypass policies.** Paths belong to the *application*,
+not the policy — a bypass policy scoped to `/api/*` is not expressible, and a
+path-less app swallows the whole host. Uncovered paths reach the Worker with no JWT
+at all, which is better than a bypass policy: fewer knobs, nothing to misconfigure.
+See ADR-001.
 
-Three things make this work, and each was a correction to the original design:
+`CF_ACCESS_AUD` is **two vars, not one**. `/v` accepts only App A's audience;
+`/admin` only App B's. A shared AUD would let any portal member present their token
+to the owner console — a privilege escalation that looks like a config
+simplification.
 
-**Paths belong to the application, not the policy.** There is no path field on an
-Access policy. You cannot "add a bypass policy scoped to `/api/*`" — Cloudflare's
-own documentation uses "create a second application at that path" as the canonical
-pattern for exactly this.
-
-**A path-less app covers the entire host.** So `/` cannot be protected in
-isolation; an Access app at `/` swallows everything. That is why the console lives
-at `/admin` and `/` is a redirect. Overlap resolves most-specific-path-wins, and
-it **overrides rather than merges** — App A's policies fully replace anything a
-parent app would have applied.
-
-**Paths with no Access app reach the Worker unauthenticated.** `/p/*` and `/api/*`
-simply have no app in front of them. This is better than a bypass policy: fewer
-moving parts, and nothing to misconfigure.
-
-`CF_ACCESS_AUD` is therefore a **list** — one AUD per app — and each route accepts
-only its own app's AUD. Accepting either token on either route would let any
-`pagevault-viewers` member reach the console. See ADR-001.
+> 🔴 **`/mcp` must never sit behind Access.** Anthropic's connector infrastructure
+> calls it from their cloud (`160.79.104.0/21`) — no browser, no cookie, no way to
+> complete an OTP login. Access would hard-block it. The Worker does its own auth
+> there, which is what it does everywhere.
 
 ## 4. Data model (Workers KV)
 
-Single namespace, `PAGEVAULT`.
-
 ```
-doc:{id}      → string (raw HTML body)
-meta:{id}     → JSON DocMeta   [+ KV key metadata]
-pub:{token}   → string (the doc id)   [only when visibility=public]
+portal:{slug}            → JSON Portal        [+ KV key metadata]
+portal:{slug}:members    → JSON string[]      (normalized, lowercase)
+doc:{id}                 → string (the source bytes)
+meta:{id}                → JSON DocMeta       [+ KV key metadata]
+idx:portal:{slug}:{id}   → ""                 (existence = membership; no RMW race)
+pub:{token}              → string (doc id)
 ```
 
 ```ts
-type Visibility = "private" | "restricted" | "public";
+type PortalKind = "private" | "restricted" | "public";
+type SourceKind = "html" | "markdown";   // markdown renders in a later layer
+
+interface Portal {
+  slug: string;          // ^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$, reserved words rejected
+  name: string;
+  kind: PortalKind;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 interface DocMeta {
-  id: string;              // 12-char, crypto.getRandomValues
+  id: string;
+  portal: string;        // always set; defaults to "default"
   title: string;
-  visibility: Visibility;
-  emails: string[];        // lowercased. Always includes OWNER_EMAIL.
-  publicToken?: string;    // 22-char random, only when visibility=public
-  tags?: string[];         // free-form, e.g. ["client:acme"]
-  createdAt: string;       // ISO8601
+  summary?: string;      // one line, shown in the portal index
+  sourceKind: SourceKind;
+  ownerOnly: boolean;    // a draft the client cannot see. Beats every grant below.
+  extraEmails?: string[];// ADDITIVE grant, this doc only. Never subtractive.
+  publicToken?: string;  // explicit widening, separate route
+  tags?: string[];
+  createdAt: string;
   updatedAt: string;
   bytes: number;
 }
 ```
 
-### Listing: KV key metadata, not a hand-maintained index
+**Listing** is `list({ prefix: "idx:portal:{slug}:" })` for membership, and
+`list({ prefix: "meta:" })` with **KV key metadata** for titles and dates. Never a
+read per document — an N+1 passes every functional test and silently eats the
+100k/day read quota. There is a test asserting one `list()` and zero `get()`s.
 
-**Do not build an `index:owner` array of doc ids.** It is a read-modify-write on
-every publish and it will corrupt itself the first time two publishes race.
+`emails` stay **out** of key metadata: KV caps it at 1024 bytes and an allowlist can
+blow it, which would break listing for exactly the documents with the most sharing.
 
-Use KV's per-key metadata (≤1024 bytes, returned inline by `list()` with no extra
-reads):
+**No index array.** It is a read-modify-write on every publish and it corrupts itself
+the first time two publishes race.
 
-```ts
-await env.PAGEVAULT.put(`meta:${id}`, JSON.stringify(meta), {
-  metadata: { title, visibility, createdAt, updatedAt, tags, bytes },
-});
-```
+**KV is eventually consistent** (~60s), with no read-after-write guarantee even at
+the same edge. The CLI retries before printing a URL. Nothing may depend on one.
 
-The console and `GET /api/docs` render off a single `list({ prefix: "meta:" })`.
-No N+1 reads, no write contention, no index to keep in sync.
-
-`emails` deliberately stays **out** of key metadata — an allowlist can blow the
-1KB cap. The union needed for the Access group is computed by reading `meta:` keys
-during reconcile, never on the hot path.
-
-Notes:
-- `private` is just `restricted` with `emails: [OWNER_EMAIL]`. Keep the distinct
-  label — it is clearer at the call site and in the UI.
-- Rotating a public link: mint a new `publicToken`, delete the old `pub:` key.
-- Revoking: delete `doc:`, `meta:`, and any `pub:` key.
-- `list()` caps at 1000 keys/call. Paginate with `cursor` if it ever exceeds that,
-  which it won't.
-
-### Consistency
-
-KV is eventually consistent — up to 60 seconds globally. There is **no documented
-read-after-write guarantee, not even at the same edge**. A freshly published doc
-may 404 briefly at a distant edge. The CLI retries before printing the URL. Do not
-build anything that depends on read-after-write.
-
-## 5. Identity and authorization
-
-### Three token types. Never a cookie.
-
-| Token | Where | Verified how |
-|---|---|---|
-| Access JWT | `Cf-Access-Jwt-Assertion` header, on `/d` and `/admin` only | JWKS, `kid`-matched, `iss` + `aud` checked |
-| `PAGEVAULT_API_TOKEN` | `Authorization: Bearer`, from CLI/MCP | Constant-time compare |
-| Console session token | `Authorization: Bearer`, minted into the `/admin` page | HMAC, ~15min TTL |
-
-Access sets a `CF_Authorization` cookie scoped `Path=/` on the hostname. The
-browser therefore sends it to `/api/*` and `/p/*` **even though those paths have
-no Access app**. We ignore it everywhere. Cookie auth on a state-changing API is
-ambient authority and a CSRF surface; a bearer header is neither. See ADR-004.
-
-### JWT validation — do not skip this
-
-Cloudflare strips these headers from external requests, but a misconfigured route,
-an enabled `workers.dev` subdomain, or a future bypass turns a trusted-header
-design into a full authentication bypass. **Verify the signature.** Never trust
-`Cf-Access-Authenticated-User-Email` on its own.
+## 5. Authorization — one function, no exceptions
 
 ```ts
-import { jwtVerify, createRemoteJWKSet } from "jose";
+export function canView(
+  doc: DocMeta, portal: Portal, members: string[],
+  email: string | null, env: Env,
+): boolean {
+  if (email !== null && emailsMatch(email, env.OWNER_EMAIL)) return true;
 
-const TEAM_DOMAIN = `https://${env.CF_TEAM_NAME}.cloudflareaccess.com`;
-const JWKS = createRemoteJWKSet(new URL(`${TEAM_DOMAIN}/cdn-cgi/access/certs`));
+  // ownerOnly beats EVERY grant below. Evaluated first, deliberately.
+  if (doc.ownerOnly) return false;
 
-async function identify(request: Request, env: Env, aud: string) {
-  const token = request.headers.get("Cf-Access-Jwt-Assertion");
-  if (!token) return null;
-  try {
-    const { payload } = await jwtVerify(token, JWKS, {
-      issuer: TEAM_DOMAIN,
-      audience: aud,          // the AUD of THIS route's app, not any app
-    });
-    return String(payload.email ?? "").toLowerCase() || null;
-  } catch {
-    return null;
-  }
+  if (portal.kind === "public") return true;
+  if (email === null) return false;
+
+  // Additive per-document grant. Can only ever ADD a viewer — never remove one.
+  if (doc.extraEmails?.includes(email)) return true;
+
+  if (portal.kind === "restricted") return members.includes(email);
+  return false;   // private portal, and we already know they are not the owner
 }
 ```
 
-Access signs with **RS256** and rotates its signing key roughly **every 6 weeks**
-(old keys stay valid 7 days). `createRemoteJWKSet` caches and refreshes the key
-set. Never pin a key; never read `public_cert`.
+Invariants, each of which is a test:
 
-### Seats: bounded by a synced Access group
+1. A document **never** inherits more visibility than its portal. It widens only by
+   two explicit owner acts: `extraEmails`, or a minted `publicToken` on a separate
+   route that does not consult `canView` at all.
+2. `extraEmails` is **additive, never subtractive** — visible in the shape of the
+   code as an early `return true`, never a `return false`.
+3. **`ownerOnly` beats everything**, evaluated before any grant. A draft with an
+   email grant on it stays invisible. Check `extraEmails` first and you silently leak
+   drafts while every other test still passes.
+4. **Cross-portal isolation is absolute.** Membership in portal A confers nothing in
+   portal B. This is the threat that ends a consulting business, not a feature. Write
+   that test first.
+5. `email === null` can only ever reach `public` portals and valid `/p/` tokens.
 
-A seat is consumed by any successful Access authentication, seats are not
-auto-reaped, and **once the 50 free seats are full, further logins are blocked**.
-An `Include: Everyone` + One-time PIN policy — which Cloudflare's docs explicitly
-list under "Common Cloudflare Access misconfigurations" — means any stranger who
-knows the hostname can exhaust your seats and lock out your actual clients.
+Read-side MCP tools go through the **same function**. A token scoped to portal A must
+not be able to `search_portal("clientB")` — that is the same threat wearing a
+read-only disguise, and it is the version most likely to be gotten wrong because it
+feels like a convenience feature.
 
-So the `/d` policy includes a **single Access group**, `pagevault-viewers`,
-holding the union of every document's allowlist. Only people you invited can
-authenticate at all.
+## 6. Identity — verify, never trust
 
-- **On publish/patch:** read the group, union in the new emails, `PUT`. Additive,
-  cheap, idempotent.
-- **On `pagevault sync-access`:** recompute the union from KV and `PUT` the whole
-  list. Access group `PUT` is a **full replacement**, so this is exact — it fixes
-  both drift and the read-modify-write race on the hot path. With `--reap` it also
-  removes seats for emails on no current allowlist.
+Access injects `Cf-Access-Jwt-Assertion` and strips it from external requests. That
+is a *deployment* property, not a *code* property. One misrouted Worker, one
+`workers.dev` subdomain left enabled, and a trusted-header design is a full
+authentication bypass with no error and no log.
 
-This needs a Cloudflare API token with Access edit rights. If `CF_API_TOKEN` is
-unset, PageVault falls back to the `Include: Everyone` policy and warns loudly —
-the simple setup path stays open for people who just want to try it.
+- Verify the signature with `jose` + `createRemoteJWKSet`. RS256. Access rotates
+  signing keys ~every 6 weeks; match on `kid`, never pin.
+- Pin **both** `issuer` and `audience`. Either alone is insufficient.
+- Missing config → **deny**. Fail closed.
+- Never read `Cf-Access-Authenticated-User-Email`.
+- **Normalize every email at every boundary.** A case-mismatched email failing an
+  allowlist check is a confidentiality bug that looks like a UI bug.
 
-**Public pages cost zero seats.** `/p/*` has no Access app, so no one ever
-authenticates. See ADR-002.
+The dev bypass is `AUTH_MODE === "none"` — **exact string equality**, never a
+truthiness test, and additionally refused unless the request host is localhost. A
+truthiness check here is an authentication bypass one typo away.
 
-## 6. Serving documents
+## 7. Hostile artifact JS
 
-Every document is treated as hostile. The HTML is LLM-generated, it runs
-JavaScript, and it may have been produced from content the model didn't control.
-On the same origin as the console and the API, that is a real attack path.
+The premise of this product is *hosting untrusted code on a trusted origin*. The HTML
+is LLM-generated, it runs JavaScript, and it may have been built from content the
+model did not control. On the same origin as the console and the API, with the
+viewer's `CF_Authorization` cookie riding along automatically, that is an open door.
 
-`/d/*` and `/p/*`:
+**The artifact never renders in our origin's document context.**
 
-```
-Content-Security-Policy: sandbox allow-scripts allow-popups allow-forms allow-downloads
-Content-Type: text/html; charset=utf-8
-X-Content-Type-Options: nosniff
-Referrer-Policy: no-referrer
-Cache-Control: private, no-store        # /d
-Cache-Control: public, max-age=300      # /p
-```
+1. `/v/{slug}/{id}` returns a **trusted shell** — our HTML, our JS, nothing from the
+   artifact.
+2. The shell frames the artifact: `<iframe sandbox="allow-scripts">`, **no
+   `allow-same-origin`**. That combination gives the frame a unique opaque origin:
+   scripts run, but it cannot read our cookies, cannot touch our DOM, and cannot make
+   credentialed same-origin requests.
+3. The shell holds a **short-lived HMAC capability token** scoped to that one
+   document. The iframe never receives one and cannot forge one.
+4. Privileged browser endpoints require the capability **and** an `Origin` check that
+   **rejects `Origin: null`** — which is precisely what a sandboxed iframe's origin
+   is.
 
-Omitting `allow-same-origin` gives the document an **opaque origin**. Its
-JavaScript cannot read `document.cookie`, cannot touch `localStorage` or
-IndexedDB, and cannot make credentialed same-origin requests to our API. Scripts,
-charts, and animations still work — which is everything a self-contained artifact
-actually needs. Supported everywhere since 2016.
+`/render/{id}` serves artifact bytes with a strict CSP *and* the `sandbox` directive,
+so even a direct top-level navigation lands in an opaque origin. That is one better
+than sharehtml, which relies on the iframe attribute alone.
 
-The `sandbox` directive is **header-only** — it is ignored in a `<meta>` tag and
-in report-only mode. Tunable via `DOC_CSP` for anyone who forks this and
-disagrees. See ADR-003.
+> ⚠️ `sandbox="allow-scripts allow-same-origin"` is **functionally no sandbox at
+> all** — the frame can reach back into the parent and strip the attribute. It is
+> exactly the mistake made at 11pm because an artifact "needs" it. It doesn't. There
+> is a lint-level test asserting the string `allow-same-origin` appears **nowhere** in
+> the codebase.
 
-The console gets a **separate, strict CSP with a per-request nonce**, so a bug in
-document serving cannot bleed into the surface that holds the session token.
+**Public does not mean unsandboxed.** `/p/*` and `/pub/*` go through the same shell.
+A public artifact is *more* exposed, not less. `X-Robots-Tag: noindex, nofollow` on
+both.
 
-## 7. API
+## 8. Credentials
 
-All under `/api`, all requiring `Authorization: Bearer`.
+| Credential | Where | Verified how |
+|---|---|---|
+| Access JWT | `Cf-Access-Jwt-Assertion`, on `/v` and `/admin` only | JWKS, `kid`, `iss` + `aud` |
+| `PAGEVAULT_API_TOKEN` | bearer, on `/api/*` and `/mcp` | constant-time compare |
+| Capability token | header, from the shell to privileged endpoints | HMAC, ~10 min, scoped to one doc |
+| Console session token | bearer, minted into `/admin` | HMAC, ~15 min |
 
-- `POST /api/docs` → `{ id, url, visibility, emails }` (201)
-- `GET /api/docs` — list; `?tag=` and `?visibility=` filters. Metadata only, no
-  bodies. Served off `list()` + key metadata.
-- `GET /api/docs/{id}` → `DocMeta`
-- `PATCH /api/docs/{id}` — `title`, `visibility`, `emails`, `tags`. May include
-  `html` to replace content in place, same URL. Visibility → `public` mints a
-  token; away from `public` deletes it.
-- `POST /api/docs/{id}/rotate` — new public token, old link dies immediately.
-- `DELETE /api/docs/{id}` — hard delete.
+**No cookie is ever trusted, anywhere.** The browser attaches `CF_Authorization` to
+`/api/*` whether we want it or not — it is scoped `Path=/` on the hostname — and
+honouring it would make every state-changing endpoint CSRF-reachable from a document
+we serve. See ADR-004.
 
-Errors: JSON `{ error, code }`, correct status codes. Upload size capped ~10MB
-(KV's hard limit is 25MiB, but the body is JSON-wrapped).
+**The API token never touches the browser.** Not in the page, not in `localStorage`,
+not in a data attribute.
 
-`/d/{id}` returns **404, not 403**, for an unauthorized viewer — a 403 confirms
-the document exists.
+## 9. Seats — and the rule that follows from them
 
-Rate limiting: free-tier WAF gives exactly one rule, IP + path only, fixed 10s
-window — effectively useless here. Use the Workers rate-limit binding, or skip it
-in v1 and say so.
+**"50 free users" means 50 distinct people who have *ever* logged in.** Not fifty
+concurrent. A seat is consumed on first authentication and **held forever**: Cloudflare
+does not auto-reap, and the built-in expiration has a **one-month minimum** inactivity
+window. Someone who opened one report in March is still holding a seat in December.
 
-## 8. Console (`/admin`) and upload (`/admin/upload`)
+When the seats run out, **further logins are blocked**. It fails closed — no surprise
+invoice, but your actual client cannot get in.
 
-Both Access-gated to `OWNER_EMAIL`, and both re-check ownership in the Worker.
-This is the only management path that works from a phone or tablet, where there is
-no terminal and no Claude Desktop. Build it properly.
+Past 50: **$7/user/month, self-serve, monthly, no sales call** (the plan is now called
+Pay-as-you-go). But the free 50 is a property of the *free plan*, not a discount carried
+into the paid one — so the 51st person plausibly costs $7 × 51, not $7. **Confirm in the
+dashboard before the README claims anything about it.**
 
-**`/admin`** — table of all docs (title, visibility, allowlist, tags, created,
-size); per-row copy link, change visibility, add/remove emails, rotate token,
-preview, delete; filter by tag and visibility; confirm-before-delete, and say that
-there is no undo.
+### The rule
 
-**`/admin/upload`** — drop or pick a `.html`, set title, pick visibility, enter
-emails, add tags; returns the link with a copy button; warns on relative
-`src`/`href` (this is single-file only, and a relative path will 404).
+> **Gate the people who come back. Link the people who read once.**
 
-One server-rendered page, vanilla JS, `fetch()` against `/api/*`. No framework, no
-build step, no bundler. Every dependency added here is one a forker has to install.
+`/p/{token}` and `/pub/{slug}` sit on paths with **no Access application**. Nobody
+authenticates, so **zero seats are burned** — Cloudflare documents bypass paths as
+exactly this escape hatch. The client's CTO who lives in the portal for nine months is
+worth a seat. The client's board, who open one artifact one time, get a capability link
+and cost nothing, forever.
 
-The page is rendered with a fresh HMAC session token embedded in it. The token is
-not `PAGEVAULT_API_TOKEN` and never leaves the header. Do not embed the API token
-in page HTML.
+This is an economic property of the route topology, not an afterthought. sharehtml burns
+a seat on **every** viewer — even link-shared ones — because their "link" mode still
+sits behind Access.
 
-## 9. Setup
+### And the `Include: Everyone` trap
 
-Automatable with one Cloudflare API token: KV namespace, Worker deploy, custom
-domain + DNS, Access apps, policies, the viewer group, seat settings, seat removal.
-The Access app-create response **returns the AUD tag directly**, so nothing has to
-be copied out of a dashboard.
+An `Include: Everyone` policy lets any stranger who knows the hostname consume seats and
+lock out your clients. Cloudflare lists that config under "common misconfigurations."
 
-Two steps genuinely require a human:
+So the `/v` policy includes **one Access group**, `pagevault-viewers`, holding the
+union of every portal's members plus every `extraEmails` grant. Strangers cannot
+authenticate at all. `pagevault sync-access --reap` recomputes the union from KV and
+`PUT`s it (Access group `PUT` is a full replace, so this is exact, not best-effort).
 
-1. **Enable Zero Trust once.** The org-creation API has no plan-selection field,
-   and Cloudflare's onboarding docs still say you must pick a plan and enter
-   payment details — *"If you chose the Zero Trust Free plan, this step is still
-   needed but you will not be charged."* `init` detects this, deep-links the
-   dashboard, and on re-run reads the team name back from the API.
-2. **Create the API token.** There is no bootstrap API to mint a token without a
-   token. `init` hands over a prefilled template URL and the exact permissions.
+**Public portals and `/p/` links cost zero seats** — those paths have no Access app,
+so nobody ever authenticates. That is an economic property, not just an architectural
+one. sharehtml burns a seat on every viewer, even link-shared ones, because their
+"link" mode still sits behind Access.
 
-> **Unverified:** whether a credit card is *actually* enforced on the free Zero
-> Trust plan today. The docs say yes; some 2026 community sources say no. Confirm
-> against a clean account before the README makes a promise about it.
+See ADR-002.
 
-So:
+## 10. MCP — remote, not stdio
 
-```
-1. Enable Zero Trust in the dashboard (once, ~60s)
-2. Create an API token (prefilled link)
-3. npx pagevault init          ← everything else
-```
+**This is the reason the project exists.** sharehtml has no MCP server; it ships a
+skill that shells out to its CLI, which only works where there is a terminal. The
+person who needs a client portal is very often the person *not* in a terminal.
 
-**Disable the `workers.dev` subdomain and Preview URLs.** They route around Access
-entirely. The Worker fails closed without a valid JWT, so this is not an open
-door — but it is a required step, not a footnote.
+But a stdio MCP server has the same limitation: it cannot run in a browser or on a
+phone, because there is no subprocess to spawn. **Only a remote MCP server reaches
+Claude Desktop, claude.ai, mobile, Cowork, *and* Claude Code.**
 
-## 10. Clients
+`/mcp` on the Worker, **Streamable HTTP** (not SSE — deprecated), via
+`createMcpHandler` from the `agents` SDK. No Durable Objects, free plan. The MCP
+server instance is created **per request** — sharing one across requests leaks
+cross-client response data.
 
-**CLI** (`pagevault`) — thin. Config from `~/.pagevault/config.json` or
-`PAGEVAULT_URL` / `PAGEVAULT_API_TOKEN`. Prints the URL and nothing else on
-success, so it pipes to `pbcopy`.
+**Write:** `publish_document`, `create_portal`, `update_portal_members`,
+`mint_public_link` (widening — the tool description must say so), `revoke_document`.
 
-```bash
-pagevault publish report.html --title "Q3 Review" --private
-pagevault publish report.html --emails alice@x.com,bob@y.com
-pagevault publish report.html --public
-pagevault list --tag client:acme
-pagevault share <id> --add carol@z.com
-pagevault rotate <id>
-pagevault rm <id>
-pagevault sync-access [--reap]
-```
+**Read — the differentiator:** `list_portals`, `list_documents`, `read_document`,
+`search_portal`.
 
-**MCP server** (`pagevault-mcp`) — stdio. `publish_document`, `list_documents`,
-`update_document_sharing`, `revoke_document`. This is the payoff: Claude writes the
-report, calls `publish_document`, hands back a link. No file shuffling.
+Two rules the tools must enforce:
 
-Both are HTTP clients of `/api`. No duplicated logic, no direct KV access. They
-must work identically pointed at anyone's deployment.
+- **An agent must not be able to clobber a client deliverable in one tool call.**
+  Publishing over an existing `(portal, title)` returns a diff summary and requires
+  an explicit `confirm: true`.
+- **The model must not infer the portal from conversation.** With one portal, resolve
+  silently. With two or more and no default, **error and list them** — inferring
+  "this is probably the RealPlus one" from chat is exactly the failure that leaks
+  Client A's report into Client B's portal.
 
-## 11. Non-goals (v1)
+Auth: bearer token today, which works in Claude Code. OAuth 2.1 is required for the
+hosted surfaces (claude.ai, Desktop, mobile) and is a **pre-launch** task, not a
+pre-validation one. See ADR-006.
 
-Not a CMS — no in-place editing, no WYSIWYG, no version history. Not multi-tenant.
-No comments, analytics, or collaboration. No multi-file sites: **single-file HTML
-only**.
+## 11. Explicit non-goals
 
-## 12. v2 backlog
+No comments, reactions, or presence — sharehtml's lane, a Durable Objects project,
+and a client reading a report does not want to leave threaded replies on it. No
+multi-owner teams. No client upload — the moment clients can upload we need virus
+scanning, quotas, and a permissions model twice as complicated. No invoicing, no
+contracts, no CRM, no tasks.
 
-R2 + multi-file bundles · self-hosted email OTP via Resend (removes the Access
-dependency and the seat cap entirely) · expiring links · view log (who opened it,
-when — trivially available from the JWT, and genuinely useful when you've sent a
-report to a client) · password-protected public links · remote MCP served by the
-Worker itself, so there is nothing to npm-install at all.
+**The whole competitive claim is "we are not an all-in-one."** Every feature past that
+line weakens it.

@@ -1,264 +1,209 @@
 # PageVault — Build Plan
 
-Ten phases, each a GitHub issue, a branch, and a PR. Read `docs/architecture.md`
-first; the ADRs in `docs/adr/` explain the four decisions that are not obvious.
+> **Rewritten 2026-07-14** after competitive research moved the product from *"publish
+> a link"* to *"the collection."* See ADR-005, ADR-006, ADR-007. The original ten-phase
+> plan is in git history; phases 0–2 shipped and survive intact.
 
-**Phases 0–7 need no Cloudflare account.** Everything is testable locally with
-Miniflare KV and hand-minted JWTs. Cloudflare state is required only at phase 8.
-That is deliberate — it means the security-critical work is done and tested before
-anything is exposed.
-
-Definition of done for every phase: tests pass, `make check` is clean, the PR
-describes what changed and why.
+Read `docs/architecture.md` first. The ADRs in `docs/adr/` explain the decisions that
+are not obvious — read the relevant one before overturning it.
 
 ---
 
-## Phase 0 — Scaffold
+## The organizing question
 
-Worker skeleton, no logic. Prove the toolchain works end to end before writing
-anything worth debugging.
+**What is the smallest thing that answers the kill criterion?**
 
-- `worker/` with `wrangler.jsonc`, strict `tsconfig.json`, `.dev.vars.example`
-- `vitest` + `@cloudflare/vitest-pool-workers` (requires Vitest 4.x), one trivial
-  test hitting a KV binding, to prove Miniflare is wired
-- `Makefile` — `help`, `dev`, `test`, `check`, `deploy`. Start with ~8 targets, not
-  30.
-- `.github/workflows/ci.yml` — on PR to main: install, typecheck, test. Crib the
-  shape from `djk-website`.
-- pnpm, lockfile committed, `.nvmrc` = 22
+> Build v1 → use it on a real client engagement for a month → does the collection
+> actually change anything, or is one URL per client a solution to a problem only I
+> have? If yes, build the portal properly and launch. If no, keep the tool, kill the
+> marketing, laugh, move on.
 
-**Exit:** `make test` passes on a clean clone. CI green.
+Everything in the MVP serves that. Everything that does not is a layer.
 
-**Note:** this repo introduces the first TypeScript test setup in the family and
-the first npm-publish flow. Both are new conventions; if the npm release process
-turns out to have real choices in it, write ADR-005 rather than inventing it in a
-`package.json` script.
+The sharpest thing the research surfaced: the client-portal incumbents' own guidance
+says do not adopt a portal below **10+ active engagements**. We have ~1.5, and are
+unlikely ever to have more than ten. The bet is that the collection is useful **to the
+owner at n=1** — because an agent can read it back — before it is ever useful to the
+audience.
 
----
+**So the MVP is the agent loop, not the client-facing page.** The portal page must be
+functional and unembarrassing. It does not have to be beautiful until a client
+actually looks at it.
 
-## Phase 1 — Store + publish/fetch API
+### The two claims that are NOT bets
 
-The core loop, with no auth beyond a bearer token. Prove publish → fetch works.
+These are craft, not market risk. They do not need validating, they need protecting:
 
-- `store.ts` — `doc:`, `meta:`, `pub:` keys. Key metadata on `meta:` writes per
-  architecture §4. **No index array.**
-- `POST /api/docs`, `GET /api/docs`, `GET /api/docs/{id}`
-- `GET /api/docs` renders off a single `list({ prefix: "meta:" })` — assert this in
-  a test, because the N+1 version also passes a functional test
-- Bearer check against `PAGEVAULT_API_TOKEN`, constant-time compare
-- 12-char id from `crypto.getRandomValues`. No `nanoid`.
-- Size cap ~10MB with a clear error
-
-**Tests:** publish → fetch round-trip. List returns metadata, not bodies. Missing
-bearer → 401. Wrong bearer → 401. Oversize → 413.
-
-**Exit:** curl can publish and read back a document.
+1. **Deploying this is easy.** Differentiating, and a product requirement. The
+   provisioning script is in the MVP (M6) because any deployment needs it; the
+   friendly `init` wrapper is Layer 1, because it is only *validated* when a stranger
+   uses it.
+2. **Onboarding a client costs the client nothing.** No account, no invitation, no
+   password — a link, a six-digit code, done. This falls out of Cloudflare Access for
+   free. **There is nothing to build here, only something to protect:** anything that
+   adds a step on the client's side is a bug, and it is the thing the whole n=1.5
+   argument rests on.
 
 ---
 
-## Phase 2 — Public documents + the sandbox
+## Done
 
-- `/p/{token}` — `pub:` lookup → serve. No auth.
-- `PATCH /api/docs/{id}`, `POST /api/docs/{id}/rotate`, `DELETE /api/docs/{id}`
-- Visibility transitions: → `public` mints a token; away from `public` deletes the
-  `pub:` key. Rotate deletes the old one. **Order matters** — delete the old `pub:`
-  key before writing the new one, or a crash between the two leaves a live orphan
-  link.
-- Response headers per architecture §6, including the `sandbox` CSP (ADR-003)
+**#1 — Scaffold.** Worker, Vitest + Miniflare, Makefile, CI. Merged.
 
-**Tests:** public token resolves. Rotated token 404s immediately. Deleted doc 404s
-on all three key types. Visibility transitions leave no orphan `pub:` keys. The
-`sandbox` CSP header is present on both `/d` and `/p` — assert the exact string;
-this is the kind of thing that gets "cleaned up" later by someone who doesn't know
-what it does.
+**#2 — KV store and publish/fetch API.** Merged, and it survives the pivot: the store,
+the bearer auth, the N+1-safe listing, and the validation are all reused. `DocMeta`
+grows `portal`, `ownerOnly`, `extraEmails`, `summary`, `sourceKind`. There is **no data
+to migrate** — which is the entire reason the portal model lands now rather than later.
 
 ---
 
-## Phase 3 — JWT verification and the allowlist ⚠️
+## MVP — "can I run a real engagement out of this for a month?"
 
-**This is the phase where a bug is a security incident rather than a bug.** Treat
-it accordingly. Do not rush it, do not merge it without the tests below, and do not
-let a later phase relax anything in it.
+Build in this order. Do not reorder — pure functions first, routes last, deliberately.
 
-- `auth.ts` — `jose`, `createRemoteJWKSet`, `kid` matching. Verify `iss` and
-  `aud`. RS256.
-- **Per-route AUD.** `/d` accepts only App A's AUD; `/admin` accepts only App B's.
-  A single shared `CF_ACCESS_AUD` here is a privilege-escalation bug (ADR-001).
-- `/d/{id}` — verify → email → load meta → **404** (not 403) unless email is on the
-  allowlist
-- Never read `Cf-Access-Authenticated-User-Email`. Never read the
-  `CF_Authorization` cookie. (ADR-004)
+### M1 — Portal model, `identify()`, and `canView()` ⚠️  *(#4)*
 
-**Tests — all of these, no exceptions:**
+**No routes.** Pure functions and exhaustive tests. This is the only part of the system
+where a bug is a security incident rather than a bug.
 
-- Valid JWT, email on allowlist → 200
-- Valid JWT, email **not** on allowlist → 404
-- No JWT → 404
-- **Invalid signature** → 404
-- **Expired** JWT → 404
-- **Wrong `aud`** (App B's token presented to `/d`) → 404
-- **Wrong `iss`** → 404
-- `Cf-Access-Authenticated-User-Email` header set, no JWT → 404 (the header is
-  never trusted)
-- `CF_Authorization` cookie set with a valid JWT, no header → 404 on `/api/*` (the
-  cookie is never trusted)
-- Email comparison is case-insensitive and normalized
+- Portal + member KV layer. Slug validation and the reserved-word list, in **one** place.
+- `identify()` — JWT verify via JWKS, match on `kid`, pin **both** `iss` and `aud`.
+  Fail-closed tests **before** happy-path tests.
+- `canView(doc, portal, members, email, env)` — one function, the full matrix in
+  `docs/architecture.md` §5.
 
-**Exit:** every test above passes, and someone has read the diff specifically
-looking for a way around it.
+The two cells that carry all the risk:
 
----
+- **Member of a *different* portal.** Cross-portal leakage ends a consulting business,
+  it doesn't lose a feature. Write that row first.
+- **`ownerOnly` + `extraEmails`.** If `extraEmails` is checked before `ownerOnly`, this
+  silently leaks drafts and every other test still passes.
 
-## Phase 4 — Owner console (`/admin`)
+### M2 — Viewer shell, sandboxed iframe, capability tokens  *(#3 — implements ADR-007)*
 
-- Server-rendered, vanilla JS, `fetch()` against `/api/*`. No framework, no build
-  step, no bundler.
-- HMAC session token minted into the page, ~15min TTL, sent as a bearer header
-  (ADR-004). Derive the signing key from `PAGEVAULT_API_TOKEN` — no new secret.
-- `/api/*` accepts session tokens as a second bearer type. **No cookie path.**
-- Strict CSP with a per-request nonce. Not the document sandbox — a different,
-  tighter policy.
-- Table: title, visibility, allowlist, tags, created, size. Per-row: copy link,
-  change visibility, add/remove emails, rotate, preview, delete. Filter by tag and
-  visibility. Confirm before delete, and say there is no undo.
-- `/` → 302 `/admin`
-- Expired session → reload the page (which silently re-auths through Access), not a
-  silent failure
+- Capability token: HMAC over `{scope, email, docId, exp}`, ~10 min. The same primitive
+  as the console session token — one implementation, two scopes.
+- Trusted shell + `<iframe sandbox="allow-scripts">`. **Never `allow-same-origin`.**
+- `/render/{id}?cap=` — bytes only. Strict CSP *including* the `sandbox` directive and
+  `frame-ancestors 'self'`, so even a direct navigation lands in an opaque origin.
+- Cookie-auth → require capability + an `Origin` check that rejects `Origin: null`.
+  Header-auth → skip it.
+- **Commit a hostile-artifact fixture** that tries to `fetch('/api/portals')`, read
+  `document.cookie`, and POST offsite. All three must fail.
+- **A lint-level test asserting `allow-same-origin` appears nowhere in the repo.**
 
-**Tests:** non-owner with a valid JWT → 403. Session token accepted on `/api/*`.
-Expired session token → 401. Session token minted for one email cannot be replayed
-as another.
+### M3 — Portal routes  *(#13)*
 
----
+`/v/{slug}` · `/v/{slug}/{id}` · `/p/{token}` · `/` → `/admin`. Portal and member API.
+`noindex` on public routes.
 
-## Phase 5 — Browser upload (`/admin/upload`)
+The portal page: name, description, documents newest-first grouped by month, each with
+title, summary, date, tags. Client-side filter. **No PageVault branding above the
+fold** — the client is looking at your work, not at a SaaS product.
 
-- Drop or pick a `.html`, set title, visibility, emails, tags
-- Returns the link with a copy button
-- Warn on relative `src`/`href` — this is single-file only and a relative path will
-  404 for the recipient
-- Warn explicitly when publishing public: an unguessable URL is a capability URL,
-  not privacy. Say so in the UI, not just the docs.
+### M4 — Remote MCP at `/mcp` ⭐  *(#8 — implements ADR-006)*
 
-This is the only management path that works from a phone. It is not decoration.
+**The reason the project exists.** `createMcpHandler`, Streamable HTTP, stateless, a new
+server instance per request, bearer auth, no Access app in front of it.
 
----
+Write: `publish_document`, `create_portal`, `update_portal_members`, `mint_public_link`,
+`revoke_document`.
 
-## Phase 6 — CLI
+Read — **the differentiator**: `list_portals`, `list_documents`, `read_document`,
+`search_portal`.
 
-- One npm package, `pagevault`, two bins. Thin HTTP client of `/api`. No KV access,
-  no duplicated logic — it must work pointed at anyone's deployment.
-- `publish`, `list`, `share`, `rotate`, `rm`
-- Config from `~/.pagevault/config.json` or `PAGEVAULT_URL` / `PAGEVAULT_API_TOKEN`
-- **Retry on read-back before printing the URL.** KV has no read-after-write
-  guarantee (architecture §4). Publishing and immediately printing a URL that 404s
-  is the first thing a new user will experience if this is skipped.
-- Print the URL and nothing else on success, so it pipes to `pbcopy`
-- Public publish prints the capability-URL warning to stderr, so it doesn't
-  pollute the pipe
+Two rules:
 
----
+- **An agent must not clobber a client deliverable in one tool call.** Publishing over an
+  existing `(portal, title)` returns a diff and requires `confirm: true`.
+- **The model must not infer the portal from conversation.** One portal → resolve
+  silently. Two or more with no default → error and list them. Inferring "this is
+  probably the RealPlus one" from chat is exactly the failure that leaks Client A's
+  report into Client B's portal.
 
-## Phase 7 — MCP server
+Read tools go through the **same `canView()`** — the cross-portal threat wearing a
+read-only disguise.
 
-- `pagevault-mcp`, stdio, second bin of the same package
-- `publish_document`, `list_documents`, `update_document_sharing`,
-  `revoke_document`
-- Thin HTTP client of the same API. Same rule: no duplicated logic.
-- `mcp/README.md` with the `claude_desktop_config.json` snippet and the Claude Code
-  `mcp add` command
+Plus a thin stdio bin that **proxies to `/mcp`**, so Claude Desktop works before OAuth.
 
-**Exit:** Claude writes a report, calls `publish_document`, hands back a link. This
-is the payoff. If it isn't smooth, fix it here rather than shipping it.
+### M5 — Minimal owner console  *(#5)*
 
----
+Enough not to fly blind: portals, documents, membership, visibility, delete with
+confirmation. Session token minted into the page, never the API token. Strict nonced
+CSP — a different, tighter policy than the artifact sandbox.
 
-## Phase 8 — `pagevault init` and the Access group
+### M6 — Provision Access with a script, deploy, then stop and use it  *(#9, part 1)*
 
-The first phase that needs a real Cloudflare account.
+**Easy deploy is a differentiating characteristic of this product, not launch
+plumbing.** But it cannot be validated by the author deploying once — it gets
+validated when a stranger deploys it. So it splits:
 
-- `init` — verify token → list accounts → detect Zero Trust → create KV namespace →
-  generate `wrangler.jsonc` → deploy → create Access group + two apps + policies →
-  **read AUDs from the create responses** → set vars → redeploy → print URL and API
-  token
-- If Zero Trust is not enabled, deep-link the dashboard and stop. On re-run, read
-  the team name back from the API rather than asking for it.
-- `upgrade` — redeploy the bundled Worker, keep KV and config
-- Shell out to `npx --yes wrangler@4`. Do **not** take Wrangler as a dependency —
-  someone who only wants the MCP server should not install 80MB to get it.
-- Access group sync on publish/patch: read → union → `PUT`
-- `pagevault sync-access [--reap]` — recompute the union from KV, `PUT` the full
-  list, optionally remove seats for emails on no allowlist (ADR-002)
-- Fall back to `Include: Everyone` with a loud warning if `CF_API_TOKEN` is unset
+**In the MVP:** the Cloudflare provisioning **script**. Two Access apps, the
+`pagevault-viewers` group, the policies, the KV namespace — created via the CF API,
+because that work has to happen for *any* deployment to exist, including this one.
+Steal the pattern from sharehtml's `setup.ts` (Apache-2.0, ~900 lines, zero deps
+beyond node builtins). Credit it.
 
-**Verify empirically, before the README makes promises:**
+**In Layer 1:** `pagevault init` — the prompts, the token-scope walkthrough, the
+Zero-Trust-not-enabled deep link, `upgrade`. A thin wrapper around a script that has
+already been run for real, once, by the person who wrote it. That is the opposite of
+the usual failure mode, which is shipping an untested provisioning flow against a
+clean account you do not have.
 
-1. Does the free Zero Trust plan actually require a credit card today? The docs say
-   yes; some 2026 sources say no. This changes what the README is allowed to claim.
-2. Does a Workers-Routes-only token 403 on custom-domain creation, or is DNS: Edit
-   also needed?
-3. Confirm that a path with no Access app really does reach the Worker with no JWT
-   header. The docs imply it unambiguously but never state it in one sentence.
+Then: one portal, real artifacts, **stop building for a month.**
+
+> **n=0 or 1 is enough to start.** Dogfood on yourself — publish your own artifacts
+> into your own portal and query them back through MCP. The agent-memory loop is
+> testable on day one; it does not wait for a client to need a report.
 
 ---
 
-## Phase 9 — README and the launch
+## Layer 1 — launch-ready *(only if the MVP validates)*
 
-- README per architecture, structured like `slack-aws-cost-guardian`: one-line
-  pitch → ≤3 badges → Features → **How It Compares** → Quick Start → How It Works →
-  docs links
-- The comparison table includes the rows where the alternatives win. It is the most
-  useful part of the page and it gets reused in the write-up.
-- The gotchas, stated loudly: seats, `workers.dev`, KV eventual consistency,
-  single-file only, capability URLs, and the Zero Trust onboarding click-through
-- `docs/access-setup.md` — the Zero Trust walkthrough with screenshots
-- Walk the runbook on a clean Cloudflare account. The setup path is the entire
-  product for anyone who isn't me; if it doesn't work start to finish on a fresh
-  account, nothing else here matters.
+Do not build this before the thesis validates. That inverts the original plan on
+purpose.
+
+- **`pagevault init`** *(#9, part 2)* — prompts, `upgrade`, the clean-account path,
+  wrapped around the M6 provisioning script.
+- **MCP OAuth 2.1** — the price of claude.ai, Desktop, and mobile, and the largest
+  single piece of work in the plan. **If Anthropic grants `static_headers` beta access,
+  delete it entirely** and ship a bearer token. Ask before building.
+- **Public portals** `/pub/{slug}` — which *are* the marketing site. Every example
+  served by the thing itself.
+- **CLI** *(#7)* · **`/admin/upload`** *(#6)* · **README** *(#10)* with the honest
+  comparison table, including the rows where competitors win.
+
+## Layer 2 — loop closers
+
+Email on publish (without it, *"you never send a link again"* is false) · read receipts
+— disclosed on the portal page, off by default, never on public routes · PDF export and
+a print stylesheet · engagement timeline · scoped API tokens · expiry · portal branding
+· markdown rendering.
 
 ---
 
 ## Make targets
 
-Make is the entry point. `make help` lists everything; `.DEFAULT_GOAL := help`.
-Targets accumulate by phase, and the final set is small on purpose — the guide says
-~10-15, and this project should land at ten.
-
 | Target | Lands in | Does |
 |---|---|---|
-| `help` | 0 | Lists targets. Default goal. |
-| `install` | 0 | `pnpm install --frozen-lockfile`, on Node 22 |
-| `dev` | 0 | `wrangler dev` against local Miniflare KV |
-| `test` | 0 | Full Vitest suite |
-| `check` | 0 | Typecheck + test. What CI runs. The pre-PR gate. |
-| `deploy` | 0 | `wrangler deploy`. Confirmation prompt — it is destructive. |
-| `test-security` | 4 | Just the JWT/allowlist suite. Fast enough to run on every save. |
-| `logs` | 5 | `wrangler tail` |
-| `release` | 8 | `npm publish` with preflight: on main, clean tree, tests pass |
-| `smoke` | 10 | Post-deploy check against the live host |
+| `help` `install` `dev` `test` `check` `deploy` | #1 ✅ | shipped |
+| `test-security` | M1 | Just the `canView` + JWT suite. Fast enough to run on save. |
+| `logs` | M5 | `wrangler tail` |
+| `release` | Layer 1 | `npm publish` with preflight |
+| `smoke` | Layer 1 | Post-deploy check against the live host |
 
-Rules from `claude-shared/docs/guides/makefile-patterns.md` that bind here:
+One target per task, not per variant. Node 22 is not the system default here; every
+target selects it.
 
-- **One target per task, not per variant.** No `deploy-dev` / `deploy-prod` — use
-  `$(ENV)`.
-- **Don't wrap one-liners.** A target earns its place by hiding complexity. `make
-  dev` earns it because it has to select Node 22 and `cd worker` first; a target
-  that is a bare alias for one pnpm script does not.
-- **Every public target gets a `## Description` comment** — that is what `make help`
-  greps.
-- **Confirmation prompt on anything destructive.** `deploy` and `release` both
-  qualify.
-
-Node 22 is not the system default here (20.14 is). Every target that runs the
-toolchain has to select it, or Wrangler 4 will refuse to start with an error that
-does not obviously say "wrong Node."
+---
 
 ## Open questions
 
-- **npm release convention.** No precedent exists in `~/yukon`. Decide, and if it
-  has real choices in it, write it down as an ADR.
-- **Logo.** Whether PageVault sits inside the CTO/4 brand (technical → blue
-  `#34507A`) or stands alone as its own product identity like `solobooks`.
-- **Rate limiting.** Free-tier WAF gives one rule, IP + path, fixed 10s window —
-  effectively useless. Either use the Workers rate-limit binding or ship without and
-  say so. Do not claim rate limiting that does not exist.
+- **`static_headers` beta.** If Anthropic grants it, ADR-006's OAuth work evaporates —
+  a ~50-line endpoint instead of an authorization server. Worth knowing before Layer 1.
+- **Markdown rendering.** `DocMeta.sourceKind` exists from M1 so it drops in with no
+  migration, but the renderer is deferred — it is a dependency, and directive #6 says ask.
+- **npm release convention.** No precedent anywhere in `~/yukon`. Layer 1. If it has
+  real choices in it, write an ADR.
+- **The n=1.5 problem.** Unresolved by construction. That is what the month of real use
+  is for.
