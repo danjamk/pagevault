@@ -18,6 +18,7 @@
     "dev": "wrangler dev --config worker/wrangler.jsonc",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:security": "vitest run worker/test/access.test.ts worker/test/auth.test.ts",
     "typecheck": "tsc --noEmit",
     "check": "pnpm typecheck && pnpm test",
     "deploy": "wrangler deploy --config worker/wrangler.jsonc"
@@ -28,5 +29,8 @@
     "typescript": "^5.7.0",
     "vitest": "^4.1.0",
     "wrangler": "^4.110.0"
+  },
+  "dependencies": {
+    "jose": "^6.2.3"
   }
 }

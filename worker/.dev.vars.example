@@ -1,17 +1,21 @@
 # Copy to worker/.dev.vars for local development. .dev.vars is gitignored.
-# In production, secrets are `wrangler secret put` and vars are set by `pagevault init`.
+# In production, secrets are `wrangler secret put` and vars are written into
+# wrangler.jsonc by the provisioning script.
 
 # --- Secrets ---
 
-# Bearer token for the CLI and MCP server. Also derives the console's session-token
-# signing key, so there is no second secret to manage.
+# Bearer token for the CLI and the MCP server at /mcp.
 #   openssl rand -hex 32
 PAGEVAULT_API_TOKEN=local-dev-token
+
+# Signs capability tokens (the viewer shell) and console session tokens. See ADR-007.
+#   openssl rand -hex 32
+VIEWER_CAPABILITY_SECRET=local-dev-capability-secret
 
 # Optional. Enables the Access group sync that bounds seat consumption (ADR-002).
 # Without it, PageVault falls back to an `Include: Everyone` Access policy and warns
 # loudly — which works, but lets any stranger who knows your hostname consume one of
-# your 50 free Zero Trust seats.
+# your 50 free Zero Trust seats and lock out your actual clients.
 #
 # Needs, on the account:
 #   Access: Apps and Policies — Edit
@@ -19,13 +23,33 @@ PAGEVAULT_API_TOKEN=local-dev-token
 CF_API_TOKEN=
 
 # --- Vars ---
-# `pagevault init` writes these into wrangler.jsonc for a real deployment. They ship
-# blank in the committed config, so local dev supplies them here.
+# The provisioning script writes these into wrangler.jsonc for a real deployment. They
+# ship blank in the committed config, so local dev supplies them here.
 
-# Required. Every document carries the owner on its allowlist; publishing refuses
-# without it rather than creating a document nobody can open.
+# Required. canView() grants the owner first, so a blank OWNER_EMAIL means a private
+# document nobody can open. Publishing refuses rather than creating one.
 OWNER_EMAIL=you@example.com
 
 # Optional locally. When unset, share links fall back to the host the request arrived
 # on — which is what you want for `wrangler dev` on localhost.
 PUBLIC_HOST=
+
+# ⚠️ LOCAL DEVELOPMENT ONLY. Bypasses Cloudflare Access, since there is no Access in
+# front of `wrangler dev`. Two independent guards make this safe to have in the repo:
+#
+#   1. It is compared with EXACT string equality to "none". A truthiness check here
+#      would disable auth on every deployment that simply forgot to set the var — which
+#      is precisely the bug this shape exists to make impossible.
+#   2. It is refused unless the request arrived on localhost. A deployed Worker on a
+#      custom domain never sees a localhost Host header, so even a leaked
+#      AUTH_MODE=none in production cannot open the door.
+#
+# When bypassed, every request is treated as OWNER_EMAIL.
+AUTH_MODE=none
+
+# Access team name and the two application audiences. Not needed while AUTH_MODE=none.
+# They are two separate vars on purpose: /v must accept only the docs app's token and
+# /admin only the console app's. A shared AUD is a privilege escalation. See ADR-001.
+CF_TEAM_NAME=
+CF_ACCESS_AUD_DOCS=
+CF_ACCESS_AUD_ADMIN=

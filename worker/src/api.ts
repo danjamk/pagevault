@@ -1,28 +1,35 @@
 import { isAuthorized } from "./auth.js";
 import type { Env } from "./env.js";
 import {
+  DEFAULT_PORTAL,
   type DocMeta,
-  type Visibility,
+  type Portal,
+  type SourceKind,
   getMeta,
+  getPortal,
+  isValidSlug,
   listDocs,
+  listPortals,
   metadataFits,
   mintId,
   mintPublicToken,
+  normalizeEmail,
   putDoc,
+  putPortal,
   putPublicToken,
 } from "./store.js";
 
 /** KV's hard cap is 25MiB. The body is JSON-wrapped, so stay well under it. */
-const MAX_HTML_BYTES = 10 * 1024 * 1024;
+const MAX_SOURCE_BYTES = 10 * 1024 * 1024;
 /** Reject on Content-Length before buffering 25MB of JSON into a 128MB isolate. */
 const MAX_BODY_BYTES = 12 * 1024 * 1024;
 
 const MAX_TITLE_CHARS = 200;
+const MAX_SUMMARY_CHARS = 300;
 const MAX_TAGS = 16;
 const MAX_TAG_CHARS = 64;
-const MAX_EMAILS = 100;
-
-const VISIBILITIES: readonly Visibility[] = ["private", "restricted", "public"];
+/** Same DoS bound as a portal member list. */
+const MAX_EXTRA_EMAILS = 100;
 
 export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -47,8 +54,8 @@ class BadRequest extends Error {
 }
 
 /**
- * The *deployment* is wrong. Surfaces as a 500, not a 400 — the caller did nothing
- * wrong, and a 400 would send them hunting through their own request.
+ * The *deployment* is wrong. A 500, not a 400 — the caller did nothing wrong, and a
+ * 400 would send them hunting through their own request.
  */
 class Misconfigured extends Error {
   constructor(
@@ -100,40 +107,52 @@ async function createDoc(request: Request, env: Env): Promise<Response> {
   } catch {
     return fail(400, "invalid_json", "Request body is not valid JSON");
   }
-
   if (!isRecord(body)) return fail(400, "invalid_body", "Request body must be an object");
 
-  const html = requireString(body["html"], "html");
-  const bytes = new TextEncoder().encode(html).byteLength;
-  if (bytes > MAX_HTML_BYTES) {
-    return fail(413, "too_large", `Document is ${bytes} bytes; the limit is ${MAX_HTML_BYTES}`);
+  requireOwner(env); // fail fast on a deployment with no owner
+
+  const source = requireString(body["html"] ?? body["source"], "html");
+  const bytes = new TextEncoder().encode(source).byteLength;
+  if (bytes > MAX_SOURCE_BYTES) {
+    return fail(413, "too_large", `Document is ${bytes} bytes; the limit is ${MAX_SOURCE_BYTES}`);
   }
 
-  const title = parseTitle(body["title"]);
-  const visibility = parseVisibility(body["visibility"]);
-  const tags = parseTags(body["tags"]);
-  const emails = parseEmails(body["emails"], visibility, requireOwner(env));
+  const portal = await resolvePortal(env, body["portal"]);
 
   const now = new Date().toISOString();
   const meta: DocMeta = {
     id: mintId(),
-    title,
-    visibility,
-    emails,
+    portal: portal.slug,
+    title: parseTitle(body["title"]),
+    sourceKind: parseSourceKind(body["sourceKind"]),
+    ownerOnly: body["ownerOnly"] === true,
     createdAt: now,
     updatedAt: now,
     bytes,
   };
-  if (tags) meta.tags = tags;
-  if (visibility === "public") meta.publicToken = mintPublicToken();
 
-  // Check before writing. KV rejects an oversized metadata write, and that failure
+  const summary = parseSummary(body["summary"]);
+  if (summary) meta.summary = summary;
+
+  const tags = parseTags(body["tags"]);
+  if (tags) meta.tags = tags;
+
+  // The Spec 01 simple path, preserved: `--emails cfo@acme.com` grants those two people
+  // access to THIS document, without making the user invent a portal for them.
+  // Additive, never subtractive. See ADR-005.
+  const extraEmails = parseExtraEmails(body["emails"] ?? body["extraEmails"]);
+  if (extraEmails) meta.extraEmails = extraEmails;
+
+  // Widening is explicit and never a side effect of publishing.
+  if (body["public"] === true) meta.publicToken = mintPublicToken();
+
+  // Check before writing: KV rejects an oversized metadata write, and that failure
   // would surface as a document missing from every listing rather than a bad request.
   if (!metadataFits(meta)) {
-    return fail(400, "metadata_too_large", "Title and tags are too long to index; shorten them");
+    return fail(400, "metadata_too_large", "Title, summary and tags are too long to index");
   }
 
-  await putDoc(env, meta, html);
+  await putDoc(env, meta, source);
   if (meta.publicToken) await putPublicToken(env, meta.publicToken, meta.id);
 
   return json(publishResult(meta, baseUrl(request, env)), 201);
@@ -141,19 +160,16 @@ async function createDoc(request: Request, env: Env): Promise<Response> {
 
 async function listDocsHandler(request: Request, env: Env): Promise<Response> {
   const params = new URL(request.url).searchParams;
+  const portal = params.get("portal") ?? undefined;
   const tag = params.get("tag");
-  const visibility = params.get("visibility");
 
-  const docs = await listDocs(env);
-  const filtered = docs.filter(
-    (doc) => (!tag || doc.tags?.includes(tag)) && (!visibility || doc.visibility === visibility),
-  );
+  const docs = (await listDocs(env, portal)).filter((doc) => !tag || doc.tags?.includes(tag));
 
-  // Newest first. Both the console and the CLI want it this way, and sorting fewer
-  // than 1000 summaries in the Worker is cheaper than any alternative.
-  filtered.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // Newest first. Both the console and the CLI want it this way, and sorting fewer than
+  // 1000 summaries in the Worker is cheaper than any alternative.
+  docs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-  return json({ docs: filtered });
+  return json({ docs });
 }
 
 async function getDocHandler(env: Env, id: string): Promise<Response> {
@@ -163,12 +179,68 @@ async function getDocHandler(env: Env, id: string): Promise<Response> {
 }
 
 /**
- * The origin to build share links on.
+ * Which portal does this document go in?
  *
- * Prefers `PUBLIC_HOST`, but falls back to the host the request actually arrived on —
- * which is nearly always right, since the CLI and console both talk to the deployment
- * by its real hostname. The fallback is what makes `wrangler dev` work with no config,
- * and it means an unset `PUBLIC_HOST` degrades to correct rather than to `https:///d/abc`.
+ * The resolution ladder exists so that the word "portal" never appears in the
+ * quickstart. A tool that demands a taxonomy before it gives you a URL is a tool
+ * nobody adopts (ADR-005).
+ *
+ *   1. Explicit `portal` → use it.
+ *   2. No portals at all → create `default` and use it.
+ *   3. Exactly one portal → use it. With one portal you cannot misfile, so there is
+ *      nothing to protect against, and asking would be a concept tax.
+ *   4. `default` exists → use it.
+ *   5. Otherwise → **error and list them.** Never guess. Guessing is exactly how
+ *      Client A's report lands in Client B's portal.
+ */
+async function resolvePortal(env: Env, requested: unknown): Promise<Portal> {
+  if (typeof requested === "string" && requested.length > 0) {
+    if (!isValidSlug(requested)) {
+      throw new BadRequest("invalid_slug", `"${requested}" is not a valid portal slug`);
+    }
+    const portal = await getPortal(env, requested);
+    if (!portal) throw new BadRequest("no_such_portal", `No such portal: ${requested}`);
+    return portal;
+  }
+
+  const portals = await listPortals(env);
+
+  if (portals.length === 0) return ensureDefaultPortal(env);
+  if (portals.length === 1) return portals[0]!;
+
+  const fallback = portals.find((p) => p.slug === DEFAULT_PORTAL);
+  if (fallback) return fallback;
+
+  throw new BadRequest(
+    "portal_ambiguous",
+    `Multiple portals exist and no default is set. Specify one: ${portals
+      .map((p) => p.slug)
+      .join(", ")}`,
+  );
+}
+
+async function ensureDefaultPortal(env: Env): Promise<Portal> {
+  const existing = await getPortal(env, DEFAULT_PORTAL);
+  if (existing) return existing;
+
+  const now = new Date().toISOString();
+  const portal: Portal = {
+    slug: DEFAULT_PORTAL,
+    name: "Default",
+    kind: "private",
+    createdAt: now,
+    updatedAt: now,
+  };
+  await putPortal(env, portal);
+  return portal;
+}
+
+/**
+ * The origin for share links.
+ *
+ * Prefers `PUBLIC_HOST`, falling back to the host the request arrived on — which is
+ * nearly always right, and means an unset var degrades to correct rather than to
+ * `https:///v/abc`.
  */
 function baseUrl(request: Request, env: Env): string {
   const configured = env.PUBLIC_HOST?.trim();
@@ -178,30 +250,33 @@ function baseUrl(request: Request, env: Env): string {
 function publishResult(meta: DocMeta, base: string) {
   const result: Record<string, unknown> = {
     id: meta.id,
-    url: `${base}/d/${meta.id}`,
-    visibility: meta.visibility,
-    emails: meta.emails,
+    portal: meta.portal,
+    // Always print where it landed. This — not a required --portal flag — is what
+    // catches a client report filed into the wrong client's portal. See ADR-005.
+    url: `${base}/v/${meta.portal}/${meta.id}`,
+    ownerOnly: meta.ownerOnly,
   };
-  // The public link is a *different* URL, not a variant of the same one. Returning
-  // both keeps the caller honest about which they are handing to a human: /d/ still
+  if (meta.extraEmails) result["extraEmails"] = meta.extraEmails;
+  // The public link is a *different* URL, not a variant of the same one: /v/ still
   // requires an allowlisted login, /p/ requires nothing at all.
   if (meta.publicToken) result["publicUrl"] = `${base}/p/${meta.publicToken}`;
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
- * The owner. Never optional.
- *
- * Every document carries the owner on its allowlist, so revoking public access still
- * leaves a document its owner can open. A blank `OWNER_EMAIL` would silently publish
- * ownerless documents — readable by nobody once #4 gates `/d/` on the allowlist. Fail
- * at the first publish instead, where the error can say why.
+ * Every document carries the owner. A blank `OWNER_EMAIL` would publish documents
+ * nobody can open — `canView` grants the owner first, and there would be no owner.
+ * Fail at publish, where the error can say why.
  */
 function requireOwner(env: Env): string {
-  const owner = env.OWNER_EMAIL?.trim().toLowerCase();
+  const owner = normalizeEmail(env.OWNER_EMAIL ?? "");
   if (!owner) {
     throw new Misconfigured("owner_not_configured", "OWNER_EMAIL is not set on this deployment");
   }
@@ -224,12 +299,21 @@ function parseTitle(value: unknown): string {
   return title;
 }
 
-function parseVisibility(value: unknown): Visibility {
-  if (value === undefined) return "private";
-  if (typeof value !== "string" || !VISIBILITIES.includes(value as Visibility)) {
-    throw new BadRequest("invalid_field", `"visibility" must be one of: ${VISIBILITIES.join(", ")}`);
+function parseSummary(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const summary = requireString(value, "summary").trim();
+  if (summary.length > MAX_SUMMARY_CHARS) {
+    throw new BadRequest("invalid_field", `"summary" exceeds ${MAX_SUMMARY_CHARS} characters`);
   }
-  return value as Visibility;
+  return summary || undefined;
+}
+
+function parseSourceKind(value: unknown): SourceKind {
+  if (value === undefined) return "html";
+  if (value !== "html" && value !== "markdown") {
+    throw new BadRequest("invalid_field", `"sourceKind" must be "html" or "markdown"`);
+  }
+  return value;
 }
 
 function parseTags(value: unknown): string[] | undefined {
@@ -251,29 +335,21 @@ function parseTags(value: unknown): string[] | undefined {
   return tags.length > 0 ? [...new Set(tags)] : undefined;
 }
 
-/**
- * `private` is `restricted` with only the owner on it. The distinct label exists
- * because it is clearer at the call site and in the UI, not because it is a different
- * mechanism.
- */
-function parseEmails(value: unknown, visibility: Visibility, owner: string): string[] {
-  if (visibility !== "restricted") return [owner];
-
-  if (!Array.isArray(value)) {
-    throw new BadRequest("invalid_field", `"emails" is required when visibility is "restricted"`);
-  }
-  if (value.length > MAX_EMAILS) {
-    throw new BadRequest("invalid_field", `"emails" exceeds ${MAX_EMAILS} entries`);
+function parseExtraEmails(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new BadRequest("invalid_field", `"emails" must be an array`);
+  if (value.length > MAX_EXTRA_EMAILS) {
+    throw new BadRequest("invalid_field", `"emails" exceeds ${MAX_EXTRA_EMAILS} entries`);
   }
 
   const emails = value.map((email) => {
     if (typeof email !== "string") throw new BadRequest("invalid_field", `"emails" must be strings`);
-    const normalized = email.trim().toLowerCase();
+    const normalized = normalizeEmail(email);
     if (!normalized.includes("@")) {
       throw new BadRequest("invalid_field", `"${email}" is not an email address`);
     }
     return normalized;
   });
 
-  return [...new Set([...emails, owner])];
+  return emails.length > 0 ? [...new Set(emails)] : undefined;
 }
