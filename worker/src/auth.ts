@@ -77,6 +77,17 @@ export function resetJWKSCache(): void {
 }
 
 /**
+ * Accept the team either way — `"acme"` or `"acme.cloudflareaccess.com"`.
+ *
+ * Cloudflare's API returns `auth_domain` as the full domain, which is the natural thing to
+ * paste into a config. Concatenating `.cloudflareaccess.com` onto it produces a JWKS URL
+ * that does not exist, every JWT verification fails, and the whole thing surfaces as an
+ * opaque 404 with no hint about the cause. Normalize here so it cannot happen.
+ */
+export const teamSlug = (value: string | undefined): string =>
+  (value ?? "").trim().replace(/\.cloudflareaccess\.com$/i, "");
+
+/**
  * Who is this?
  *
  * Cloudflare Access injects `Cf-Access-Jwt-Assertion` on protected paths and strips it
@@ -103,7 +114,7 @@ export async function identify(
     return email ? { email, sub: "dev" } : null;
   }
 
-  const team = env.CF_TEAM_NAME?.trim();
+  const team = teamSlug(env.CF_TEAM_NAME);
   const aud = (audience === "docs" ? env.CF_ACCESS_AUD_DOCS : env.CF_ACCESS_AUD_ADMIN)?.trim();
 
   // Missing config → DENY. Never skip. An unconfigured deployment is a closed one.

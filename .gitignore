@@ -18,3 +18,9 @@ PR_COMMENT.md
 
 # Wrangler
 .wrangler/
+
+# Written by `make provision`. Holds a real email, team name, Access AUD tags and KV
+# namespace id — this is a public repo, and none of that belongs in it. The committed
+# worker/wrangler.jsonc keeps its placeholders and is what the tests run against.
+worker/wrangler.generated.jsonc
+.pagevault-provision.json

@@ -1,5 +1,9 @@
 .DEFAULT_GOAL := help
-.PHONY: help install dev test test-security check-sandbox check deploy
+.PHONY: help install dev demo test test-security check-sandbox check provision destroy deploy logs
+
+# Written by `make provision`. Gitignored — it holds your email, team name, AUD tags and
+# KV id, and this is a public repo.
+DEPLOY_CONFIG := worker/wrangler.generated.jsonc
 
 # Wrangler 4 requires Node 22; the system default here is 20. Every target that
 # touches the toolchain selects it first, because the error you get otherwise does
@@ -14,7 +18,14 @@ install: ## Install dependencies
 	@$(NVM) && pnpm install --frozen-lockfile
 
 dev: ## Run the Worker locally against Miniflare KV
+	@if [ ! -f worker/.dev.vars ]; then \
+		cp worker/.dev.vars.example worker/.dev.vars; \
+		echo "→ created worker/.dev.vars from the example (gitignored)"; \
+	fi
 	@$(NVM) && pnpm dev
+
+demo: ## Seed a running local Worker with a demo client engagement, and print where to look
+	@bash scripts/demo.sh
 
 test: ## Run the test suite
 	@$(NVM) && pnpm test
@@ -42,6 +53,19 @@ check-sandbox: ## Fail the build if the iframe is ever granted our origin (ADR-0
 check: check-sandbox ## Typecheck + test — the pre-PR gate, and what CI runs
 	@$(NVM) && pnpm check
 
+provision: ## Create the KV namespace, Access group, and two Access apps on Cloudflare
+	@$(NVM) && node scripts/provision.mjs
+
+destroy: ## Tear the deployment down — Worker, DNS, Access apps, group, and KV data
+	@$(NVM) && node scripts/destroy.mjs
+
 deploy: ## Deploy the Worker to Cloudflare
+	@if [ ! -f $(DEPLOY_CONFIG) ]; then \
+		echo "✗ No $(DEPLOY_CONFIG). Run 'make provision' first."; \
+		exit 1; \
+	fi
 	@printf "Deploy to production? [y/N] " && read ans && [ "$$ans" = "y" ]
-	@$(NVM) && pnpm deploy
+	@$(NVM) && npx wrangler deploy --config $(DEPLOY_CONFIG)
+
+logs: ## Tail the deployed Worker
+	@$(NVM) && npx wrangler tail --config $(DEPLOY_CONFIG)

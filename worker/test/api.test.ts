@@ -1,4 +1,4 @@
-import { SELF, env } from "cloudflare:test";
+import { SELF, createExecutionContext, env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index.js";
 import { type Portal, putPortal } from "../src/store.js";
@@ -195,6 +195,27 @@ describe("POST /api/docs — portal resolution", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ code: "invalid_slug" });
   });
+
+  it("⭐ returns a /pub/ URL for a public portal, never a /v/ one", async () => {
+    // Handing someone a /v/ link to a public page walks them into a Cloudflare Access login
+    // wall and burns one of the 50 free seats — on a page that is public by design.
+    await putPortal(env, portal("marketing", "public"));
+
+    const res = await publish(aDoc({ portal: "marketing" }));
+    const body = (await res.json()) as { url: string };
+
+    expect(body.url).toMatch(/^https:\/\/share\.example\.com\/pub\/marketing\/[a-z2-9]{12}$/);
+    expect(body.url).not.toContain("/v/");
+  });
+
+  it("returns a /v/ URL for a restricted portal", async () => {
+    await putPortal(env, portal("realplus", "restricted"));
+
+    const res = await publish(aDoc({ portal: "realplus" }));
+    const body = (await res.json()) as { url: string };
+
+    expect(body.url).toMatch(/^https:\/\/share\.example\.com\/v\/realplus\/[a-z2-9]{12}$/);
+  });
 });
 
 describe("POST /api/docs — validation", () => {
@@ -250,7 +271,7 @@ describe("deployment misconfiguration", () => {
       headers: { ...auth(), "Content-Type": "application/json" },
       body: JSON.stringify(aDoc()),
     });
-    return worker.fetch(request, { ...env, ...overrides });
+    return worker.fetch(request, { ...env, ...overrides }, createExecutionContext());
   }
 
   it("500s rather than publishing a document with no owner", async () => {
@@ -357,10 +378,19 @@ describe("GET /api/docs/{id}", () => {
     expect(res.status).toBe(404);
   });
 
-  it("405s on an unsupported method", async () => {
-    // DELETE lands in #13. Until then it must not silently 404 as if the route were
-    // unknown — that would hide a real routing bug.
-    const res = await SELF.fetch(`${HOST}/api/docs/whatever`, { method: "DELETE", headers: auth() });
+  it("405s on an unsupported method — it must not silently 404 as if the route were unknown", async () => {
+    // A 404 here would hide a real routing bug behind what looks like a missing document.
+    const res = await SELF.fetch(`${HOST}/api/docs/whatever`, { method: "PUT", headers: auth() });
     expect(res.status).toBe(405);
+  });
+
+  it("deletes a document and everything pointing at it", async () => {
+    const created = await publish(aDoc({ public: true }));
+    const { id } = (await created.json()) as { id: string };
+
+    expect((await SELF.fetch(`${HOST}/api/docs/${id}`, { method: "DELETE", headers: auth() })).status).toBe(200);
+    expect(await env.PAGEVAULT.get(`doc:${id}`)).toBeNull();
+    expect(await env.PAGEVAULT.get(`meta:${id}`)).toBeNull();
+    expect(await env.PAGEVAULT.get(`idx:default:${id}`)).toBeNull();
   });
 });

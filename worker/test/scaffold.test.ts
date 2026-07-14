@@ -61,11 +61,15 @@ describe("router", () => {
     expect(res.status).toBe(501);
   });
 
-  it.each(["/p/nosuchtoken", "/v/nosuchportal"])(
-    "404s %s rather than 501ing — the route is live",
-    async (path) => {
-      const res = await SELF.fetch(`https://share.example.com${path}`);
-      expect(res.status).toBe(404);
-    },
-  );
+  it("404s an unknown /p/ token rather than 501ing — the route is live", async () => {
+    const res = await SELF.fetch("https://share.example.com/p/nosuchtoken");
+    expect(res.status).toBe(404);
+  });
+
+  it("500s an unauthenticated /v/ request — the route is live, and Access should have gated it", async () => {
+    // Not a 501 (unimplemented) and not a 404 (no such portal): a 500 saying the deployment
+    // is misconfigured, because an unauthenticated request cannot reach /v/* unless it is.
+    const res = await SELF.fetch("https://share.example.com/v/nosuchportal");
+    expect(res.status).toBe(500);
+  });
 });

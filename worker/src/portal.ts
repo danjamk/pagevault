@@ -1,5 +1,6 @@
-import { canView, canViewPortal } from "./access.js";
+import { canView, canViewPortal, emailsMatch } from "./access.js";
 import { identify } from "./auth.js";
+import { documentPath, portalPath } from "./documents.js";
 import type { Env } from "./env.js";
 import {
   type DocSummary,
@@ -9,7 +10,7 @@ import {
   getPortal,
   listDocs,
 } from "./store.js";
-import { renderShell } from "./viewer.js";
+import { logBlocked, renderShell } from "./viewer.js";
 
 /**
  * `/v/{slug}` and `/v/{slug}/{id}` — the client-facing surface.
@@ -23,17 +24,76 @@ export async function handlePortalRoute(
   slug: string,
   id: string | null,
 ): Promise<Response> {
+  const portal = await getPortal(env, slug);
+
+  // A public portal's canonical home is /pub, which Access never sees. If someone reaches
+  // it here they have already been through the login wall — but redirect anyway, so there
+  // is one canonical URL and a mistakenly-shared /v link still lands in the right place.
+  if (portal?.kind === "public") {
+    const target = id === null ? portalPath(portal) : documentPath(portal, id);
+    return Response.redirect(new URL(target, request.url).toString(), 302);
+  }
+
   const identity = await identify(request, env, "docs");
   const email = identity?.email ?? null;
 
-  const portal = await getPortal(env, slug);
-  if (!portal) return notFound();
+  // 🔴 Cloudflare Access let this request through, and we could not verify the JWT.
+  //
+  // That is not a visitor problem, it is a DEPLOYMENT problem — a wrong CF_ACCESS_AUD, a
+  // wrong CF_TEAM_NAME, a Worker deployed against a different Access app. And it is
+  // indistinguishable, from the outside, from "that portal doesn't exist": both are 404.
+  //
+  // The first real deploy of this Worker had exactly that bug (CF_TEAM_NAME carried the
+  // full .cloudflareaccess.com domain, so the JWKS URL doubled it), and it presented as a
+  // bare "Not found" with nothing to go on. Never again: it is impossible for an
+  // unauthenticated request to reach this path unless the deployment is broken, so say so.
+  if (email === null) {
+    logBlocked("jwt_verification_failed_behind_access", request, { slug });
+    return misconfigured();
+  }
+
+  if (!portal) return notFound(env, email, slug);
 
   const members = await getMembers(env, slug);
 
   return id === null
     ? portalIndex(env, portal, members, email)
     : portalDocument(env, portal, members, email, id);
+}
+
+/**
+ * `/pub/{slug}` and `/pub/{slug}/{id}` — the public tier.
+ *
+ * 🔴 This path has **no Cloudflare Access application in front of it**, and that is the
+ * entire point.
+ *
+ * The first version of this served public portals from `/v/*`, which Access *does* cover.
+ * The tests passed — Miniflare has no Access, so an unauthenticated request reached the
+ * Worker and `canViewPortal` correctly returned true. In production it would have been a
+ * disaster: an anonymous visitor to a public marketing page gets an OTP login wall, and if
+ * they complete it they permanently consume one of the 50 free Access seats. For a page
+ * that is deliberately public.
+ *
+ * The function was right. The deployment topology was wrong. That is a class of bug no
+ * unit test can see, and it is why the route lives here, on its own path, rather than being
+ * a `kind` check inside a protected one.
+ */
+export async function handlePublicPortalRoute(
+  env: Env,
+  slug: string,
+  id: string | null,
+): Promise<Response> {
+  const portal = await getPortal(env, slug);
+
+  // Only public portals are served here. A restricted portal reached through /pub is a
+  // 404, not a redirect — a redirect would confirm that a client's portal exists.
+  if (!portal || portal.kind !== "public") return notFound();
+
+  // No identify(), no members, no JWT. Nobody authenticates on this path, so nobody burns
+  // a seat. That is an economic property of the route, not an afterthought.
+  return id === null
+    ? portalIndex(env, portal, [], null)
+    : portalDocument(env, portal, [], null, id);
 }
 
 async function portalIndex(
@@ -77,11 +137,16 @@ async function portalDocument(
 
   return renderShell(env, meta, {
     email,
-    backHref: `/v/${encodeURIComponent(portal.slug)}`,
+    backHref: portalPath(portal),
     backLabel: portal.name,
-    // Restricted and private portals are behind Access anyway; a public portal is not,
-    // and its documents are only as private as a search engine allows.
-    noindex: portal.kind !== "public",
+    // Everything is noindex for now, including public portals.
+    //
+    // A public portal is a deliberate act, so an argument exists for letting search engines
+    // in — that is what would make the marketing-site plan work. But "the owner made this
+    // public" and "the owner wants this in Google" are not the same statement, and the
+    // costly mistake runs one way only. When the marketing site is actually built, this
+    // becomes a per-portal flag rather than an assumption.
+    noindex: true,
   });
 }
 
@@ -213,7 +278,9 @@ function renderPortalPage(portal: Portal, docs: DocSummary[], isOwner: boolean):
 }
 
 function renderRow(portal: Portal, doc: DocSummary): string {
-  const href = `/v/${encodeURIComponent(portal.slug)}/${encodeURIComponent(doc.id)}`;
+  // One helper, so a public portal can never emit a /v/ link — which would walk the reader
+  // into an Access login wall and burn a seat on a page that is deliberately public.
+  const href = documentPath(portal, doc.id);
   const date = doc.createdAt.slice(0, 10);
   const tags = (doc.tags ?? []).map((tag) => `<span class="tag">${esc(tag)}</span>`).join("");
   const draft = doc.ownerOnly ? `<span class="draft">draft</span>` : "";
@@ -248,7 +315,87 @@ function groupByMonth(docs: DocSummary[]): [string, DocSummary[]][] {
   return [...groups.entries()];
 }
 
-const notFound = () => new Response("Not found", { status: 404 });
+/**
+ * 404 — but tell the OWNER what is actually going on.
+ *
+ * A stranger gets a bare 404, deliberately: a 403, or a "no such portal" message, would
+ * confirm whether a client's portal exists. The owner already knows everything there is to
+ * know, so leaving them to guess buys no security and costs them an afternoon.
+ */
+function notFound(env?: Env, email?: string | null, slug?: string): Response {
+  const isOwner = env && email && emailsMatch(email, env.OWNER_EMAIL);
+
+  if (!isOwner || !slug) return new Response("Not found", { status: 404 });
+
+  return page(
+    404,
+    "No such portal",
+    `There is no portal named <code>${esc(slug)}</code> on this deployment.`,
+    `Create one, and publish something into it:
+<pre>curl -X POST https://${esc(env.PUBLIC_HOST || "your-host")}/api/portals \\
+  -H "Authorization: Bearer $PAGEVAULT_API_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{"slug":"${esc(slug)}","name":"${esc(slug)}","kind":"restricted"}'</pre>
+Or ask Claude to do it, if the MCP server is connected.`,
+  );
+}
+
+/**
+ * The deployment is broken, and only the operator can fix it. Say which knob.
+ *
+ * Reaching this means Cloudflare Access authenticated someone and the Worker could not
+ * verify the resulting JWT. There is no visitor-side cause for that.
+ */
+const misconfigured = (): Response =>
+  page(
+    500,
+    "PageVault is misconfigured",
+    "Cloudflare Access authenticated you, but this Worker could not verify the token it issued.",
+    `Almost always one of:
+<ul>
+  <li><code>CF_TEAM_NAME</code> — should be the team slug, e.g. <code>acme</code>. If it
+      carries the full <code>.cloudflareaccess.com</code> domain the JWKS URL doubles it and
+      every verification fails. (Recent builds tolerate both.)</li>
+  <li><code>CF_ACCESS_AUD_DOCS</code> — must be the Audience tag of the Access application
+      covering <code>/v</code>, not the one covering <code>/admin</code>.</li>
+  <li>The Worker was deployed before the Access apps were created.</li>
+</ul>
+Run <code>make provision</code> then <code>make deploy</code>. <code>make logs</code> shows
+the failure as <code>jwt_verification_failed_behind_access</code>.`,
+  );
+
+/** A plain, honest error page. No branding, no cleverness. */
+function page(status: number, title: string, lead: string, detail: string): Response {
+  return new Response(
+    `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(title)}</title>
+<style>
+  body { margin:0; padding:3rem 1.25rem; font:16px/1.6 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+         color:#1e1610; background:#fbf6ec; }
+  .wrap { max-width:40rem; margin:0 auto; }
+  h1 { font-size:1.5rem; margin:0 0 .5rem; }
+  .lead { color:#4a3a28; }
+  code { background:#f0ece0; padding:.1rem .3rem; border-radius:3px; font-size:.9em; }
+  pre { background:#1e1610; color:#f4ebd6; padding:1rem; border-radius:6px; overflow-x:auto;
+        font-size:.8125rem; line-height:1.5; }
+  pre code { background:none; padding:0; color:inherit; }
+  ul { padding-left:1.2rem; } li { margin:.4rem 0; }
+</style></head><body><div class="wrap">
+<h1>${esc(title)}</h1>
+<p class="lead">${lead}</p>
+${detail}
+</div></body></html>`,
+    {
+      status,
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "private, no-store",
+        "X-Robots-Tag": "noindex, nofollow",
+      },
+    },
+  );
+}
 
 const esc = (s: string): string =>
   s
