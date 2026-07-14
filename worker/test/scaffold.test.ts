@@ -54,7 +54,8 @@ describe("router", () => {
     expect(await res.json()).toEqual({ error: "Not found", code: "not_found" });
   });
 
-  it.each(["/api/docs", "/d/abc", "/p/xyz", "/admin"])(
+  // /api/* is live as of #2 and has its own suite. These three land in #3 and #5.
+  it.each(["/d/abc", "/p/xyz", "/admin"])(
     "routes %s to a handler (not yet implemented)",
     async (path) => {
       const res = await SELF.fetch(`https://share.example.com${path}`);

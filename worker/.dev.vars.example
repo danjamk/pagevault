@@ -1,10 +1,12 @@
 # Copy to worker/.dev.vars for local development. .dev.vars is gitignored.
-# In production these are `wrangler secret put`, never committed.
+# In production, secrets are `wrangler secret put` and vars are set by `pagevault init`.
+
+# --- Secrets ---
 
 # Bearer token for the CLI and MCP server. Also derives the console's session-token
 # signing key, so there is no second secret to manage.
 #   openssl rand -hex 32
-PAGEVAULT_API_TOKEN=
+PAGEVAULT_API_TOKEN=local-dev-token
 
 # Optional. Enables the Access group sync that bounds seat consumption (ADR-002).
 # Without it, PageVault falls back to an `Include: Everyone` Access policy and warns
@@ -15,3 +17,15 @@ PAGEVAULT_API_TOKEN=
 #   Access: Apps and Policies — Edit
 #   Access: Organizations, Identity Providers, and Groups — Edit   (groups live here)
 CF_API_TOKEN=
+
+# --- Vars ---
+# `pagevault init` writes these into wrangler.jsonc for a real deployment. They ship
+# blank in the committed config, so local dev supplies them here.
+
+# Required. Every document carries the owner on its allowlist; publishing refuses
+# without it rather than creating a document nobody can open.
+OWNER_EMAIL=you@example.com
+
+# Optional locally. When unset, share links fall back to the host the request arrived
+# on — which is what you want for `wrangler dev` on localhost.
+PUBLIC_HOST=

@@ -1,3 +1,4 @@
+import { handleApi, json } from "./api.js";
 import type { Env } from "./env.js";
 
 /**
@@ -20,9 +21,10 @@ export default {
       return Response.redirect(new URL("/admin", url).toString(), 302);
     }
 
-    // Bearer-authenticated. No Access app in front of this path. (#2, #3)
+    // Bearer-authenticated. No Access app in front of this path — this Worker is the
+    // only thing guarding it. See ADR-001.
     if (pathname.startsWith("/api/")) {
-      return notImplemented("api");
+      return handleApi(request, env);
     }
 
     // Access app A. JWT verified here, then checked against the doc's allowlist. (#4)
@@ -46,14 +48,4 @@ export default {
 
 function notImplemented(surface: string): Response {
   return json({ error: `Not implemented: ${surface}`, code: "not_implemented" }, 501);
-}
-
-export function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "private, no-store",
-    },
-  });
 }
