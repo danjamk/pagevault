@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install dev test check deploy
+.PHONY: help install dev test test-security check deploy
 
 # Wrangler 4 requires Node 22; the system default here is 20. Every target that
 # touches the toolchain selects it first, because the error you get otherwise does
@@ -18,6 +18,9 @@ dev: ## Run the Worker locally against Miniflare KV
 
 test: ## Run the test suite
 	@$(NVM) && pnpm test
+
+test-security: ## Run only canView() + identity — the suite where a bug is an incident
+	@$(NVM) && pnpm test:security
 
 check: ## Typecheck + test — the pre-PR gate, and what CI runs
 	@$(NVM) && pnpm check
