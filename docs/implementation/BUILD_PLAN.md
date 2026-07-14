@@ -21,13 +21,28 @@ are not obvious — read the relevant one before overturning it.
 Everything in the MVP serves that. Everything that does not is a layer.
 
 The sharpest thing the research surfaced: the client-portal incumbents' own guidance
-says do not adopt a portal below **10+ active engagements**. We have ~1.5. The bet is
-that the collection is useful **to the owner at n=1** — because an agent can read it
-back — before it is ever useful to the audience.
+says do not adopt a portal below **10+ active engagements**. We have ~1.5, and are
+unlikely ever to have more than ten. The bet is that the collection is useful **to the
+owner at n=1** — because an agent can read it back — before it is ever useful to the
+audience.
 
 **So the MVP is the agent loop, not the client-facing page.** The portal page must be
 functional and unembarrassing. It does not have to be beautiful until a client
 actually looks at it.
+
+### The two claims that are NOT bets
+
+These are craft, not market risk. They do not need validating, they need protecting:
+
+1. **Deploying this is easy.** Differentiating, and a product requirement. The
+   provisioning script is in the MVP (M6) because any deployment needs it; the
+   friendly `init` wrapper is Layer 1, because it is only *validated* when a stranger
+   uses it.
+2. **Onboarding a client costs the client nothing.** No account, no invitation, no
+   password — a link, a six-digit code, done. This falls out of Cloudflare Access for
+   free. **There is nothing to build here, only something to protect:** anything that
+   adds a step on the client's side is a bug, and it is the thing the whole n=1.5
+   argument rests on.
 
 ---
 
@@ -117,10 +132,29 @@ Enough not to fly blind: portals, documents, membership, visibility, delete with
 confirmation. Session token minted into the page, never the API token. Strict nonced
 CSP — a different, tighter policy than the artifact sandbox.
 
-### M6 — Deploy by hand, then stop and use it
+### M6 — Provision Access with a script, deploy, then stop and use it  *(#9, part 1)*
 
-`wrangler deploy`, two Access apps in the dashboard, one portal, one real client.
-**Then stop building for a month.**
+**Easy deploy is a differentiating characteristic of this product, not launch
+plumbing.** But it cannot be validated by the author deploying once — it gets
+validated when a stranger deploys it. So it splits:
+
+**In the MVP:** the Cloudflare provisioning **script**. Two Access apps, the
+`pagevault-viewers` group, the policies, the KV namespace — created via the CF API,
+because that work has to happen for *any* deployment to exist, including this one.
+Steal the pattern from sharehtml's `setup.ts` (Apache-2.0, ~900 lines, zero deps
+beyond node builtins). Credit it.
+
+**In Layer 1:** `pagevault init` — the prompts, the token-scope walkthrough, the
+Zero-Trust-not-enabled deep link, `upgrade`. A thin wrapper around a script that has
+already been run for real, once, by the person who wrote it. That is the opposite of
+the usual failure mode, which is shipping an untested provisioning flow against a
+clean account you do not have.
+
+Then: one portal, real artifacts, **stop building for a month.**
+
+> **n=0 or 1 is enough to start.** Dogfood on yourself — publish your own artifacts
+> into your own portal and query them back through MCP. The agent-memory loop is
+> testable on day one; it does not wait for a client to need a report.
 
 ---
 
@@ -129,10 +163,8 @@ CSP — a different, tighter policy than the artifact sandbox.
 Do not build this before the thesis validates. That inverts the original plan on
 purpose.
 
-- **`pagevault init`** *(#9)* — the adoption bottleneck, and adoption is a launch
-  concern, not a validation one. Steal the pattern from sharehtml's `setup.ts`
-  (Apache-2.0, ~900 lines, zero deps beyond node builtins); it already provisions the
-  Access app via the CF API. Credit it.
+- **`pagevault init`** *(#9, part 2)* — prompts, `upgrade`, the clean-account path,
+  wrapped around the M6 provisioning script.
 - **MCP OAuth 2.1** — the price of claude.ai, Desktop, and mobile, and the largest
   single piece of work in the plan. **If Anthropic grants `static_headers` beta access,
   delete it entirely** and ship a bearer token. Ask before building.

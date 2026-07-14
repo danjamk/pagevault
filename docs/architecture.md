@@ -261,12 +261,39 @@ we serve. See ADR-004.
 **The API token never touches the browser.** Not in the page, not in `localStorage`,
 not in a data attribute.
 
-## 9. Seats
+## 9. Seats — and the rule that follows from them
 
-A seat is consumed by any successful Access authentication. The free tier is 50, they
-are not auto-reaped, and **when they run out, further logins are blocked** — so an
-`Include: Everyone` policy lets any stranger who knows the hostname lock out your
-actual clients. Cloudflare lists that config under "common misconfigurations."
+**"50 free users" means 50 distinct people who have *ever* logged in.** Not fifty
+concurrent. A seat is consumed on first authentication and **held forever**: Cloudflare
+does not auto-reap, and the built-in expiration has a **one-month minimum** inactivity
+window. Someone who opened one report in March is still holding a seat in December.
+
+When the seats run out, **further logins are blocked**. It fails closed — no surprise
+invoice, but your actual client cannot get in.
+
+Past 50: **$7/user/month, self-serve, monthly, no sales call** (the plan is now called
+Pay-as-you-go). But the free 50 is a property of the *free plan*, not a discount carried
+into the paid one — so the 51st person plausibly costs $7 × 51, not $7. **Confirm in the
+dashboard before the README claims anything about it.**
+
+### The rule
+
+> **Gate the people who come back. Link the people who read once.**
+
+`/p/{token}` and `/pub/{slug}` sit on paths with **no Access application**. Nobody
+authenticates, so **zero seats are burned** — Cloudflare documents bypass paths as
+exactly this escape hatch. The client's CTO who lives in the portal for nine months is
+worth a seat. The client's board, who open one artifact one time, get a capability link
+and cost nothing, forever.
+
+This is an economic property of the route topology, not an afterthought. sharehtml burns
+a seat on **every** viewer — even link-shared ones — because their "link" mode still
+sits behind Access.
+
+### And the `Include: Everyone` trap
+
+An `Include: Everyone` policy lets any stranger who knows the hostname consume seats and
+lock out your clients. Cloudflare lists that config under "common misconfigurations."
 
 So the `/v` policy includes **one Access group**, `pagevault-viewers`, holding the
 union of every portal's members plus every `extraEmails` grant. Strangers cannot
