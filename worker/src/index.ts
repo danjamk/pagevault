@@ -1,5 +1,6 @@
 import { handleApi, json } from "./api.js";
 import type { Env } from "./env.js";
+import { handlePortalRoute } from "./portal.js";
 import { getMeta, getPublicTokenTarget } from "./store.js";
 import { handleRender, renderShell } from "./viewer.js";
 
@@ -51,9 +52,10 @@ export default {
       return handlePublicToken(env, pub[1]);
     }
 
-    // Access app A. Portal index and documents, gated by canView. (#13)
-    if (pathname.startsWith("/v/")) {
-      return notImplemented("portal");
+    // Access app A. Portal index and documents, gated by canView.
+    const portal = /^\/v\/([^/]+)(?:\/([^/]+))?\/?$/.exec(pathname);
+    if (portal?.[1]) {
+      return handlePortalRoute(request, env, portal[1], portal[2] ?? null);
     }
 
     // Access app B. Owner only. (#5)

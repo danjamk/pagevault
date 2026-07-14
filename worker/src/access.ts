@@ -12,6 +12,40 @@ export function emailsMatch(a: string | null, b: string | null): boolean {
 }
 
 /**
+ * May this person see the portal *itself* — its name, its index, the list of what a
+ * client has been given?
+ *
+ * This is a different question from `canView`, and keeping them separate is what makes
+ * the listing free.
+ *
+ * `extraEmails` is a **document** grant, not a portal grant. If you sent one report to a
+ * client's CFO, the CFO can open that report — and has no business seeing the client's
+ * entire index. So the index does not consult `extraEmails` at all, which is also why it
+ * can be rendered from KV key metadata with **zero reads**: the only per-document
+ * question left is `ownerOnly`, and that is in the metadata.
+ *
+ * Fold this into `canView` and you reintroduce a read per document on every portal page
+ * load — the exact N+1 the data model exists to avoid.
+ */
+export function canViewPortal(
+  portal: Portal,
+  members: string[],
+  email: string | null,
+  ownerEmail: string,
+): boolean {
+  if (emailsMatch(email, ownerEmail)) return true;
+  if (portal.kind === "public") return true;
+  if (email === null) return false;
+
+  if (portal.kind === "restricted") {
+    return members.some((member) => emailsMatch(member, email));
+  }
+
+  // Private portals are the owner's. A per-document grant does not open the front door.
+  return false;
+}
+
+/**
  * ⚠️ THE authorization function. There is no other one.
  *
  * Cloudflare Access answers "who are you?". This answers "may you see this?". Every
