@@ -1,5 +1,7 @@
 import { isAuthorized } from "./auth.js";
+import { originAllowed } from "./capability.js";
 import type { Env } from "./env.js";
+import { logBlocked } from "./viewer.js";
 import {
   DEFAULT_PORTAL,
   type DocMeta,
@@ -67,6 +69,18 @@ class Misconfigured extends Error {
 }
 
 export async function handleApi(request: Request, env: Env): Promise<Response> {
+  // Defense in depth, ahead of the bearer check.
+  //
+  // A sandboxed artifact has an opaque origin, so anything it fetches arrives with
+  // `Origin: null`. It has no bearer token either, so the check below would already
+  // refuse it — but this is the cheapest possible second wall, and it means a future
+  // endpoint that gets its auth wrong is still not reachable from inside an artifact.
+  // The console (#5) sends a real Origin; the CLI and MCP server send none. See ADR-007.
+  if (!originAllowed(request)) {
+    logBlocked("blocked_api_request_invalid_origin", request);
+    return fail(403, "forbidden_origin", "Cross-origin request refused");
+  }
+
   if (!isAuthorized(request, env)) {
     return fail(401, "unauthorized", "Missing or invalid bearer token");
   }

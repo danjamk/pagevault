@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install dev test test-security check deploy
+.PHONY: help install dev test test-security check-sandbox check deploy
 
 # Wrangler 4 requires Node 22; the system default here is 20. Every target that
 # touches the toolchain selects it first, because the error you get otherwise does
@@ -22,7 +22,24 @@ test: ## Run the test suite
 test-security: ## Run only canView() + identity — the suite where a bug is an incident
 	@$(NVM) && pnpm test:security
 
-check: ## Typecheck + test — the pre-PR gate, and what CI runs
+check-sandbox: ## Fail the build if the iframe is ever granted our origin (ADR-007)
+# `allow-scripts` combined with same-origin is functionally NO SANDBOX: with scripts
+# enabled the frame can reach into the parent and remove the attribute outright. It is
+# the single change that silently deletes every protection in ADR-007, and it is exactly
+# what gets added at 11pm because an artifact "needs" it.
+#
+# Comments in worker/src deliberately never spell the token out, so this stays a plain,
+# absolute grep with no exceptions to argue about.
+	@if grep -rn 'allow-same-origin' worker/src; then \
+		echo ""; \
+		echo "✗ allow-same-origin found in worker/src. Read docs/adr/ADR-007-viewer-shell.md."; \
+		echo "  With allow-scripts, this is not a weaker sandbox — it is no sandbox."; \
+		exit 1; \
+	else \
+		echo "✓ no allow-same-origin in worker/src"; \
+	fi
+
+check: check-sandbox ## Typecheck + test — the pre-PR gate, and what CI runs
 	@$(NVM) && pnpm check
 
 deploy: ## Deploy the Worker to Cloudflare

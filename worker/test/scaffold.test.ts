@@ -54,12 +54,18 @@ describe("router", () => {
     expect(await res.json()).toEqual({ error: "Not found", code: "not_found" });
   });
 
-  // /api/* is live as of #2 and has its own suite. These three land in #3 and #5.
-  it.each(["/d/abc", "/p/xyz", "/admin"])(
+  // /api/* (#2), /render and /p/* (#3) are live and have their own suites.
+  // The portal routes land in #13 and the console in #5.
+  it.each(["/v/default/abc", "/admin"])(
     "routes %s to a handler (not yet implemented)",
     async (path) => {
       const res = await SELF.fetch(`https://share.example.com${path}`);
       expect(res.status).toBe(501);
     },
   );
+
+  it("404s an unknown /p/ token rather than 501ing — the route is live", async () => {
+    const res = await SELF.fetch("https://share.example.com/p/nosuchtoken");
+    expect(res.status).toBe(404);
+  });
 });

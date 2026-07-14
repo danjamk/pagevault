@@ -1,0 +1,209 @@
+import { mintCapability, verifyCapability } from "./capability.js";
+import type { Env } from "./env.js";
+import type { DocMeta } from "./store.js";
+import { getDoc } from "./store.js";
+
+/**
+ * The iframe sandbox.
+ *
+ * `allow-scripts` WITHOUT same-origin is the entire trick. Scripts run — charts,
+ * animations, everything a self-contained artifact does — but the frame gets a unique
+ * opaque origin: it cannot read our cookies, cannot touch the shell's DOM, and cannot
+ * make credentialed requests back to us.
+ *
+ * 🔴 Adding the same-origin token to this list is functionally the same as deleting the
+ * sandbox: with scripts enabled, the frame can reach into the parent and remove the
+ * attribute outright. It is exactly the change made at 11pm because an artifact
+ * "needs" it. It doesn't. `make check-sandbox` fails the build if the token ever
+ * appears in worker/src, and there are runtime tests asserting it never reaches a
+ * response body.
+ */
+export const IFRAME_SANDBOX = "allow-scripts allow-popups allow-forms allow-downloads";
+
+/**
+ * The CSP on artifact bytes.
+ *
+ * Belt and braces. The iframe attribute above already gives the frame an opaque origin;
+ * this repeats the guarantee as a header, so even a *direct top-level navigation* to
+ * `/render/{id}` lands in one. sharehtml relies on the attribute alone and sends no CSP
+ * at all — this is one better, and it costs a header.
+ *
+ * - `connect-src 'none'` — the artifact cannot phone home.
+ * - `form-action 'none'` — no exfiltration by form POST.
+ * - `frame-ancestors 'self'` — only our shell may frame it.
+ * - `script-src` allows inline, `eval`, and a small CDN allowlist, because Claude
+ *   artifacts routinely pull Chart.js or D3 from one. **Every entry is a supply-chain
+ *   trust decision**, which is why the whole policy is an env var: the deployer should
+ *   own that call, not us.
+ */
+const DEFAULT_DOC_CSP = [
+  "sandbox allow-scripts allow-popups allow-forms allow-downloads",
+  "default-src 'none'",
+  "script-src 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com",
+  "style-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://fonts.googleapis.com",
+  "font-src data: https://fonts.gstatic.com https://cdnjs.cloudflare.com",
+  "img-src data: blob: https:",
+  "media-src data: blob:",
+  "connect-src 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'self'",
+  "base-uri 'none'",
+].join("; ");
+
+export const docCsp = (env: Env): string => env.DOC_CSP?.trim() || DEFAULT_DOC_CSP;
+
+/**
+ * `/render/{id}?cap={token}` — the artifact bytes, and nothing else.
+ *
+ * No Access application in front of it. The capability token IS the authorization: it
+ * was minted by a shell that had already been through `canView`, it names this one
+ * document, and it expires in minutes.
+ */
+export async function handleRender(request: Request, env: Env, id: string): Promise<Response> {
+  const cap = new URL(request.url).searchParams.get("cap");
+
+  // Scoped verification. A valid capability for a different document is not a
+  // capability for this one.
+  const capability = await verifyCapability(env, cap, id);
+  if (!capability) {
+    logBlocked("blocked_render_invalid_capability", request, { doc: id });
+    return new Response("Not found", { status: 404 });
+  }
+
+  const source = await getDoc(env, id);
+  if (source === null) return new Response("Not found", { status: 404 });
+
+  return new Response(source, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Security-Policy": docCsp(env),
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      "X-Robots-Tag": "noindex, nofollow",
+      // Never let the CDN cache an artifact that a capability token gated.
+      "Cache-Control": "private, no-store",
+    },
+  });
+}
+
+export interface ShellOptions {
+  /** The verified viewer, or null for an unauthenticated public view. */
+  email: string | null;
+  /** Where "back" goes. Absent on a `/p/` capability link — there is no collection. */
+  backHref?: string;
+  backLabel?: string;
+  /** `/p/` and `/pub/` must never be indexed. An unguessable URL is not a private one. */
+  noindex: boolean;
+}
+
+/**
+ * The trusted shell: our HTML, our JS, nothing from the artifact.
+ *
+ * This is where chrome lives — the title, the link back to the collection, and later
+ * the PDF button and the read receipt. It is the reason ADR-003 was superseded: a
+ * top-level CSP sandbox is equally secure and makes all of that impossible.
+ */
+export async function renderShell(
+  env: Env,
+  meta: DocMeta,
+  opts: ShellOptions,
+): Promise<Response> {
+  const cap = await mintCapability(env, meta.id, opts.email);
+  if (!cap) {
+    return new Response("Server misconfigured: PAGEVAULT_API_TOKEN is not set", { status: 500 });
+  }
+
+  // The shell's own script/style are nonced. A bug in artifact serving must not be able
+  // to degrade the page that holds the capability token.
+  const nonce = crypto.randomUUID();
+  const src = `/render/${encodeURIComponent(meta.id)}?cap=${encodeURIComponent(cap)}`;
+
+  const back = opts.backHref
+    ? `<a class="back" href="${esc(opts.backHref)}">&larr; ${esc(opts.backLabel ?? "Back")}</a>`
+    : "";
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(meta.title)}</title>
+<style nonce="${nonce}">
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; flex-direction: column;
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    color: #1e1610; background: #fbf6ec;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap;
+    padding: .75rem 1.25rem; border-bottom: 1px solid #d8cdb0; background: #fff;
+  }
+  h1 { font-size: 1rem; font-weight: 600; margin: 0; }
+  .back { color: #34507a; text-decoration: none; font-size: .875rem; }
+  .back:hover { text-decoration: underline; }
+  .meta { margin-left: auto; color: #7d6b52; font-size: .8125rem; }
+  iframe { flex: 1 1 auto; width: 100%; border: 0; background: #fff; }
+</style>
+</head>
+<body>
+<header>
+  ${back}
+  <h1>${esc(meta.title)}</h1>
+  <span class="meta">${esc(new Date(meta.updatedAt).toISOString().slice(0, 10))}</span>
+</header>
+<iframe
+  src="${esc(src)}"
+  sandbox="${IFRAME_SANDBOX}"
+  referrerpolicy="no-referrer"
+  title="${esc(meta.title)}"></iframe>
+</body>
+</html>`;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "text/html; charset=utf-8",
+    "Content-Security-Policy": [
+      "default-src 'none'",
+      `style-src 'nonce-${nonce}'`,
+      `script-src 'nonce-${nonce}'`,
+      "frame-src 'self'",
+      "form-action 'none'",
+      "frame-ancestors 'none'",
+      "base-uri 'none'",
+    ].join("; "),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "private, no-store",
+  };
+
+  if (opts.noindex) headers["X-Robots-Tag"] = "noindex, nofollow";
+
+  return new Response(html, { headers });
+}
+
+/**
+ * Structured, named events. Cheap, and the first time something goes wrong you will be
+ * glad they are here.
+ */
+export function logBlocked(event: string, request: Request, extra: Record<string, unknown> = {}) {
+  console.log(
+    JSON.stringify({
+      level: "warn",
+      event,
+      timestamp: new Date().toISOString(),
+      method: request.method,
+      url: request.url,
+      origin: request.headers.get("Origin"),
+      ...extra,
+    }),
+  );
+}
+
+const esc = (s: string): string =>
+  s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
