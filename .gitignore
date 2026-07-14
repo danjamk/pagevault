@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.DS_Store
+.idea/
+
+# Claude workspace artifacts
+# skills/ are symlinks into the private ~/yukon/claude-shared — local only,
+# they would be dangling links for anyone who clones this.
+.claude/settings.local.json
+.claude/skills/
+CLAUDE.local.md
+COMMIT_MESSAGE.md
+PR_COMMENT.md
+
+# Secrets — never commit
+.env.local
+.dev.vars
+
+# Wrangler
+.wrangler/
