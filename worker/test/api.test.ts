@@ -45,6 +45,38 @@ describe("auth", () => {
     expect((await publish(aDoc(), TOKEN.slice(0, -1))).status).toBe(401);
   });
 
+  it("🔴 403s a request from a sandboxed artifact (Origin: null), before auth is even checked", async () => {
+    // An opaque origin sends `Origin: null`. The bearer check would already refuse this
+    // — the artifact has no token — but this is the second wall, so an endpoint that
+    // gets its auth wrong later is still unreachable from inside an artifact. ADR-007.
+    const res = await SELF.fetch(`${HOST}/api/docs`, {
+      headers: { ...auth(), Origin: "null" },
+    });
+
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: "forbidden_origin" });
+  });
+
+  it("403s a cross-origin browser caller", async () => {
+    const res = await SELF.fetch(`${HOST}/api/docs`, {
+      headers: { ...auth(), Origin: "https://evil.example" },
+    });
+    expect(res.status).toBe(403);
+  });
+
+  it("allows a same-origin browser caller — this is the console (#5)", async () => {
+    const res = await SELF.fetch(`${HOST}/api/docs`, {
+      headers: { ...auth(), Origin: HOST },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("allows a caller with no Origin at all — the CLI and the MCP server", async () => {
+    // Non-browser callers attach an explicit bearer header and carry no ambient
+    // authority, so there is nothing for an Origin check to defend against.
+    expect((await SELF.fetch(`${HOST}/api/docs`, { headers: auth() })).status).toBe(200);
+  });
+
   it("🔴 never accepts the CF_Authorization cookie", async () => {
     // The browser attaches this to /api/* whether we like it or not — it is scoped
     // Path=/ on the hostname, and /api has no Access app to strip it. Honouring it

@@ -21,6 +21,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Fails the build if the artifact iframe is ever granted our origin. See ADR-007.
+      - run: make check-sandbox
+
       - run: pnpm typecheck
 
       - run: pnpm test

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Hostile artifact</title>
+</head>
+<body>
+<!--
+  A deliberately malicious artifact. Committed, not generated, so it can be published to
+  a real deployment and opened in a real browser.
+
+  This is not a hypothetical. PageVault serves LLM-generated HTML with scripts enabled,
+  from our own origin, to a viewer whose browser is carrying a valid CF_Authorization
+  cookie. The model that wrote the artifact may have been reading a web page carrying a
+  prompt injection. "The HTML is self-authored" is not a security property.
+
+  Every one of the four attacks below MUST fail. If any of them succeeds, the sandbox is
+  broken and it is an incident, not a bug.
+
+  How to verify by hand (the automated tests assert the headers; only a browser can
+  prove the JS is actually contained):
+
+    make dev
+    curl -sX POST localhost:8787/api/docs -H "Authorization: Bearer local-dev-token" \
+      -H 'Content-Type: application/json' \
+      -d "{\"title\":\"Hostile\",\"public\":true,\"html\":$(jq -Rs . < worker/test/fixtures/hostile-artifact.html)}"
+
+  Open the /p/ link it returns and read the results on the page. All four rows must be
+  BLOCKED, and the browser console should be full of security errors. That is success.
+-->
+<h1>Hostile artifact</h1>
+<p>Every row below must read <strong>BLOCKED</strong>.</p>
+<table id="results" border="1" cellpadding="6">
+  <tr><th>Attack</th><th>Result</th></tr>
+</table>
+
+<script>
+  const results = document.getElementById("results");
+
+  function report(attack, blocked, detail) {
+    const row = results.insertRow();
+    row.insertCell().textContent = attack;
+    const cell = row.insertCell();
+    cell.textContent = blocked ? "BLOCKED" : "*** SUCCEEDED — SANDBOX IS BROKEN ***";
+    cell.style.color = blocked ? "green" : "red";
+    cell.style.fontWeight = "bold";
+    if (detail) cell.title = String(detail);
+  }
+
+  // 1. Read the viewer's session cookie.
+  //    An opaque origin has no cookie jar. This should throw, not return "".
+  try {
+    const cookies = document.cookie;
+    report("document.cookie", cookies === "", cookies);
+  } catch (err) {
+    report("document.cookie", true, err);
+  }
+
+  // 2. Call the PageVault API with the viewer's ambient credentials.
+  //    Cross-origin from an opaque origin, sent with Origin: null, and carrying no
+  //    bearer token. It must not return data under any circumstances.
+  fetch("/api/docs", { credentials: "include" })
+    .then((res) => res.text())
+    .then((body) => report("fetch /api/docs", !body.includes('"docs"'), body.slice(0, 200)))
+    .catch((err) => report("fetch /api/docs", true, err));
+
+  // 3. Read another document directly.
+  fetch("/render/someotherdoc", { credentials: "include" })
+    .then((res) => report("fetch /render/{other}", !res.ok, res.status))
+    .catch((err) => report("fetch /render/{other}", true, err));
+
+  // 4. Persist anything. localStorage on an opaque origin throws SecurityError.
+  try {
+    localStorage.setItem("exfil", "1");
+    report("localStorage", false, localStorage.getItem("exfil"));
+  } catch (err) {
+    report("localStorage", true, err);
+  }
+
+  // 5. Reach into the parent shell and steal the capability token from the iframe src.
+  try {
+    const stolen = window.parent.document.querySelector("iframe").src;
+    report("read parent DOM", false, stolen);
+  } catch (err) {
+    report("read parent DOM", true, err);
+  }
+</script>
+</body>
+</html>
