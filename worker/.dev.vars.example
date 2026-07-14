@@ -1,0 +1,17 @@
+# Copy to worker/.dev.vars for local development. .dev.vars is gitignored.
+# In production these are `wrangler secret put`, never committed.
+
+# Bearer token for the CLI and MCP server. Also derives the console's session-token
+# signing key, so there is no second secret to manage.
+#   openssl rand -hex 32
+PAGEVAULT_API_TOKEN=
+
+# Optional. Enables the Access group sync that bounds seat consumption (ADR-002).
+# Without it, PageVault falls back to an `Include: Everyone` Access policy and warns
+# loudly — which works, but lets any stranger who knows your hostname consume one of
+# your 50 free Zero Trust seats.
+#
+# Needs, on the account:
+#   Access: Apps and Policies — Edit
+#   Access: Organizations, Identity Providers, and Groups — Edit   (groups live here)
+CF_API_TOKEN=

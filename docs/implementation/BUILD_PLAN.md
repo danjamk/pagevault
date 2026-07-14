@@ -1,7 +1,7 @@
 # PageVault — Build Plan
 
-Nine phases, each a branch and a PR. Read `docs/architecture.md` first; the ADRs in
-`docs/adr/` explain the four decisions that are not obvious.
+Ten phases, each a GitHub issue, a branch, and a PR. Read `docs/architecture.md`
+first; the ADRs in `docs/adr/` explain the four decisions that are not obvious.
 
 **Phases 0–7 need no Cloudflare account.** Everything is testable locally with
 Miniflare KV and hand-minted JWTs. Cloudflare state is required only at phase 8.
@@ -217,6 +217,41 @@ The first phase that needs a real Cloudflare account.
   account, nothing else here matters.
 
 ---
+
+## Make targets
+
+Make is the entry point. `make help` lists everything; `.DEFAULT_GOAL := help`.
+Targets accumulate by phase, and the final set is small on purpose — the guide says
+~10-15, and this project should land at ten.
+
+| Target | Lands in | Does |
+|---|---|---|
+| `help` | 0 | Lists targets. Default goal. |
+| `install` | 0 | `pnpm install --frozen-lockfile`, on Node 22 |
+| `dev` | 0 | `wrangler dev` against local Miniflare KV |
+| `test` | 0 | Full Vitest suite |
+| `check` | 0 | Typecheck + test. What CI runs. The pre-PR gate. |
+| `deploy` | 0 | `wrangler deploy`. Confirmation prompt — it is destructive. |
+| `test-security` | 4 | Just the JWT/allowlist suite. Fast enough to run on every save. |
+| `logs` | 5 | `wrangler tail` |
+| `release` | 8 | `npm publish` with preflight: on main, clean tree, tests pass |
+| `smoke` | 10 | Post-deploy check against the live host |
+
+Rules from `claude-shared/docs/guides/makefile-patterns.md` that bind here:
+
+- **One target per task, not per variant.** No `deploy-dev` / `deploy-prod` — use
+  `$(ENV)`.
+- **Don't wrap one-liners.** A target earns its place by hiding complexity. `make
+  dev` earns it because it has to select Node 22 and `cd worker` first; a target
+  that is a bare alias for one pnpm script does not.
+- **Every public target gets a `## Description` comment** — that is what `make help`
+  greps.
+- **Confirmation prompt on anything destructive.** `deploy` and `release` both
+  qualify.
+
+Node 22 is not the system default here (20.14 is). Every target that runs the
+toolchain has to select it, or Wrangler 4 will refuse to start with an error that
+does not obviously say "wrong Node."
 
 ## Open questions
 
