@@ -1,0 +1,49 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pagevault",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+
+  // `pagevault init` rewrites this file: it fills in the KV namespace id, the
+  // custom domain, and the Access AUD tags read back from the app-create calls.
+  // Editing it by hand is supported but not the intended path.
+
+  // Placeholder. `pagevault init` overwrites it, or run:
+  //   wrangler kv namespace create PAGEVAULT
+  // Wrangler validates that this is a non-empty string even for local tests, so it
+  // cannot be blank. Deploying with the placeholder fails loudly, which is correct.
+  "kv_namespaces": [
+    {
+      "binding": "PAGEVAULT",
+      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+    }
+  ],
+
+  "vars": {
+    "OWNER_EMAIL": "",
+    "CF_TEAM_NAME": "",
+    "PUBLIC_HOST": "",
+
+    // One AUD per Access application. These are NOT interchangeable — /d must not
+    // accept the console's token and vice versa. See ADR-001.
+    "CF_ACCESS_AUD_DOCS": "",
+    "CF_ACCESS_AUD_ADMIN": ""
+  },
+
+  // Secrets (`wrangler secret put`), never in this file:
+  //   PAGEVAULT_API_TOKEN  — bearer for CLI/MCP; also derives the console session key
+  //   CF_API_TOKEN         — optional; enables Access group sync (ADR-002)
+
+  // Routes are added by `pagevault init` as a custom domain:
+  //   "routes": [{ "pattern": "share.example.com", "custom_domain": true }]
+
+  // Disabled deliberately. Both route around Cloudflare Access entirely.
+  // The Worker fails closed without a valid JWT, so this is not an open door —
+  // but leaving them on means an unauthenticated path to the same Worker exists.
+  "workers_dev": false,
+  "preview_urls": false,
+
+  "observability": {
+    "enabled": true
+  }
+}

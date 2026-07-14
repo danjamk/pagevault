@@ -1,0 +1,11 @@
+# pnpm 10 reads build-script approvals from here, not from package.json's "pnpm" field.
+# workerd is the Workers runtime that Miniflare (and therefore the whole test suite)
+# runs on; esbuild is Wrangler's bundler. Both need their postinstall.
+onlyBuiltDependencies:
+  - esbuild
+  - workerd
+
+# Transitive, unused, and slow to compile. Declared rather than left to warn on every
+# install, so the decision is recorded instead of rediscovered.
+ignoredBuiltDependencies:
+  - sharp

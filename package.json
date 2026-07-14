@@ -1,0 +1,32 @@
+{
+  "name": "pagevault",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Self-hosted, single-file HTML publishing with per-document access control, on Cloudflare's free tier",
+  "license": "MIT",
+  "author": "Dan Kuhn",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danjamk/pagevault.git"
+  },
+  "type": "module",
+  "packageManager": "pnpm@10.22.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "wrangler dev --config worker/wrangler.jsonc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "check": "pnpm typecheck && pnpm test",
+    "deploy": "wrangler deploy --config worker/wrangler.jsonc"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.18.4",
+    "@cloudflare/workers-types": "^5.20260714.1",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.110.0"
+  }
+}
