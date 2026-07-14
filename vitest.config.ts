@@ -24,13 +24,14 @@ export default defineConfig({
         },
       },
 
-      // Each test file gets its own KV. Tests that depend on another file's writes
-      // are tests that fail in a random order six months from now.
-      isolatedStorage: true,
     }),
   ],
 
   test: {
     include: ["worker/test/**/*.test.ts"],
+    // Wipes KV between tests. 0.18 dropped the `isolatedStorage` pool option; the
+    // replacement is an explicit reset(), and it belongs here so no test file can
+    // forget it. See worker/test/setup.ts.
+    setupFiles: ["./worker/test/setup.ts"],
   },
 });
