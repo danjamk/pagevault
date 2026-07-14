@@ -6,7 +6,11 @@ import {
   DEFAULT_PORTAL,
   type DocMeta,
   type Portal,
+  type PortalKind,
   type SourceKind,
+  deleteDoc,
+  deletePortal,
+  getMembers,
   getMeta,
   getPortal,
   isValidSlug,
@@ -17,6 +21,7 @@ import {
   mintPublicToken,
   normalizeEmail,
   putDoc,
+  putMembers,
   putPortal,
   putPublicToken,
 } from "./store.js";
@@ -95,11 +100,23 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       return fail(405, "method_not_allowed", `${request.method} not allowed on /api/docs`);
     }
 
-    const match = /^\/docs\/([^/]+)$/.exec(rest);
-    if (match?.[1]) {
-      if (request.method === "GET") return await getDocHandler(env, match[1]);
+    const doc = /^\/docs\/([^/]+)$/.exec(rest);
+    if (doc?.[1]) {
+      if (request.method === "GET") return await getDocHandler(env, doc[1]);
       return fail(405, "method_not_allowed", `${request.method} not allowed on ${pathname}`);
     }
+
+    if (rest === "/portals") {
+      if (request.method === "POST") return await createPortal(request, env);
+      if (request.method === "GET") return json({ portals: await listPortals(env) });
+      return fail(405, "method_not_allowed", `${request.method} not allowed on /api/portals`);
+    }
+
+    const members = /^\/portals\/([^/]+)\/members$/.exec(rest);
+    if (members?.[1]) return await membersHandler(request, env, members[1]);
+
+    const portal = /^\/portals\/([^/]+)$/.exec(rest);
+    if (portal?.[1]) return await portalHandler(request, env, portal[1]);
 
     return fail(404, "not_found", `No such endpoint: ${pathname}`);
   } catch (err) {
@@ -192,6 +209,140 @@ async function getDocHandler(env: Env, id: string): Promise<Response> {
   return json(meta);
 }
 
+// ---------------------------------------------------------------------------
+// Portals
+// ---------------------------------------------------------------------------
+
+async function createPortal(request: Request, env: Env): Promise<Response> {
+  const body = await readJson(request);
+
+  // Validated as given, NOT lowercased first. Silently turning "Has-Caps" into
+  // "has-caps" means the caller later references the name they typed and gets a 404.
+  // Reject and say why.
+  const slug = requireString(body["slug"], "slug").trim();
+  if (!isValidSlug(slug)) {
+    throw new BadRequest(
+      "invalid_slug",
+      `"${slug}" is not a valid portal slug: lowercase letters, digits and hyphens, 2-40 chars, and not a reserved word`,
+    );
+  }
+  if (await getPortal(env, slug)) {
+    throw new BadRequest("portal_exists", `Portal "${slug}" already exists`);
+  }
+
+  const kind = parsePortalKind(body["kind"]);
+  const now = new Date().toISOString();
+
+  const portal: Portal = {
+    slug,
+    name: parseTitle(body["name"] ?? slug),
+    kind,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const description = parseSummary(body["description"]);
+  if (description) portal.description = description;
+
+  await putPortal(env, portal);
+  return json(portal, 201);
+}
+
+async function portalHandler(request: Request, env: Env, slug: string): Promise<Response> {
+  const portal = await getPortal(env, slug);
+  if (!portal) return fail(404, "no_such_portal", `No such portal: ${slug}`);
+
+  if (request.method === "GET") {
+    const [docs, members] = await Promise.all([listDocs(env, slug), getMembers(env, slug)]);
+    return json({ ...portal, docCount: docs.length, memberCount: members.length });
+  }
+
+  if (request.method === "PATCH") {
+    const body = await readJson(request);
+    const updated: Portal = { ...portal, updatedAt: new Date().toISOString() };
+
+    if (body["name"] !== undefined) updated.name = parseTitle(body["name"]);
+    if (body["kind"] !== undefined) updated.kind = parsePortalKind(body["kind"]);
+    if (body["description"] !== undefined) {
+      const description = parseSummary(body["description"]);
+      if (description) updated.description = description;
+      else delete updated.description;
+    }
+
+    await putPortal(env, updated);
+    return json(updated);
+  }
+
+  if (request.method === "DELETE") {
+    return await deletePortalHandler(request, env, portal);
+  }
+
+  return fail(405, "method_not_allowed", `${request.method} not allowed on /api/portals/${slug}`);
+}
+
+/**
+ * Deleting a portal deletes a client's entire history. Make that impossible to do by
+ * accident: it refuses on a non-empty portal unless the caller says `?cascade=true`, and
+ * the error says exactly how many documents it is about to destroy.
+ */
+async function deletePortalHandler(request: Request, env: Env, portal: Portal): Promise<Response> {
+  const cascade = new URL(request.url).searchParams.get("cascade") === "true";
+  const docs = await listDocs(env, portal.slug);
+
+  if (docs.length > 0 && !cascade) {
+    return fail(
+      409,
+      "portal_not_empty",
+      `Portal "${portal.slug}" holds ${docs.length} document(s). Deleting it deletes them too. Re-send with ?cascade=true.`,
+    );
+  }
+
+  for (const summary of docs) {
+    const meta = await getMeta(env, summary.id);
+    if (meta) await deleteDoc(env, meta);
+  }
+  await deletePortal(env, portal.slug);
+
+  return json({ ok: true, deleted: docs.length });
+}
+
+// ---------------------------------------------------------------------------
+// Members — the payoff of the whole data model
+// ---------------------------------------------------------------------------
+
+async function membersHandler(request: Request, env: Env, slug: string): Promise<Response> {
+  const portal = await getPortal(env, slug);
+  if (!portal) return fail(404, "no_such_portal", `No such portal: ${slug}`);
+
+  if (request.method === "GET") {
+    return json({ members: await getMembers(env, slug) });
+  }
+
+  // ⭐ One call adds a person to every document this client has ever received. That is
+  // the entire reason permissions live on the portal rather than the document.
+  if (request.method === "PUT") {
+    const body = await readJson(request);
+    const emails = parseEmailList(body["emails"], "emails");
+    await putMembers(env, slug, emails ?? []);
+    return json({ members: await getMembers(env, slug) });
+  }
+
+  if (request.method === "POST") {
+    const body = await readJson(request);
+    const add = parseEmailList(body["add"], "add") ?? [];
+    const remove = new Set(parseEmailList(body["remove"], "remove") ?? []);
+
+    const current = await getMembers(env, slug);
+    const next = [...new Set([...current, ...add])].filter((email) => !remove.has(email));
+
+    await putMembers(env, slug, next);
+    return json({ members: await getMembers(env, slug) });
+  }
+
+  return fail(405, "method_not_allowed", `${request.method} not allowed on this endpoint`);
+}
+
+// ---------------------------------------------------------------------------
+
 /**
  * Which portal does this document go in?
  *
@@ -283,6 +434,49 @@ function publishResult(meta: DocMeta, base: string) {
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
+
+async function readJson(request: Request): Promise<Record<string, unknown>> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    throw new BadRequest("invalid_json", "Request body is not valid JSON");
+  }
+  if (!isRecord(body)) throw new BadRequest("invalid_body", "Request body must be an object");
+  return body;
+}
+
+const PORTAL_KINDS: readonly PortalKind[] = ["private", "restricted", "public"];
+
+function parsePortalKind(value: unknown): PortalKind {
+  if (value === undefined) return "private";
+  if (typeof value !== "string" || !PORTAL_KINDS.includes(value as PortalKind)) {
+    throw new BadRequest("invalid_field", `"kind" must be one of: ${PORTAL_KINDS.join(", ")}`);
+  }
+  return value as PortalKind;
+}
+
+/** Same 100-email DoS bound as an extraEmails list. */
+function parseEmailList(value: unknown, field: string): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new BadRequest("invalid_field", `"${field}" must be an array`);
+  if (value.length > MAX_EXTRA_EMAILS) {
+    throw new BadRequest("invalid_field", `"${field}" exceeds ${MAX_EXTRA_EMAILS} entries`);
+  }
+
+  const emails = value.map((email) => {
+    if (typeof email !== "string") {
+      throw new BadRequest("invalid_field", `"${field}" must be strings`);
+    }
+    const normalized = normalizeEmail(email);
+    if (!normalized.includes("@")) {
+      throw new BadRequest("invalid_field", `"${email}" is not an email address`);
+    }
+    return normalized;
+  });
+
+  return [...new Set(emails)];
+}
 
 /**
  * Every document carries the owner. A blank `OWNER_EMAIL` would publish documents
