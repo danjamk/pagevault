@@ -12,6 +12,7 @@ import {
   readDocument,
   resolvePortal,
   searchPortal,
+  updatePortalMembers,
 } from "./documents.js";
 import type { Env } from "./env.js";
 import {
@@ -19,15 +20,12 @@ import {
   type Portal,
   deleteDoc,
   deletePublicToken,
-  getMembers,
   getMeta,
   getPortal,
   isValidSlug,
   listDocs,
   listPortals,
   mintPublicToken,
-  normalizeEmail,
-  putMembers,
   putMeta,
   putPortal,
   putPublicToken,
@@ -215,28 +213,22 @@ function buildServer(env: Env): McpServer {
     async (args) => {
       try {
         const portal = await resolvePortal(env, args.portal);
-        const current = await getMembers(env, portal.slug);
+        // Shared with the console's /api endpoint, so the Access group sync (#20) is done the
+        // same way on both paths. Removal is not synced here — freeing a seat is the
+        // reconciler's job (ADR-002).
+        const result = await updatePortalMembers(env, portal.slug, args.add ?? [], args.remove ?? []);
 
-        const add = (args.add ?? []).map(normalizeEmail);
-        const remove = new Set((args.remove ?? []).map(normalizeEmail));
-        const next = [...new Set([...current, ...add])].filter((email) => !remove.has(email));
-
-        await putMembers(env, portal.slug, next);
-        const members = await getMembers(env, portal.slug);
-
-        // Admit added members to the viewer group. Removal is deliberately NOT synced here:
-        // the hot path is additive, and freeing a seat is the reconciler's job (ADR-002).
-        const syncNote = add.length > 0 ? groupSyncNote(await syncGroupMembers(env, add)) : [];
+        const syncNote = result.added.length > 0 ? groupSyncNote(result.sync) : [];
         const removeNote =
-          remove.size > 0
+          result.removed.length > 0
             ? ["", "Note: removed members keep Access admission (and their seat) until 'sync-access' reconciles."]
             : [];
 
         return text(
           [
-            members.length === 0
+            result.members.length === 0
               ? `Portal "${portal.slug}" now has no members.`
-              : `Portal "${portal.slug}" members (${members.length}):\n${members.map((m) => `  ${m}`).join("\n")}`,
+              : `Portal "${portal.slug}" members (${result.members.length}):\n${result.members.map((m) => `  ${m}`).join("\n")}`,
             ...syncNote,
             ...removeNote,
           ].join("\n"),

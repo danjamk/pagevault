@@ -1,3 +1,4 @@
+import { type GroupSyncResult, syncGroupMembers } from "./access-group.js";
 import type { Env } from "./env.js";
 import {
   DEFAULT_PORTAL,
@@ -6,6 +7,7 @@ import {
   type Portal,
   type SourceKind,
   getDoc,
+  getMembers,
   getMeta,
   getPortal,
   isValidSlug,
@@ -16,6 +18,7 @@ import {
   mintPublicToken,
   normalizeEmail,
   putDoc,
+  putMembers,
   putPortal,
   putPublicToken,
 } from "./store.js";
@@ -336,6 +339,45 @@ export async function searchPortal(
   }
 
   return hits;
+}
+
+export interface MemberUpdate {
+  /** The portal's membership after the change. */
+  members: string[];
+  /** Emails that were not already members (the ones synced to the Access group). */
+  added: string[];
+  /** Emails that were members and are now removed. */
+  removed: string[];
+  /** Whether the added emails reached the Access group. */
+  sync: GroupSyncResult;
+}
+
+/**
+ * Add and/or remove portal members, and admit the added ones to the Access group.
+ *
+ * The single place membership changes: both the MCP `update_portal_members` tool and the
+ * console's `/api` endpoint call this, so the group sync (#20) cannot be forgotten on one
+ * path and present on the other. Removal is deliberately not synced — the hot path is
+ * additive; freeing a seat is the reconciler's job (ADR-002).
+ */
+export async function updatePortalMembers(
+  env: Env,
+  slug: string,
+  add: string[],
+  remove: string[],
+): Promise<MemberUpdate> {
+  const current = await getMembers(env, slug);
+  const addNorm = add.map(normalizeEmail).filter(Boolean);
+  const removeSet = new Set(remove.map(normalizeEmail).filter(Boolean));
+
+  const next = [...new Set([...current, ...addNorm])].filter((email) => !removeSet.has(email));
+  await putMembers(env, slug, next);
+
+  const added = addNorm.filter((email) => !current.includes(email));
+  const removed = current.filter((email) => removeSet.has(email));
+  const sync = added.length > 0 ? await syncGroupMembers(env, added) : { status: "noop" as const };
+
+  return { members: next, added, removed, sync };
 }
 
 // ---------------------------------------------------------------------------

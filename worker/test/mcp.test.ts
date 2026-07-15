@@ -1,5 +1,6 @@
 import { SELF, env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { mintSession } from "../src/session.js";
 import { putMembers, putPortal } from "../src/store.js";
 
 /**
@@ -71,6 +72,13 @@ describe("🔴 /mcp — auth", () => {
 
   it("401s with the wrong bearer token", async () => {
     expect((await rpc("tools/list", {}, "not-the-token")).status).toBe(401);
+  });
+
+  it("🔴 401s with a console session token — /mcp is API-token-only (ADR-004)", async () => {
+    // Session tokens authenticate the console against /api. They must NOT reach /mcp, or a
+    // token minted for a browser page becomes an agent credential. Surface isolation.
+    const session = await mintSession(env, "owner@example.com");
+    expect((await rpc("tools/list", {}, session!)).status).toBe(401);
   });
 });
 
