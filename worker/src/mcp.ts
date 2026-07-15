@@ -94,7 +94,15 @@ function buildServer(env: Env): McpServer {
     ].join("\n"),
     {
       title: z.string().describe("Human-readable title. Also the update key within a portal."),
-      html: z.string().describe("The complete, self-contained HTML document. Inline all CSS and JS."),
+      html: z
+        .string()
+        .describe(
+          "The complete, self-contained HTML document. Inline all CSS and JS, and embed " +
+            "images as data: URIs — PageVault stores only this one HTML blob and hosts no " +
+            "separate assets. An external https:// image loads, but it adds a live dependency " +
+            "and phones home: for a private document the third-party host learns who opened it " +
+            "and when. Embed to stay self-contained. Ceiling is ~25 MiB per document.",
+        ),
       portal: z.string().optional().describe("Portal slug. Omit to use the only/default portal."),
       summary: z.string().optional().describe("One line, shown in the portal index."),
       tags: z.array(z.string()).optional(),
