@@ -356,6 +356,8 @@ const generated = template
   .replace(/"PUBLIC_HOST": ""/, `"PUBLIC_HOST": "${host}"`)
   .replace(/"CF_ACCESS_AUD_DOCS": ""/, `"CF_ACCESS_AUD_DOCS": "${audDocs}"`)
   .replace(/"CF_ACCESS_AUD_ADMIN": ""/, `"CF_ACCESS_AUD_ADMIN": "${audAdmin}"`)
+  .replace(/"CF_ACCOUNT_ID": ""/, `"CF_ACCOUNT_ID": "${account.id}"`)
+  .replace(/"CF_ACCESS_GROUP_ID": ""/, `"CF_ACCESS_GROUP_ID": "${group.id}"`)
   .replace(
     /"observability": \{/,
     `"routes": [{ "pattern": "${host}", "custom_domain": true }],\n\n  "observability": {`,
@@ -363,7 +365,7 @@ const generated = template
 
 // A generated file that silently failed to substitute would deploy a Worker with no KV and
 // no audiences, and the failure would surface as "nothing works" rather than as an error.
-for (const [key, value] of Object.entries({ kv: kv.id, team, host, audDocs, audAdmin })) {
+for (const [key, value] of Object.entries({ kv: kv.id, team, host, audDocs, audAdmin, accountId: account.id, groupId: group.id })) {
   if (!generated.includes(value)) die(`Failed to write ${key} into ${CONFIG_OUT}. Did the template change?`);
 }
 

@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createMcpHandler } from "agents/mcp";
 import { z } from "zod";
+import { type GroupSyncResult, syncGroupMembers } from "./access-group.js";
 import { isAuthorized } from "./auth.js";
 import {
   BadRequest,
@@ -129,6 +130,12 @@ function buildServer(env: Env): McpServer {
           confirm: args.confirm,
         });
 
+        // Admit any newly granted emails to the viewer group, or Access blocks them at the
+        // door before canView() ever runs (ADR-002 hot path). KV already holds the grant;
+        // this is the second, derived source of truth.
+        const syncNote =
+          args.emails && args.emails.length > 0 ? groupSyncNote(await syncGroupMembers(env, args.emails)) : [];
+
         const base = baseUrl(env);
         return text(
           [
@@ -138,6 +145,7 @@ function buildServer(env: Env): McpServer {
             ...(meta.ownerOnly ? ["Draft:  owner-only. The client cannot see this."] : []),
             ...(meta.extraEmails ? [`Shared: ${meta.extraEmails.join(", ")}`] : []),
             ...(created ? [] : ["", "Anyone holding the existing link now sees the new version."]),
+            ...syncNote,
           ].join("\n"),
         );
       } catch (err) {
@@ -216,10 +224,22 @@ function buildServer(env: Env): McpServer {
         await putMembers(env, portal.slug, next);
         const members = await getMembers(env, portal.slug);
 
+        // Admit added members to the viewer group. Removal is deliberately NOT synced here:
+        // the hot path is additive, and freeing a seat is the reconciler's job (ADR-002).
+        const syncNote = add.length > 0 ? groupSyncNote(await syncGroupMembers(env, add)) : [];
+        const removeNote =
+          remove.size > 0
+            ? ["", "Note: removed members keep Access admission (and their seat) until 'sync-access' reconciles."]
+            : [];
+
         return text(
-          members.length === 0
-            ? `Portal "${portal.slug}" now has no members.`
-            : `Portal "${portal.slug}" members (${members.length}):\n${members.map((m) => `  ${m}`).join("\n")}`,
+          [
+            members.length === 0
+              ? `Portal "${portal.slug}" now has no members.`
+              : `Portal "${portal.slug}" members (${members.length}):\n${members.map((m) => `  ${m}`).join("\n")}`,
+            ...syncNote,
+            ...removeNote,
+          ].join("\n"),
         );
       } catch (err) {
         return toolError(err);
@@ -449,4 +469,33 @@ function toolError(err: unknown) {
   if (err instanceof BadRequest) return text(`Error (${err.code}): ${err.message}`, true);
   if (err instanceof Misconfigured) return text(`Deployment error (${err.code}): ${err.message}`, true);
   return text(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`, true);
+}
+
+/**
+ * Turn an Access-group sync into status lines for the tool response. The grant is already
+ * in KV; this says whether Cloudflare Access will actually admit the person — so a Tier-0
+ * or failed sync is never quietly presented as success (ADR-002).
+ *
+ * `synced`/`noop` add nothing: the tool's own "Shared:" / member-list lines already say who
+ * has access, and Access will admit them. Only the cases that DON'T work get loud.
+ */
+function groupSyncNote(result: GroupSyncResult): string[] {
+  switch (result.status) {
+    case "synced":
+    case "noop":
+      return [];
+    case "not_configured":
+      return [
+        "",
+        "⚠️ Email-secured access is not enabled (no portals tier). The people above are",
+        "recorded, but Cloudflare Access will not admit them yet. Enable portals, or share a",
+        "public link instead.",
+      ];
+    case "failed":
+      return [
+        "",
+        `⚠️ Recorded, but admitting them to Access failed: ${result.error}`,
+        "They cannot open it until this is retried or reconciled.",
+      ];
+  }
 }

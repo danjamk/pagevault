@@ -352,3 +352,44 @@ describe("portal and member tools", () => {
     expect(await env.PAGEVAULT.get(`doc:${id}`)).toBeNull();
   });
 });
+
+describe("🔴 email grants sync to the Access group (ADR-002 hot path)", () => {
+  // The test env has empty CF_ACCOUNT_ID / CF_ACCESS_GROUP_ID, so the sync is `not_configured`
+  // and makes no network call — the Tier-0 shape. We assert the wiring surfaces that, loudly,
+  // because a grant that KV accepts but Access silently blocks is the exact bug #20 fixes.
+
+  it("publish_document with emails says loudly that Access will not admit them in Tier 0", async () => {
+    const out = await callTool("publish_document", {
+      title: "Board Deck",
+      html: "<h1>x</h1>",
+      emails: ["cfo@acme.com"],
+    });
+
+    expect(out).toContain("Shared: cfo@acme.com");
+    expect(out).toContain("Email-secured access is not enabled");
+  });
+
+  it("publish_document with NO emails never mentions Access admission", async () => {
+    const out = await callTool("publish_document", { title: "Memo", html: "<h1>x</h1>" });
+    expect(out).not.toContain("Email-secured access is not enabled");
+  });
+
+  it("update_portal_members add warns that the new member will not be admitted in Tier 0", async () => {
+    await seedPortals();
+
+    const out = await callTool("update_portal_members", { portal: "realplus", add: ["newhire@realplus.com"] });
+
+    expect(out).toContain("newhire@realplus.com");
+    expect(out).toContain("Email-secured access is not enabled");
+  });
+
+  it("update_portal_members remove notes that the seat persists until reconcile", async () => {
+    await seedPortals();
+
+    const out = await callTool("update_portal_members", { portal: "realplus", remove: ["cto@realplus.com"] });
+
+    expect(out).toContain("until 'sync-access' reconciles");
+    // Removal is not the hot path — it must not claim an Access sync happened.
+    expect(out).not.toContain("Email-secured access is not enabled");
+  });
+});
