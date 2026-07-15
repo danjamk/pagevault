@@ -1,5 +1,5 @@
 import type { Env } from "./env.js";
-import { timingSafeEqual } from "./auth.js";
+import { resetTokenKeyCache, signPayload, verifyPayload } from "./token.js";
 
 /**
  * A capability token: proof that the bearer was authorized to view ONE document,
@@ -27,62 +27,13 @@ export interface Capability {
 /** Minutes, not hours. The shell re-mints on reload; nothing depends on a long life. */
 const TTL_SECONDS = 10 * 60;
 
-/**
- * Derived from `PAGEVAULT_API_TOKEN` rather than being a secret of its own.
- *
- * One fewer thing in the runbook, and no security loss: the derivation is one-way, so
- * a leaked capability token cannot be walked back to the API token. Rotating the API
- * token invalidates outstanding capabilities, which is correct and costs nothing given
- * the ten-minute lifetime.
- */
+/** Its own derived key (see token.ts) — a viewer token is not a console session. */
 const KEY_INFO = "pagevault:capability:v1";
 
-let keyCache: { token: string; key: CryptoKey } | null = null;
-
-async function signingKey(env: Env): Promise<CryptoKey | null> {
-  const token = env.PAGEVAULT_API_TOKEN;
-  if (!token) return null; // no token, no capabilities. Fail closed.
-
-  if (keyCache?.token === token) return keyCache.key;
-
-  const encoder = new TextEncoder();
-  const base = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(token),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-  const derived = await crypto.subtle.sign("HMAC", base, encoder.encode(KEY_INFO));
-
-  const key = await crypto.subtle.importKey(
-    "raw",
-    derived,
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  );
-
-  keyCache = { token, key };
-  return key;
-}
-
-/** Test seam — the derived key is cached against the token that produced it. */
+/** Test seam — clears the shared derived-key cache. */
 export function resetCapabilityKeyCache(): void {
-  keyCache = null;
+  resetTokenKeyCache();
 }
-
-const b64urlEncode = (bytes: Uint8Array): string => {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-};
-
-const b64urlDecode = (value: string): Uint8Array => {
-  const padded = value.replaceAll("-", "+").replaceAll("_", "/");
-  const binary = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
-  return Uint8Array.from(binary, (c) => c.charCodeAt(0));
-};
 
 /** `{payload}.{signature}`, both base64url. */
 export async function mintCapability(
@@ -91,16 +42,8 @@ export async function mintCapability(
   sub: string | null,
   nowSeconds = Math.floor(Date.now() / 1000),
 ): Promise<string | null> {
-  const key = await signingKey(env);
-  if (!key) return null;
-
   const cap: Capability = { scope: "viewer", doc, sub, exp: nowSeconds + TTL_SECONDS };
-
-  const encoder = new TextEncoder();
-  const payload = b64urlEncode(encoder.encode(JSON.stringify(cap)));
-  const signature = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
-
-  return `${payload}.${b64urlEncode(new Uint8Array(signature))}`;
+  return signPayload(env, KEY_INFO, cap);
 }
 
 /**
@@ -117,30 +60,8 @@ export async function verifyCapability(
   expectedDoc: string,
   nowSeconds = Math.floor(Date.now() / 1000),
 ): Promise<Capability | null> {
-  if (!token) return null;
-
-  const key = await signingKey(env);
-  if (!key) return null;
-
-  const dot = token.indexOf(".");
-  if (dot <= 0) return null;
-
-  const payload = token.slice(0, dot);
-  const signature = token.slice(dot + 1);
-
-  const encoder = new TextEncoder();
-  const expected = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
-
-  // Constant-time. A byte-by-byte compare here leaks the signature one character at a
-  // time to anyone willing to time the responses.
-  if (!timingSafeEqual(signature, b64urlEncode(new Uint8Array(expected)))) return null;
-
-  let cap: Capability;
-  try {
-    cap = JSON.parse(new TextDecoder().decode(b64urlDecode(payload))) as Capability;
-  } catch {
-    return null;
-  }
+  const cap = await verifyPayload<Capability>(env, KEY_INFO, token);
+  if (!cap) return null;
 
   if (cap.scope !== "viewer") return null;
   if (cap.doc !== expectedDoc) return null; // a capability for doc A does not open doc B

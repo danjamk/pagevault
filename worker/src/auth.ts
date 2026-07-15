@@ -23,10 +23,17 @@ export type Audience = "docs" | "admin";
  * and honouring it would turn every state-changing endpoint into a CSRF target
  * reachable from any artifact we serve. See ADR-004.
  */
-export function isAuthorized(request: Request, env: Env): boolean {
+/** The bearer token from the `Authorization` header, or null if absent/malformed. */
+export function bearerToken(request: Request): string | null {
   const header = request.headers.get("Authorization");
-  if (!header?.startsWith("Bearer ")) return false;
-  return timingSafeEqual(header.slice("Bearer ".length), env.PAGEVAULT_API_TOKEN);
+  if (!header?.startsWith("Bearer ")) return null;
+  return header.slice("Bearer ".length);
+}
+
+export function isAuthorized(request: Request, env: Env): boolean {
+  const token = bearerToken(request);
+  if (token === null) return false;
+  return timingSafeEqual(token, env.PAGEVAULT_API_TOKEN);
 }
 
 /**

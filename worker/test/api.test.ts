@@ -1,7 +1,8 @@
 import { SELF, createExecutionContext, env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index.js";
-import { type Portal, putPortal } from "../src/store.js";
+import { mintSession } from "../src/session.js";
+import { type Portal, putMembers, putPortal } from "../src/store.js";
 
 const TOKEN = "test-token-do-not-use-in-production";
 const HOST = "https://share.example.com";
@@ -85,6 +86,107 @@ describe("auth", () => {
       headers: { Cookie: `CF_Authorization=${TOKEN}` },
     });
     expect(res.status).toBe(401);
+  });
+});
+
+describe("🔴 /api — console session tokens (ADR-004)", () => {
+  it("accepts a valid session token as a second bearer credential", async () => {
+    const session = await mintSession(env, "owner@example.com");
+    const res = await SELF.fetch(`${HOST}/api/docs`, {
+      headers: { Authorization: `Bearer ${session}` },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects an expired session token", async () => {
+    const stale = await mintSession(env, "owner@example.com", Math.floor(Date.now() / 1000) - 1000);
+    const res = await SELF.fetch(`${HOST}/api/docs`, {
+      headers: { Authorization: `Bearer ${stale}` },
+    });
+    expect(res.status).toBe(401);
+  });
+});
+
+describe("PATCH /api/docs/{id} — the console visibility toggle (#5)", () => {
+  async function createDoc(): Promise<string> {
+    const res = await publish(aDoc());
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  const patch = (id: string, body: unknown, headers = auth()) =>
+    SELF.fetch(`${HOST}/api/docs/${id}`, {
+      method: "PATCH",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("toggles ownerOnly and reflects it on read", async () => {
+    const id = await createDoc();
+
+    const res = await patch(id, { ownerOnly: true });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ownerOnly: true });
+
+    const after = await SELF.fetch(`${HOST}/api/docs/${id}`, { headers: auth() });
+    expect(await after.json()).toMatchObject({ ownerOnly: true });
+  });
+
+  it("rejects a non-boolean ownerOnly with 400", async () => {
+    const id = await createDoc();
+    expect((await patch(id, { ownerOnly: "yes" })).status).toBe(400);
+  });
+
+  it("404s on a missing document", async () => {
+    expect((await patch("nosuchdoc", { ownerOnly: true })).status).toBe(404);
+  });
+
+  it("a console session token can toggle visibility", async () => {
+    const id = await createDoc();
+    const session = await mintSession(env, "owner@example.com");
+    expect((await patch(id, { ownerOnly: true }, { Authorization: `Bearer ${session}` })).status).toBe(200);
+  });
+});
+
+describe("PATCH/GET /api/portals/{slug} — member management (#5 console)", () => {
+  const members = (body: unknown) => (body as { members: string[] }).members;
+
+  const patchPortal = (slug: string, body: unknown) =>
+    SELF.fetch(`${HOST}/api/portals/${slug}`, {
+      method: "PATCH",
+      headers: { ...auth(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("GET returns the member list, not just a count", async () => {
+    await putPortal(env, portal("realplus"));
+    await putMembers(env, "realplus", ["cto@realplus.com"]);
+
+    const body = await (await SELF.fetch(`${HOST}/api/portals/realplus`, { headers: auth() })).json();
+    expect(members(body)).toEqual(["cto@realplus.com"]);
+    expect((body as { memberCount: number }).memberCount).toBe(1);
+  });
+
+  it("adds a member via addMembers", async () => {
+    await putPortal(env, portal("realplus"));
+    const res = await patchPortal("realplus", { addMembers: ["newhire@realplus.com"] });
+    expect(res.status).toBe(200);
+    expect(members(await res.json())).toContain("newhire@realplus.com");
+  });
+
+  it("removes a member via removeMembers", async () => {
+    await putPortal(env, portal("realplus"));
+    await putMembers(env, "realplus", ["a@x.com", "b@x.com"]);
+
+    const res = await patchPortal("realplus", { removeMembers: ["a@x.com"] });
+    expect(members(await res.json())).toEqual(["b@x.com"]);
+  });
+
+  it("stores the member even when the group sync is unavailable (Tier 0)", async () => {
+    // No CF ids in the test env -> not_configured, but KV stays authoritative (ADR-002).
+    await putPortal(env, portal("realplus"));
+    const body = await (await patchPortal("realplus", { addMembers: ["x@x.com"] })).json();
+    expect((body as { sync?: string }).sync).toBe("not_configured");
+    expect(members(body)).toContain("x@x.com");
   });
 });
 

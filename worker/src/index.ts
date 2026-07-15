@@ -1,4 +1,5 @@
 import { handleApi, json } from "./api.js";
+import { handleConsole } from "./console.js";
 import type { Env } from "./env.js";
 import { handleMcp } from "./mcp.js";
 import { handlePortalRoute, handlePublicPortalRoute } from "./portal.js";
@@ -76,7 +77,7 @@ export default {
 
     // Access app B. Owner only. (#5)
     if (pathname === "/admin" || pathname.startsWith("/admin/")) {
-      return notImplemented("admin");
+      return handleConsole(request, env);
     }
 
     return json({ error: "Not found", code: "not_found" }, 404);
@@ -113,7 +114,3 @@ async function handlePublicToken(env: Env, token: string): Promise<Response> {
 }
 
 const notFound = () => new Response("Not found", { status: 404 });
-
-function notImplemented(surface: string): Response {
-  return json({ error: `Not implemented: ${surface}`, code: "not_implemented" }, 501);
-}

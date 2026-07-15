@@ -1,5 +1,6 @@
-import { isAuthorized } from "./auth.js";
+import { bearerToken, isAuthorized } from "./auth.js";
 import { originAllowed } from "./capability.js";
+import { verifySession } from "./session.js";
 import {
   BadRequest,
   Conflict,
@@ -12,6 +13,7 @@ import {
   parseTitle,
   publishDocument,
   requireString,
+  updatePortalMembers,
 } from "./documents.js";
 import type { Env } from "./env.js";
 import {
@@ -27,6 +29,7 @@ import {
   listDocs,
   listPortals,
   putMembers,
+  putMeta,
   putPortal,
 } from "./store.js";
 import { logBlocked } from "./viewer.js";
@@ -66,7 +69,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     return fail(403, "forbidden_origin", "Cross-origin request refused");
   }
 
-  if (!isAuthorized(request, env)) {
+  // Two accepted bearer credentials, no cookies (ADR-004): the long-lived PAGEVAULT_API_TOKEN
+  // (CLI, MCP) or a short-lived console session token. Both are owner-scoped, so a boolean is
+  // all we need — the console does everything the token does. /mcp accepts ONLY the API token.
+  const authorized = isAuthorized(request, env) || (await verifySession(env, bearerToken(request))) !== null;
+  if (!authorized) {
     return fail(401, "unauthorized", "Missing or invalid bearer token");
   }
 
@@ -83,6 +90,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     const doc = /^\/docs\/([^/]+)$/.exec(rest);
     if (doc?.[1]) {
       if (request.method === "GET") return await getDocHandler(env, doc[1]);
+      if (request.method === "PATCH") return await patchDocHandler(request, env, doc[1]);
       if (request.method === "DELETE") return await deleteDocHandler(env, doc[1]);
       return fail(405, "method_not_allowed", `${request.method} not allowed on ${pathname}`);
     }
@@ -164,6 +172,27 @@ async function deleteDocHandler(env: Env, id: string): Promise<Response> {
   return json({ ok: true });
 }
 
+/**
+ * Toggle a document's `ownerOnly` (draft) flag — the console's visibility control.
+ *
+ * `putMeta` writes both the meta blob and the key metadata the listing reads, so the
+ * change is reflected everywhere in one write. Only `ownerOnly` is patchable here: title,
+ * body, and grants go through publish (create-or-update) and the group sync respectively.
+ */
+async function patchDocHandler(request: Request, env: Env, id: string): Promise<Response> {
+  const meta = await getMeta(env, id);
+  if (!meta) return fail(404, "not_found", `No such document: ${id}`);
+
+  const body = await readJson(request);
+  if (typeof body["ownerOnly"] !== "boolean") {
+    return fail(400, "invalid_field", `PATCH expects "ownerOnly": boolean`);
+  }
+
+  const next: DocMeta = { ...meta, ownerOnly: body["ownerOnly"], updatedAt: new Date().toISOString() };
+  await putMeta(env, next);
+  return json(next);
+}
+
 // ---------------------------------------------------------------------------
 // Portals
 // ---------------------------------------------------------------------------
@@ -205,23 +234,36 @@ async function portalHandler(request: Request, env: Env, slug: string): Promise<
 
   if (request.method === "GET") {
     const [docs, members] = await Promise.all([listDocs(env, slug), getMembers(env, slug)]);
-    return json({ ...portal, docCount: docs.length, memberCount: members.length });
+    // The console needs the member list to show and remove them, not just a count.
+    return json({ ...portal, docCount: docs.length, memberCount: members.length, members });
   }
 
   if (request.method === "PATCH") {
     const body = await readJson(request);
-    const updated: Portal = { ...portal, updatedAt: new Date().toISOString() };
 
-    if (body["name"] !== undefined) updated.name = parseTitle(body["name"]);
-    if (body["kind"] !== undefined) updated.kind = parsePortalKind(body["kind"]);
-    if (body["description"] !== undefined) {
-      const description = parseSummary(body["description"]);
-      if (description) updated.description = description;
-      else delete updated.description;
+    // Membership goes through the shared service so the Access group stays in sync (#20) —
+    // the same code the MCP tool uses.
+    const add = parseEmails(body["addMembers"], "addMembers") ?? [];
+    const remove = parseEmails(body["removeMembers"], "removeMembers") ?? [];
+    const memberChange = add.length > 0 || remove.length > 0;
+    const memberResult = memberChange ? await updatePortalMembers(env, slug, add, remove) : null;
+
+    // Portal metadata (optional, independent of membership).
+    let updated: Portal = portal;
+    if (body["name"] !== undefined || body["kind"] !== undefined || body["description"] !== undefined) {
+      updated = { ...portal, updatedAt: new Date().toISOString() };
+      if (body["name"] !== undefined) updated.name = parseTitle(body["name"]);
+      if (body["kind"] !== undefined) updated.kind = parsePortalKind(body["kind"]);
+      if (body["description"] !== undefined) {
+        const description = parseSummary(body["description"]);
+        if (description) updated.description = description;
+        else delete updated.description;
+      }
+      await putPortal(env, updated);
     }
 
-    await putPortal(env, updated);
-    return json(updated);
+    const members = memberResult ? memberResult.members : await getMembers(env, slug);
+    return json({ ...updated, members, ...(memberResult ? { sync: memberResult.sync.status } : {}) });
   }
 
   if (request.method === "DELETE") return await deletePortalHandler(request, env, portal);

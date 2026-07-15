@@ -54,11 +54,10 @@ describe("router", () => {
     expect(await res.json()).toEqual({ error: "Not found", code: "not_found" });
   });
 
-  // /api/* (#2), /render + /p/* (#3), and /v/* (#13) are live and have their own suites.
-  // Only the console is still a stub.
-  it("routes /admin to a handler (not yet implemented)", async () => {
+  // /api/* (#2), /render + /p/* (#3), /v/* (#13), and /admin (#5) are all live now.
+  it("403s an unauthenticated /admin — the console is live and identity-gated", async () => {
     const res = await SELF.fetch("https://share.example.com/admin");
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(403);
   });
 
   it("404s an unknown /p/ token rather than 501ing — the route is live", async () => {
