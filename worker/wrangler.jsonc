@@ -32,7 +32,13 @@
     // One AUD per Access application. These are NOT interchangeable — /d must not
     // accept the console's token and vice versa. See ADR-001.
     "CF_ACCESS_AUD_DOCS": "",
-    "CF_ACCESS_AUD_ADMIN": ""
+    "CF_ACCESS_AUD_ADMIN": "",
+
+    // Account + viewer-group ids, so the Worker can add a granted email to the
+    // pagevault-viewers group (ADR-002 hot path). `pagevault init` fills these in.
+    // Empty = email-secured sharing unavailable; grants with emails fail loudly.
+    "CF_ACCOUNT_ID": "",
+    "CF_ACCESS_GROUP_ID": ""
   },
 
   // Secrets (`wrangler secret put`), never in this file:
