@@ -8,10 +8,11 @@
 import { execSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { c, ok, info, warn, die, loadContext, saveContext, isInteractive, wranglerAccount } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, isInteractive, wranglerAccount } from "./context.mjs";
 
 const CONFIG_OUT = "worker/wrangler.generated.jsonc";
 
+loadCloudToken(); // .env.local token → environment, so wrangler targets the right account
 const ctx = loadContext();
 if (!ctx.rung || !ctx.ownerEmail) die("No .pagevault.json yet.", "Run `make setup` first.");
 

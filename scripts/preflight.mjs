@@ -7,13 +7,16 @@
 // It collects every gap in one pass and names the fix, rather than dying on the first.
 //
 import { versions } from "node:process";
-import { c, ok, die, loadContext, saveContext, fromEnv, argValue, wranglerAccount } from "./context.mjs";
+import { c, ok, die, loadContext, saveContext, loadCloudToken, argValue, wranglerAccount } from "./context.mjs";
 
 const API = "https://api.cloudflare.com/client/v4";
 
 const ctx = loadContext();
 const rung = ctx.rung ?? 1;
 const host = ctx.host ?? "";
+// Put any .env.local token into the environment first, so the wrangler whoami below sees
+// it and reports the token's account — not the machine-wide login's.
+const token = loadCloudToken();
 
 console.log(`\n${c.bold("PageVault — preflight")} ${c.dim(`(read-only · rung ${rung})`)}\n`);
 
@@ -82,8 +85,6 @@ if (!acct.ok) {
 
 // --- 3. API token — required at rung 3, optional (but useful) below --------
 
-const token = fromEnv("CF_API_TOKEN");
-
 if (!token) {
   if (rung >= 3) {
     fail("API token", "rung 3 needs CF_API_TOKEN to provision Access",
@@ -143,4 +144,6 @@ const fails = findings.filter((f) => f.level === "fail").length;
 const warns = findings.filter((f) => f.level === "warn").length;
 console.log();
 if (fails) { console.log(`  ${c.red(`${fails} blocker(s)`)}${warns ? `, ${warns} note(s)` : ""}. Fix, then re-run.\n`); process.exit(1); }
-console.log(`  ${c.green("Ready for rung " + rung + ".")}${warns ? ` ${warns} note(s) above.` : ""}  Next: ${c.bold("make deploy")}\n`);
+console.log(`  ${c.green("Ready for rung " + rung + ".")}${warns ? ` ${warns} note(s) above.` : ""}  Next: ${c.bold("make deploy")}`);
+console.log(`  ${c.dim("Not the Cloudflare account you wanted above? Put a token for the right one in .env.local")}`);
+console.log(`  ${c.dim("(see docs/setup/prerequisites.md — 'Targeting a specific account').")}\n`);

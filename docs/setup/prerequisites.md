@@ -60,6 +60,40 @@ Wrangler is Cloudflare's CLI. You don't install it separately — the repo runs 
 
 ---
 
+## Targeting a specific Cloudflare account
+
+`wrangler` deploys to whatever account it is signed into machine-wide — a problem if
+you have more than one (a personal account and a client's, or a throwaway test
+account). `make preflight` **names the account** it will use; if that is not the one
+you want, point the tooling at the right account with an API token.
+
+**1. Create a token** in the *target* account's dashboard →
+[API Tokens](https://dash.cloudflare.com/profile/api-tokens) → *Create Custom Token*.
+For rung 1 (publish) it needs three scopes:
+
+- `Workers Scripts` — Edit
+- `Workers KV Storage` — Edit
+- `Account Settings` — Read
+
+(Rung 3 needs the fuller set below.)
+
+**2. Put it in `.env.local`** at the repo root — gitignored, never committed:
+
+```
+CLOUDFLARE_API_TOKEN=your-token-here
+```
+
+The tooling loads it into the environment before every `wrangler` call, so wrangler
+targets *that* account. **Each clone keeps its own `.env.local`** — which is exactly
+how you run multiple accounts from one machine: one clone per account, each pinned to
+its own. (A shell `export CLOUDFLARE_API_TOKEN=…` works too, for one terminal.)
+
+**3. Re-run `make preflight`** — it should now name the account the token belongs to.
+If it still shows the wrong one, the token isn't being read: check the file is
+`.env.local` at the repo root and the variable is spelled `CLOUDFLARE_API_TOKEN`.
+
+---
+
 ## Rung 2 — put it on your domain
 
 One more thing on top of rung 1.

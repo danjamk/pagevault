@@ -40,6 +40,25 @@ export const loadContext = () =>
 export const saveContext = (ctx) =>
   writeFileSync(CONTEXT_FILE, `${JSON.stringify(ctx, null, 2)}\n`);
 
+/**
+ * Put a Cloudflare API token from .env.local (or the environment) where wrangler will see
+ * it. Our own code reads .env.local, but the `wrangler` subprocesses we spawn only read the
+ * real environment — so a token sitting in .env.local would be silently ignored, and
+ * wrangler would fall back to its machine-wide login (the wrong account). Call this before
+ * anything shells out to wrangler. Returns the token, or undefined.
+ *
+ * This is also the "multiple accounts on one machine" answer: each clone keeps its own
+ * .env.local with its own account's token, and every command in that clone targets it.
+ */
+export function loadCloudToken() {
+  const token = fromEnv("CLOUDFLARE_API_TOKEN") ?? fromEnv("CF_API_TOKEN");
+  if (token) {
+    process.env.CLOUDFLARE_API_TOKEN = token; // wrangler's preferred variable
+    process.env.CF_API_TOKEN = token; // provision.mjs and the CF API helpers
+  }
+  return token;
+}
+
 /** A value from the environment, or from gitignored .env.local. */
 export function fromEnv(key) {
   if (process.env[key]) return process.env[key];

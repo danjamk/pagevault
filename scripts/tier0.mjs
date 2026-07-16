@@ -14,7 +14,7 @@
 //
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { c, ok, info, die, loadContext, saveContext, argValue } from "./context.mjs";
+import { c, ok, info, die, loadContext, saveContext, loadCloudToken, argValue } from "./context.mjs";
 
 const CONFIG_IN = "worker/wrangler.jsonc";
 const CONFIG_OUT = "worker/wrangler.generated.jsonc";
@@ -25,6 +25,7 @@ const findKvId = (text) => text.match(/"id":\s*"([0-9a-f]{32})"/)?.[1];
 
 if (!existsSync(CONFIG_IN)) die(`Can't find ${CONFIG_IN}. Run this from the repo root.`);
 
+loadCloudToken(); // .env.local token → environment, so `wrangler kv namespace create` targets the right account
 const ctx = loadContext();
 if (!ctx.ownerEmail) die("No .pagevault.json yet.", "Run `make setup` first.");
 
