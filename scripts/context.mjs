@@ -59,6 +59,39 @@ export function loadCloudToken() {
   return token;
 }
 
+/**
+ * A Cloudflare API call with the loaded token. Read-only or not — the caller decides via
+ * `init`. Never throws; returns { ok, status, result, errors }. The token is the auth model
+ * now (a per-clone .env.local token, explicit — no ambient wrangler login to guess at).
+ */
+export async function cfApi(path, init = {}) {
+  const token = process.env.CLOUDFLARE_API_TOKEN ?? process.env.CF_API_TOKEN;
+  if (!token) return { ok: false, status: 0, result: null, errors: [{ code: 0, message: "no CF token loaded" }] };
+  try {
+    const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+      ...init,
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(init.headers ?? {}) },
+    });
+    const body = await res.json().catch(() => null);
+    return { ok: res.ok && Boolean(body?.success), status: res.status, result: body?.result, errors: body?.errors ?? [] };
+  } catch (err) {
+    return { ok: false, status: 0, result: null, errors: [{ code: 0, message: String(err) }] };
+  }
+}
+
+/** The accounts this token can reach — [{ name, id }]. Empty if the token is bad or absent. */
+export async function cfAccounts() {
+  const r = await cfApi("/accounts");
+  return r.ok ? (r.result ?? []).map((a) => ({ name: a.name, id: a.id })) : [];
+}
+
+/** Cloudflare's error list, flattened to a line. */
+export const cfErr = (errors = []) => errors.map((e) => `[${e.code}] ${e.message}`).join("; ");
+
+/** A Cloudflare-safe slug: lowercase, alphanumerics and single hyphens. */
+export const slug = (s) =>
+  String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 54) || "pagevault";
+
 /** A value from the environment, or from gitignored .env.local. */
 export function fromEnv(key) {
   if (process.env[key]) return process.env[key];

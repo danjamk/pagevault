@@ -78,7 +78,7 @@ documents carry across untouched.
 
 | Rung | You get | It needs |
 |---|---|---|
-| **1 · Publish** | Deploy, publish HTML, share public `/p/` links | a Cloudflare account (**no card**), Node, `wrangler login` |
+| **1 · Publish** | Deploy, publish HTML, share public `/p/` links | a Cloudflare account (**no card**), Node, an API token |
 | **2 · Your domain** | The same, on `pagevault.you.com` | a domain in that Cloudflare account |
 | **3 · Portals** | Client collections, email-secured access, the owner console | Cloudflare Zero Trust (**needs a card on file**) |
 
@@ -97,11 +97,16 @@ checks them for you before you deploy.
 ```bash
 git clone https://github.com/danjamk/pagevault && cd pagevault
 make setup            # install deps, pick your rung, check your environment
-make login            # log in to Cloudflare (setup tells you if you still need this)
-make preflight        # verify readiness — it names the account it will deploy to
-make deploy           # deploy to a *.workers.dev URL
+# create a Cloudflare API token (setup links you to it + the scopes), then:
+echo 'CLOUDFLARE_API_TOKEN=…' > .env.local
+make preflight        # verify readiness — names the account it will deploy to
+make deploy           # creates KV + a workers.dev subdomain, deploys, sets your bearer token
 make verify           # smoke-test the live deployment
 ```
+
+Auth is a Cloudflare API token in `.env.local` — explicit and per-clone, so a deploy
+can never land in the wrong account. Scopes and the token link are in
+[`docs/setup/prerequisites.md`](docs/setup/prerequisites.md).
 
 Then publish from a chat over MCP (or the CLI), and share the `/p/` link — anyone
 opens it, no login. Locally, `make dev` runs the Worker against Miniflare and

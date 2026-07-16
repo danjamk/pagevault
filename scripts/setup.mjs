@@ -10,7 +10,7 @@
 //
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, versions } from "node:process";
-import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, wranglerAccount } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cfAccounts } from "./context.mjs";
 
 console.log(`\n${c.bold("PageVault — setup")} ${c.dim("(nothing is created)")}\n`);
 
@@ -92,30 +92,37 @@ ok(`Saved to ${c.bold(".pagevault.json")}`);
 // Where does this deploy? NOT the email above — that's who you are in the app. The account
 // comes from your wrangler login. Surface it now (or point a not-logged-in newbie at the one
 // command they need), so the distinction is concrete before preflight.
-loadCloudToken();
-const acct = wranglerAccount();
+const token = loadCloudToken();
 console.log();
-if (!acct.ok || acct.accounts.length === 0) {
-  warn("You're not logged in to Cloudflare yet.");
-  console.log(`  ${c.dim("This is WHERE it deploys — separate from the owner email above.")}`);
-  console.log(`  Log in:  ${c.bold("make login")}   ${c.dim("(runs wrangler under Node 22 for you)")}`);
-  console.log(`  Then:    ${c.bold("make preflight")}\n`);
+if (!token) {
+  warn("No Cloudflare API token yet — that's how PageVault reaches your account.");
+  console.log(`  ${c.dim("This is WHERE it deploys, and it's separate from the owner email above.")}\n`);
+  console.log(`  1. Create a token:  ${c.bold("https://dash.cloudflare.com/profile/api-tokens")}  → Create Custom Token`);
+  console.log(`     ${c.dim("Rung 1: Workers Scripts (Edit), Workers KV Storage (Edit), Account Settings (Read).")}`);
+  console.log(`     ${c.dim("Full progression scopes: docs/setup/prerequisites.md.")}`);
+  console.log(`  2. Save it:          ${c.bold("echo 'CLOUDFLARE_API_TOKEN=…' > .env.local")}   ${c.dim("(gitignored)")}`);
+  console.log(`  3. Then:             ${c.bold("make preflight")}\n`);
 } else {
-  const a = acct.accounts[0];
-  info(`You're logged in to Cloudflare. This is WHERE it deploys (not the email above):`);
-  console.log(
-    `     ${c.bold(a.name)} ${c.dim(a.id)}` +
-      (acct.accounts.length > 1 ? c.dim(`  (+${acct.accounts.length - 1} more — preflight will have you pick)`) : ""),
-  );
-  if (isInteractive()) {
-    const rl2 = createInterface({ input: stdin, output: stdout });
-    const ans = (await rl2.question(`\n  Deploy to that account? [Y/n] `)).trim().toLowerCase();
-    rl2.close();
-    if (ans === "n" || ans === "no") {
-      console.log(`\n  To switch: ${c.bold("make login")} as the right account, or put a token for it in`);
-      console.log(`  ${c.bold(".env.local")} (see docs/setup/prerequisites.md), then re-run ${c.bold("make setup")}.\n`);
-      process.exit(0);
+  const accounts = await cfAccounts();
+  if (accounts.length === 0) {
+    warn("Token is set, but Cloudflare returned no account for it — check the token and its scopes.");
+    console.log(`\n${c.bold("Next:")} ${c.bold("make preflight")} ${c.dim("— it names the exact problem.")}\n`);
+  } else {
+    const a = accounts[0];
+    info(`Token found. This is WHERE it deploys (not the email above):`);
+    console.log(
+      `     ${c.bold(a.name)} ${c.dim(a.id)}` +
+        (accounts.length > 1 ? c.dim(`  (+${accounts.length - 1} more — preflight will have you pick)`) : ""),
+    );
+    if (isInteractive()) {
+      const rl2 = createInterface({ input: stdin, output: stdout });
+      const ans = (await rl2.question(`\n  Deploy to that account? [Y/n] `)).trim().toLowerCase();
+      rl2.close();
+      if (ans === "n" || ans === "no") {
+        console.log(`\n  Put a token for a different account in ${c.bold(".env.local")}, then re-run ${c.bold("make setup")}.\n`);
+        process.exit(0);
+      }
     }
+    console.log(`\n${c.bold("Next:")} ${c.bold("make preflight")}\n`);
   }
-  console.log(`\n${c.bold("Next:")} ${c.bold("make preflight")}\n`);
 }

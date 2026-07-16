@@ -1,45 +1,73 @@
 #!/usr/bin/env node
 //
-// make deploy — generate the config for your rung, deploy the Worker, remember the URL.
-//
-// Rung 1–2 write a Tier-0 config (tier0.mjs); rung 3 provisions Access (provision.mjs).
-// You never pass the tier — it's a fact in .pagevault.json, set by `make setup`.
+// make deploy — verify the account, ensure a workers.dev subdomain, deploy, set the bearer
+// secret, remember the URL. Rung 1–2 write a Tier-0 config (tier0.mjs); rung 3 provisions
+// Access (provision.mjs). You never pass the tier — it's a fact in .pagevault.json. Auth is
+// the .env.local token, which is what lets us do the subdomain and the secret over the API.
 //
 import { execSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
+import { randomBytes } from "node:crypto";
 import { stdin, stdout } from "node:process";
-import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, isInteractive, wranglerAccount } from "./context.mjs";
+import {
+  c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, isInteractive, cfApi, cfAccounts, cfErr, slug,
+} from "./context.mjs";
 
 const CONFIG_OUT = "worker/wrangler.generated.jsonc";
 
-loadCloudToken(); // .env.local token → environment, so wrangler targets the right account
+loadCloudToken();
 const ctx = loadContext();
 if (!ctx.rung || !ctx.ownerEmail) die("No .pagevault.json yet.", "Run `make setup` first.");
 
 console.log(`\n${c.bold("PageVault — deploy")} ${c.dim(`(rung ${ctx.rung})`)}\n`);
 
-// --- 0. 🔴 WHERE are we deploying? Name it, verify it, confirm it. ----------
-//
-// The guard that stops a wrong-account clobber (#32): preflight pins the account; here we
-// refuse if the live wrangler auth can't reach it, and state the target before mutating.
+// --- 0. WHERE? Verify the pinned account, state it, confirm it -------------
 
-const acct = wranglerAccount();
-if (!acct.ok) die("Not signed in to wrangler.", "make login, or put a token in .env.local");
-if (!ctx.accountId) die("No account pinned yet.", "Run `make preflight` first — it names and pins the account.");
-const target = acct.accounts.find((a) => a.id === ctx.accountId);
+const accounts = await cfAccounts();
+if (accounts.length === 0) die("No Cloudflare token, or it reaches no account.", "Run `make preflight` — it names the problem.");
+if (!ctx.accountId) die("No account pinned yet.", "Run `make preflight` first — it pins the account.");
+const target = accounts.find((a) => a.id === ctx.accountId);
 if (!target) {
-  die(
-    `You're signed in as ${acct.email}, which can't reach the pinned account ${ctx.accountId}.`,
-    "Switch accounts (export CLOUDFLARE_API_TOKEN=<that account's token>), or re-pin with `make preflight`.",
-  );
+  die(`Your token reaches ${accounts.map((a) => a.id).join(", ")}, not the pinned ${ctx.accountId}.`,
+    "Use the token for the pinned account, or re-pin with `make preflight`.");
 }
 
-console.log(`  Target: ${c.bold(target.name)} ${c.dim(target.id)}  ${c.dim(`· ${acct.email ?? ""}`)}\n`);
+console.log(`  Target: ${c.bold(target.name)} ${c.dim(target.id)}\n`);
 if (isInteractive()) {
   const rl = createInterface({ input: stdin, output: stdout });
   const ans = (await rl.question(`  Deploy "pagevault" to ${c.bold(target.name)}? [y/N] `)).trim().toLowerCase();
   rl.close();
   if (ans !== "y") die("Cancelled — nothing was deployed.");
+}
+
+// --- 0b. rung 1: a fresh account has no workers.dev subdomain. Register one. -
+
+if (ctx.rung < 2) {
+  const sub = await cfApi(`/accounts/${target.id}/workers/subdomain`);
+  if (sub.result?.subdomain) {
+    ok(`workers.dev subdomain: ${c.dim(sub.result.subdomain)}`);
+  } else {
+    let name = slug(ctx.ownerEmail.split("@")[0]);
+    if (isInteractive()) {
+      const rl = createInterface({ input: stdin, output: stdout });
+      const ans = (
+        await rl.question(
+          `\n  This account has no workers.dev subdomain yet.\n` +
+            `  Register ${c.bold(`${name}.workers.dev`)}?  [Enter to accept · type another name · "n" to cancel] `,
+        )
+      ).trim();
+      rl.close();
+      if (/^n(o)?$/i.test(ans)) die("A workers.dev subdomain is required for rung 1.");
+      if (ans && !/^y(es)?$/i.test(ans)) name = slug(ans);
+    }
+    info(`Registering ${name}.workers.dev…`);
+    const put = await cfApi(`/accounts/${target.id}/workers/subdomain`, {
+      method: "PUT",
+      body: JSON.stringify({ subdomain: name }),
+    });
+    if (!put.ok) die(`Couldn't register "${name}.workers.dev" (${cfErr(put.errors)}).`, "That name may be taken — re-run and pick another.");
+    ok(`Registered ${c.bold(`${name}.workers.dev`)}`);
+  }
 }
 
 // --- 1. Generate the tier-appropriate config -------------------------------
@@ -57,22 +85,22 @@ try {
 info("Deploying the Worker…");
 let out = "";
 try {
-  out = execSync(`npx --yes wrangler@4 deploy --config ${CONFIG_OUT}`, {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  out = execSync(`npx --yes wrangler@4 deploy --config ${CONFIG_OUT}`, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   process.stdout.write(out);
 } catch (err) {
+  const output = `${err.stdout ?? ""}${err.stderr ?? ""}`;
   process.stdout.write(err.stdout ?? "");
   process.stderr.write(err.stderr ?? "");
+  if (/workers\.dev subdomain/i.test(output)) {
+    die("This account still has no workers.dev subdomain.",
+      "Odd — the step above should have registered one. Re-run `make deploy`.");
+  }
   die("Deploy failed — see wrangler's output above.");
 }
 
 // --- 3. Remember where it landed, so `make verify` knows what to test -------
 
-const url =
-  out.match(/https:\/\/[^\s]+\.workers\.dev[^\s]*/)?.[0] ??
-  (ctx.host ? `https://${ctx.host}` : undefined);
+const url = out.match(/https:\/\/[^\s]+\.workers\.dev[^\s]*/)?.[0] ?? (ctx.host ? `https://${ctx.host}` : undefined);
 if (url) {
   saveContext({ ...loadContext(), deployedUrl: url });
   ok(`Live at ${c.bold(url)}`);
@@ -80,25 +108,33 @@ if (url) {
   warn("Deployed, but couldn't read the URL from wrangler's output — check above.");
 }
 
-// --- 4. Is the API token secret set? ---------------------------------------
+// --- 4. The bearer secret — generate and set it over the API ---------------
+//
+// PAGEVAULT_API_TOKEN is what the CLI and MCP server authenticate with (a different token
+// from the Cloudflare one). The token model lets us set it via the API, so there is no
+// `wrangler secret put` step to run by hand in a wrong-Node shell.
 
-let hasSecret = false;
-try {
-  const secrets = JSON.parse(
-    execSync(`npx --yes wrangler@4 secret list --config ${CONFIG_OUT}`, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }),
-  );
-  hasSecret = Array.isArray(secrets) && secrets.some((s) => s.name === "PAGEVAULT_API_TOKEN");
-} catch {
-  // Non-fatal — just means we can't confirm; fall through to the reminder.
-}
+const existing = await cfApi(`/accounts/${target.id}/workers/scripts/pagevault/secrets`);
+const hasSecret = existing.ok && (existing.result ?? []).some((s) => s.name === "PAGEVAULT_API_TOKEN");
 
 console.log();
-if (!hasSecret) {
-  warn("PAGEVAULT_API_TOKEN is not set — the CLI and MCP server can't authenticate yet.");
-  console.log(`  ${c.bold(`npx wrangler secret put PAGEVAULT_API_TOKEN --config ${CONFIG_OUT}`)}\n`);
+if (hasSecret) {
+  ok("PAGEVAULT_API_TOKEN is already set.");
+} else {
+  const value = randomBytes(32).toString("hex");
+  const put = await cfApi(`/accounts/${target.id}/workers/scripts/pagevault/secrets`, {
+    method: "PUT",
+    body: JSON.stringify({ name: "PAGEVAULT_API_TOKEN", text: value, type: "secret_text" }),
+  });
+  if (put.ok) {
+    ok("PAGEVAULT_API_TOKEN set. This is your CLI / MCP bearer — save it, you can't see it again:");
+    console.log(`     ${c.bold(value)}`);
+    console.log(`     ${c.dim("e.g. add PAGEVAULT_API_TOKEN=… to .env.local, and use it as the MCP bearer.")}`);
+  } else {
+    warn(`Couldn't set PAGEVAULT_API_TOKEN automatically (${cfErr(put.errors)}).`);
+    console.log(`  Set it by hand under Node 22: ${c.bold(`npx wrangler secret put PAGEVAULT_API_TOKEN --config ${CONFIG_OUT}`)}`);
+  }
 }
-console.log(`${c.bold("Next:")} ${c.bold("make verify")} ${c.dim("— smoke-test the live deployment.")}`);
+
+console.log(`\n${c.bold("Next:")} ${c.bold("make verify")} ${c.dim("— smoke-test the live deployment.")}`);
 console.log(`  ${c.dim("Then publish a document over MCP and open its /p/ link.")}\n`);

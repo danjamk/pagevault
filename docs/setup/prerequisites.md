@@ -49,14 +49,24 @@ The repo's package manager.
   `corepack enable`. Otherwise <https://pnpm.io/installation>. (`make setup` will
   guide you if it's missing.)
 
-### Wrangler, signed in to your account
+### A Cloudflare API token
 
-Wrangler is Cloudflare's CLI. You don't install it separately — the repo runs it for
-you — but it does need to be **signed in** so it can deploy.
+This is how PageVault reaches your account — at **every** rung. A token is explicit and
+lives per-clone in `.env.local`, so a deploy can never drift to the wrong account the way
+a machine-wide login can. It also lets the tooling do everything over the API: create the
+KV, register your workers.dev subdomain, set your bearer secret — no interactive prompts.
 
-- **Check:** `make preflight` names the account it will use (or "not signed in").
-- **Get it:** `make login` opens a browser to authorize. Use `make login` (not a bare
-  `wrangler login`) — it runs wrangler under Node 22, which wrangler requires.
+Create it at [API Tokens](https://dash.cloudflare.com/profile/api-tokens) → *Create Custom
+Token*. Rung 1 needs three scopes; grant the whole set once so climbing never means
+re-scoping:
+
+**Account** — `Workers Scripts` (Edit) · `Workers KV Storage` (Edit) · `Account Settings`
+(Read)  ← *rung 1*
+plus for rungs 2–3: `Workers Routes` (Edit) · `Access: Apps and Policies` (Edit) ·
+`Access: Organizations, Identity Providers, and Groups` (Edit — *groups hide here, easy to miss*)
+
+- **Save it:** `echo 'CLOUDFLARE_API_TOKEN=…' > .env.local`  (gitignored, never committed)
+- **Check:** `make preflight` verifies the token, names the account, and flags any missing scope.
 
 ---
 
