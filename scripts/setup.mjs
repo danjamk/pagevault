@@ -10,9 +10,9 @@
 //
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, versions } from "node:process";
-import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, wranglerAccount } from "./context.mjs";
 
-console.log(`\n${c.bold("PageVault — setup")} ${c.dim("(local; nothing is created)")}\n`);
+console.log(`\n${c.bold("PageVault — setup")} ${c.dim("(nothing is created)")}\n`);
 
 // --- Sanity: the most basic thing, checked plainly -------------------------
 
@@ -89,4 +89,33 @@ rl.close();
 saveContext({ ...ctx, rung, ownerEmail, host });
 ok(`Saved to ${c.bold(".pagevault.json")}`);
 
-console.log(`\n${c.bold("Next:")} ${c.bold("make preflight")} ${c.dim("— check your Cloudflare account is ready for rung " + rung + ".")}\n`);
+// Where does this deploy? NOT the email above — that's who you are in the app. The account
+// comes from your wrangler login. Surface it now (or point a not-logged-in newbie at the one
+// command they need), so the distinction is concrete before preflight.
+loadCloudToken();
+const acct = wranglerAccount();
+console.log();
+if (!acct.ok || acct.accounts.length === 0) {
+  warn("You're not logged in to Cloudflare yet.");
+  console.log(`  ${c.dim("This is WHERE it deploys — separate from the owner email above.")}`);
+  console.log(`  Log in:  ${c.bold("npx wrangler login")}`);
+  console.log(`  Then:    ${c.bold("make preflight")}\n`);
+} else {
+  const a = acct.accounts[0];
+  info(`You're logged in to Cloudflare. This is WHERE it deploys (not the email above):`);
+  console.log(
+    `     ${c.bold(a.name)} ${c.dim(a.id)}` +
+      (acct.accounts.length > 1 ? c.dim(`  (+${acct.accounts.length - 1} more — preflight will have you pick)`) : ""),
+  );
+  if (isInteractive()) {
+    const rl2 = createInterface({ input: stdin, output: stdout });
+    const ans = (await rl2.question(`\n  Deploy to that account? [Y/n] `)).trim().toLowerCase();
+    rl2.close();
+    if (ans === "n" || ans === "no") {
+      console.log(`\n  To switch: ${c.bold("npx wrangler login")} as the right account, or put a token for it in`);
+      console.log(`  ${c.bold(".env.local")} (see docs/setup/prerequisites.md), then re-run ${c.bold("make setup")}.\n`);
+      process.exit(0);
+    }
+  }
+  console.log(`\n${c.bold("Next:")} ${c.bold("make preflight")}\n`);
+}
