@@ -65,12 +65,15 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
   // requests can leak one client's response data to another. Given what this product
   // stores — one client's confidential deliverables, next to another's — that is an
   // incident, not a bug.
-  const server = buildServer(env);
+  // The host this request arrived on — so a Tier-0 deploy with no PUBLIC_HOST set still
+  // produces working links (see baseUrl). At Tier 1, PUBLIC_HOST overrides it.
+  const origin = new URL(request.url).origin;
+  const server = buildServer(env, origin);
 
   return createMcpHandler(server, { route: "/mcp" })(request, env, ctx);
 }
 
-function buildServer(env: Env): McpServer {
+function buildServer(env: Env, origin: string): McpServer {
   const server = new McpServer({ name: "pagevault", version: "0.1.0" });
 
   // -------------------------------------------------------------------------
@@ -134,7 +137,7 @@ function buildServer(env: Env): McpServer {
         const syncNote =
           args.emails && args.emails.length > 0 ? groupSyncNote(await syncGroupMembers(env, args.emails)) : [];
 
-        const base = baseUrl(env);
+        const base = baseUrl(env, origin);
         return text(
           [
             `${created ? "Published" : "Updated in place"}: ${meta.title}`,
@@ -258,7 +261,7 @@ function buildServer(env: Env): McpServer {
         if (!meta) throw new BadRequest("not_found", `No such document: ${args.id}`);
 
         if (meta.publicToken) {
-          return text(`Already public: ${baseUrl(env)}/p/${meta.publicToken}`);
+          return text(`Already public: ${baseUrl(env, origin)}/p/${meta.publicToken}`);
         }
 
         const token = mintPublicToken();
@@ -268,7 +271,7 @@ function buildServer(env: Env): McpServer {
         return text(
           [
             `Public link for "${meta.title}":`,
-            `  ${baseUrl(env)}/p/${token}`,
+            `  ${baseUrl(env, origin)}/p/${token}`,
             ``,
             `This is a capability URL. Anyone it is forwarded to can open it.`,
           ].join("\n"),
@@ -441,9 +444,12 @@ const describe = (doc: {
     ...(doc.tags?.length ? [`  tags: ${doc.tags.join(", ")}`] : []),
   ].join("\n");
 
-const baseUrl = (env: Env): string => {
+const baseUrl = (env: Env, origin: string): string => {
   const host = env.PUBLIC_HOST?.trim();
-  return host ? `https://${host}` : "http://localhost:8787";
+  // Fall back to the host the MCP request arrived on, not localhost — so a Tier-0 deploy
+  // with no PUBLIC_HOST set still hands out working *.workers.dev links. Mirrors the
+  // fallback in api.ts's baseUrl. See #32.
+  return host ? `https://${host}` : origin;
 };
 
 const text = (body: string, isError = false) => ({
