@@ -24,7 +24,7 @@ console.log(`\n${c.bold("PageVault — deploy")} ${c.dim(`(rung ${ctx.rung})`)}\
 // refuse if the live wrangler auth can't reach it, and state the target before mutating.
 
 const acct = wranglerAccount();
-if (!acct.ok) die("Not signed in to wrangler.", "npx wrangler login, or export CLOUDFLARE_API_TOKEN=…");
+if (!acct.ok) die("Not signed in to wrangler.", "make login, or put a token in .env.local");
 if (!ctx.accountId) die("No account pinned yet.", "Run `make preflight` first — it names and pins the account.");
 const target = acct.accounts.find((a) => a.id === ctx.accountId);
 if (!target) {

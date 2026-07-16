@@ -52,7 +52,7 @@ Number(versions.node.split(".")[0]) >= 22
 
 const acct = wranglerAccount();
 if (!acct.ok) {
-  fail("Wrangler auth", `not signed in (${acct.error})`, "npx wrangler login, or export CLOUDFLARE_API_TOKEN=…");
+  fail("Wrangler auth", `not signed in (${acct.error})`, "make login, or put a token in .env.local");
 } else if (acct.accounts.length === 0) {
   fail("Cloudflare account", `signed in as ${acct.email ?? "?"}, but wrangler reports no accounts`);
 } else {

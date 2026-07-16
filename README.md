@@ -97,7 +97,7 @@ checks them for you before you deploy.
 ```bash
 git clone https://github.com/danjamk/pagevault && cd pagevault
 make setup            # install deps, pick your rung, check your environment
-npx wrangler login    # log in to Cloudflare (setup tells you if you still need this)
+make login            # log in to Cloudflare (setup tells you if you still need this)
 make preflight        # verify readiness — it names the account it will deploy to
 make deploy           # deploy to a *.workers.dev URL
 make verify           # smoke-test the live deployment

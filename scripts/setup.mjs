@@ -98,7 +98,7 @@ console.log();
 if (!acct.ok || acct.accounts.length === 0) {
   warn("You're not logged in to Cloudflare yet.");
   console.log(`  ${c.dim("This is WHERE it deploys — separate from the owner email above.")}`);
-  console.log(`  Log in:  ${c.bold("npx wrangler login")}`);
+  console.log(`  Log in:  ${c.bold("make login")}   ${c.dim("(runs wrangler under Node 22 for you)")}`);
   console.log(`  Then:    ${c.bold("make preflight")}\n`);
 } else {
   const a = acct.accounts[0];
@@ -112,7 +112,7 @@ if (!acct.ok || acct.accounts.length === 0) {
     const ans = (await rl2.question(`\n  Deploy to that account? [Y/n] `)).trim().toLowerCase();
     rl2.close();
     if (ans === "n" || ans === "no") {
-      console.log(`\n  To switch: ${c.bold("npx wrangler login")} as the right account, or put a token for it in`);
+      console.log(`\n  To switch: ${c.bold("make login")} as the right account, or put a token for it in`);
       console.log(`  ${c.bold(".env.local")} (see docs/setup/prerequisites.md), then re-run ${c.bold("make setup")}.\n`);
       process.exit(0);
     }

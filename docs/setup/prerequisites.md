@@ -51,12 +51,12 @@ The repo's package manager.
 
 ### Wrangler, signed in to your account
 
-Wrangler is Cloudflare's CLI. You don't install it separately — the repo runs it via
-`npx` — but it does need to be **signed in** to your account so it can deploy.
+Wrangler is Cloudflare's CLI. You don't install it separately — the repo runs it for
+you — but it does need to be **signed in** so it can deploy.
 
-- **Check:** `npx wrangler whoami` → prints your account, not "not authenticated".
-- **Get it:** `npx wrangler login` opens a browser to authorize. That's the whole
-  step.
+- **Check:** `make preflight` names the account it will use (or "not signed in").
+- **Get it:** `make login` opens a browser to authorize. Use `make login` (not a bare
+  `wrangler login`) — it runs wrangler under Node 22, which wrangler requires.
 
 ---
 
@@ -159,8 +159,10 @@ If you'd rather eyeball it before running anything:
 node --version        # v22+ ?
 git --version         # present ?
 pnpm --version        # present ?
-npx wrangler whoami   # signed in to the right account ?
 ```
+
+(For Cloudflare, let `make preflight` name your account rather than a bare
+`wrangler whoami` — wrangler needs Node 22, which the `make` targets select for you.)
 
 Then let the tooling do the rest: `make setup` gets the repo ready, and
 `make preflight` verifies your Cloudflare account and token before you spend a

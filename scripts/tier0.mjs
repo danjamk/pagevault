@@ -54,11 +54,11 @@ else {
     die("Couldn't create the KV namespace automatically.", [
       c.dim(String(err.message ?? err).split("\n")[0]),
       "",
-      "This needs Node 22 and a signed-in wrangler. Either run `make deploy` (which uses the",
-      "right Node), or do it by hand and re-run:",
+      "This needs Node 22 and a signed-in wrangler. Easiest: `make login` then `make deploy`",
+      "(both select the right Node). Or, under Node 22 yourself:",
       "",
-      `  ${c.bold("npx wrangler login")}`,
-      `  ${c.bold("npx wrangler kv namespace create PAGEVAULT")}`,
+      `  ${c.bold("make login")}`,
+      `  ${c.bold("npx wrangler kv namespace create PAGEVAULT")}   ${c.dim("(needs Node 22)")}`,
       `  ${c.bold("node scripts/tier0.mjs --kv <id>")}`,
     ]);
   }

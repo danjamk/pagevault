@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install setup preflight dev demo test test-security check-sandbox check provision deploy verify destroy logs
+.PHONY: help install setup login logout preflight dev demo test test-security check-sandbox check provision deploy verify destroy logs
 
 # Written by `make provision`. Gitignored — it holds your email, team name, AUD tags and
 # KV id, and this is a public repo.
@@ -23,6 +23,12 @@ setup: install ## Decide your rung and get the repo ready (local; nothing create
 		echo "→ created worker/.dev.vars from the example (gitignored)"; \
 	fi
 	@$(NVM) && node scripts/setup.mjs
+
+login: ## Log in to Cloudflare (opens a browser), under the right Node
+	@$(NVM) && npx wrangler login
+
+logout: ## Log out of Cloudflare — for a clean, newbie-style test
+	@$(NVM) && npx wrangler logout
 
 dev: ## Run the Worker locally against Miniflare KV
 	@if [ ! -f worker/.dev.vars ]; then \
