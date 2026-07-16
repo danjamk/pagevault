@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>PageVault — Architecture</title>
+<style>
+  :root {
+    --base: #0E0F13;
+    --raised: #16181D;
+    --overlay: #1D2027;
+    --border: #292D36;
+    --text: #E7E9EE;
+    --muted: #9AA0AD;
+    --faint: #6B7280;
+
+    /* categorical (CVD-validated) — bright on dark */
+    --c-op:  #F59E0B;   /* you / publish */
+    --c-vw:  #22D3EE;   /* viewer / access */
+    --c-inf: #A78BFA;   /* Cloudflare infra */
+    --c-op-sub:  color-mix(in srgb, var(--c-op) 15%, var(--base));
+    --c-vw-sub:  color-mix(in srgb, var(--c-vw) 15%, var(--base));
+    --c-inf-sub: color-mix(in srgb, var(--c-inf) 15%, var(--base));
+    --c-op-bd:  color-mix(in srgb, var(--c-op) 42%, var(--border));
+    --c-vw-bd:  color-mix(in srgb, var(--c-vw) 42%, var(--border));
+    --c-inf-bd: color-mix(in srgb, var(--c-inf) 42%, var(--border));
+
+    --allow: #3FB950;
+    --allow-subtle: color-mix(in srgb, var(--allow) 15%, var(--base));
+    --deny: #F0685A;
+    --deny-subtle: color-mix(in srgb, var(--deny) 15%, var(--base));
+
+    /* brand accent (amber) — used by chrome; each act re-scopes it */
+    --accent: var(--c-op);
+    --accent-hover: #FBBF24;
+    --accent-contrast: #1C1206;
+    --accent-subtle: var(--c-op-sub);
+    --accent-border: var(--c-op-bd);
+
+    --radius: 14px;
+    --radius-sm: 9px;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+    --ease: cubic-bezier(.4, 0, .2, 1);
+    --measure: 62ch;
+  }
+  :root[data-theme="light"] {
+    --base: #FAFAF9;
+    --raised: #FFFFFF;
+    --overlay: #F3F3F1;
+    --border: #E5E4E1;
+    --text: #1A1917;
+    --muted: #5D5B57;
+    --faint: #97948C;
+    /* deeper categorical variants for contrast on the light ground */
+    --c-op:  #B45309;
+    --c-vw:  #0E7490;
+    --c-inf: #6D28D9;
+    --allow: #1A7F37;
+    --deny: #C0362C;
+    --accent-hover: #C2740C;
+    --accent-subtle: color-mix(in srgb, var(--c-op) 12%, var(--raised));
+    --accent-border: color-mix(in srgb, var(--c-op) 45%, var(--border));
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--base); color: var(--text);
+    font-family: var(--sans); line-height: 1.55; -webkit-font-smoothing: antialiased;
+    transition: background .4s var(--ease), color .4s var(--ease);
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---------- top bar ---------- */
+  .bar { position: sticky; top: 0; z-index: 40; padding: 15px 24px; background: color-mix(in srgb, var(--base) 82%, transparent); backdrop-filter: blur(14px); border-bottom: 1px solid var(--border); }
+  .bar .inner { max-width: 1000px; margin: 0 auto; width: 100%; display: flex; align-items: center; gap: 14px; }
+  .wordmark { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--text); }
+  .wordmark .txt { font-size: 17px; font-weight: 600; letter-spacing: -.02em; }
+  .badge { margin-left: 4px; font-size: 11px; color: var(--muted); font-family: var(--mono); padding: 3px 8px; border: 1px solid var(--border); border-radius: 999px; }
+  .a-fill { fill: var(--c-op); }
+  .t-stroke { stroke: var(--text); }
+  .toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; background: var(--overlay); border: 1px solid var(--border); color: var(--text); border-radius: 999px; padding: 7px 13px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: var(--sans); transition: border-color .2s var(--ease); }
+  .toggle:hover { border-color: var(--accent-border); }
+  .toggle:focus-visible { outline: 2px solid var(--accent-hover); outline-offset: 2px; }
+
+  /* ---------- info-term tooltips ---------- */
+  .term { position: relative; border-bottom: 1.5px dotted currentColor; cursor: help; white-space: nowrap; }
+  .term > .ti { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; margin-left: 3px; font-size: 9px; font-weight: 700; font-style: normal; font-family: var(--sans); color: var(--base); background: currentColor; border-radius: 50%; vertical-align: text-top; }
+  .term > .ti::after { content: "i"; color: var(--base); }
+  .term > .pop {
+    position: absolute; left: 50%; bottom: calc(100% + 9px); transform: translateX(-50%);
+    width: max-content; max-width: 260px; white-space: normal; z-index: 50;
+    background: var(--overlay); color: var(--text); border: 1px solid var(--accent-border);
+    border-radius: 10px; padding: 11px 13px; font-size: 12.5px; line-height: 1.5; font-weight: 400;
+    text-align: left; letter-spacing: 0;
+    opacity: 0; visibility: hidden; transition: opacity .16s var(--ease), transform .16s var(--ease);
+    pointer-events: none;
+  }
+  .term > .pop::after { content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 6px solid transparent; border-top-color: var(--accent-border); }
+  .term > .pop b { color: var(--accent); font-weight: 600; }
+  .term:hover > .pop, .term:focus-visible > .pop, .term.open > .pop { opacity: 1; visibility: visible; pointer-events: auto; }
+  .term:focus-visible { outline: none; }
+  .term:focus-visible { color: var(--accent); }
+
+  /* ---------- hero ---------- */
+  .hero { padding: 74px 0 20px; }
+  .eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: .16em; color: var(--accent); font-weight: 600; margin: 0 0 18px; }
+  h1 { font-size: clamp(31px, 5vw, 52px); line-height: 1.07; letter-spacing: -.03em; font-weight: 680; margin: 0; text-wrap: balance; max-width: 20ch; }
+  h1 .op { color: var(--c-op); }
+  h1 .vw { color: var(--c-vw); }
+  .lede { margin: 26px 0 0; font-size: clamp(16px, 2vw, 19px); color: var(--muted); max-width: var(--measure); }
+  .lede b { color: var(--text); font-weight: 600; }
+  .lede code { font-family: var(--mono); font-size: .9em; }
+
+  /* two-act signposts */
+  .act { padding: 40px 0 24px; scroll-margin-top: 70px; }
+  .act-tag { display: inline-flex; align-items: center; gap: 9px; font-size: 12px; text-transform: uppercase; letter-spacing: .11em; font-weight: 700; margin: 0 0 12px; }
+  .act-tag .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .act-publish .act-tag { color: var(--c-op); } .act-publish .act-tag .dot { background: var(--c-op); }
+  .act-secure .act-tag { color: var(--c-vw); } .act-secure .act-tag .dot { background: var(--c-vw); }
+  .act h2 { font-size: clamp(24px, 3.4vw, 33px); font-weight: 660; letter-spacing: -.025em; margin: 0; text-wrap: balance; }
+  .act .say { color: var(--muted); font-size: 16px; margin: 10px 0 26px; max-width: var(--measure); }
+  .act .say b { color: var(--text); font-weight: 550; }
+
+  /* scope brand accent per act */
+  .act-secure { --accent: var(--c-vw); --accent-hover: #67E8F9; --accent-contrast: #04181C; --accent-subtle: var(--c-vw-sub); --accent-border: var(--c-vw-bd); }
+  :root[data-theme="light"] .act-secure { --accent-hover: #0891B2; --accent-subtle: color-mix(in srgb, var(--c-vw) 12%, var(--raised)); --accent-border: color-mix(in srgb, var(--c-vw) 45%, var(--border)); }
+
+  /* ---------- publish diagram ---------- */
+  .diagram { display: flex; flex-direction: column; }
+  .layer { background: var(--raised); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px 18px; }
+  .layer.infra { border-color: var(--c-inf-bd); background: color-mix(in srgb, var(--c-inf) 5%, var(--raised)); }
+  .ll { display: flex; align-items: baseline; gap: 10px; margin-bottom: 13px; flex-wrap: wrap; }
+  .ll .t { font-size: 11px; text-transform: uppercase; letter-spacing: .11em; font-weight: 700; }
+  .ll.op .t { color: var(--c-op); } .ll.inf .t { color: var(--c-inf); }
+  .ll .h { font-size: 12.5px; color: var(--muted); }
+
+  .clients { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  @media (max-width: 760px) { .clients { grid-template-columns: repeat(2, 1fr); } }
+  .card { text-align: left; cursor: pointer; font-family: var(--sans); color: var(--text); background: var(--base); border: 1.5px solid var(--border); border-radius: var(--radius-sm); padding: 12px 13px; transition: all .2s var(--ease); display: block; width: 100%; }
+  :root[data-theme="light"] .card { background: var(--overlay); }
+  .card:hover { border-color: var(--c-op-bd); transform: translateY(-2px); }
+  .card:focus-visible { outline: 2px solid var(--c-op); outline-offset: 2px; }
+  .card.selected { border-color: var(--c-op); box-shadow: 0 0 0 3px var(--c-op-sub); }
+  .card .k { font-size: 10px; text-transform: uppercase; letter-spacing: .09em; color: var(--faint); font-weight: 600; }
+  .card .n { font-size: 14px; font-weight: 620; margin: 5px 0 6px; letter-spacing: -.01em; line-height: 1.25; }
+  .card .tag { font-family: var(--mono); font-size: 11px; color: var(--muted); background: var(--overlay); border: 1px solid var(--border); padding: 1px 6px; border-radius: 5px; display: inline-block; }
+  :root[data-theme="light"] .card .tag { background: var(--raised); }
+  .card.selected .tag { color: var(--c-op); border-color: var(--c-op-bd); }
+
+  .spine { display: flex; justify-content: center; align-items: center; height: 26px; }
+  .spine::before { content: ""; width: 2px; height: 100%; background: var(--border); border-radius: 2px; transition: all .25s var(--ease); }
+  .diagram.active .spine::before { background: var(--c-op); box-shadow: 0 0 10px var(--c-op-sub); }
+
+  .worker-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .chip { font-family: var(--mono); font-size: 12px; color: var(--text); background: var(--base); border: 1.5px solid var(--border); padding: 4px 9px; border-radius: 6px; transition: all .2s var(--ease); }
+  :root[data-theme="light"] .chip { background: var(--overlay); }
+  .chip.lit { border-color: var(--c-op); background: var(--c-op-sub); color: var(--c-op); }
+  .mods { margin-top: 13px; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--muted); }
+  .mods b { color: var(--text); font-weight: 600; font-family: var(--mono); font-size: .95em; }
+
+  .detail { margin-top: 16px; background: var(--raised); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; min-height: 84px; transition: border-color .2s var(--ease); }
+  .detail.lit { border-color: var(--c-op-bd); }
+  .detail .k { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--c-op); font-weight: 600; }
+  .detail h3 { margin: 5px 0 7px; font-size: 17px; font-weight: 630; letter-spacing: -.01em; }
+  .detail p { margin: 0; color: var(--muted); font-size: 14px; max-width: var(--measure); }
+  .detail code { font-family: var(--mono); font-size: .86em; background: var(--overlay); padding: 1px 6px; border-radius: 5px; color: var(--text); }
+  .hint { font-size: 12.5px; color: var(--faint); margin: 13px 0 0; }
+  .hint b { color: var(--c-op); font-weight: 600; }
+
+  /* ---------- security pillars ---------- */
+  .pillars { display: flex; flex-direction: column; gap: 14px; }
+  .pillar { background: var(--raised); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px 24px; border-left: 3px solid var(--c-vw); }
+  .pillar > .ph { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; flex-wrap: wrap; }
+  .pillar .num { font-family: var(--mono); font-size: 13px; color: var(--c-vw); font-weight: 700; }
+  .pillar h3 { font-size: 19px; font-weight: 640; letter-spacing: -.01em; margin: 0; }
+  .pillar .q { font-size: 13px; color: var(--muted); font-style: italic; }
+  .pillar > p { color: var(--muted); font-size: 14.5px; margin: 8px 0 0; max-width: var(--measure); }
+  .pillar > p code { font-family: var(--mono); font-size: .86em; background: var(--overlay); padding: 1px 6px; border-radius: 5px; color: var(--text); }
+
+  /* canView playground */
+  .cv-grid { display: grid; grid-template-columns: 1fr 1.05fr; gap: 16px; margin-top: 16px; }
+  @media (max-width: 820px) { .cv-grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--base); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 18px; }
+  :root[data-theme="light"] .panel { background: var(--overlay); }
+  .ctl { margin-bottom: 18px; } .ctl:last-child { margin-bottom: 0; }
+  .ctl > label { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .09em; color: var(--faint); font-weight: 600; margin-bottom: 9px; }
+  .opts { display: flex; flex-direction: column; gap: 6px; }
+  .opt { display: flex; align-items: center; gap: 11px; cursor: pointer; padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--raised); transition: all .18s var(--ease); }
+  :root[data-theme="light"] .opt { background: var(--raised); }
+  .opt:hover { border-color: var(--c-vw-bd); }
+  .opt.on { border-color: var(--c-vw); background: var(--c-vw-sub); }
+  .opt .rd { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--faint); flex: none; transition: all .18s var(--ease); }
+  .opt.on .rd { border-color: var(--c-vw); background: radial-gradient(circle, var(--c-vw) 0 42%, transparent 46%); }
+  .opt .lbl { font-size: 13.5px; font-weight: 550; }
+  .opt .sub { font-size: 12px; color: var(--muted); }
+  .opt .txt { display: flex; flex-direction: column; gap: 1px; }
+  .opt:focus-visible { outline: 2px solid var(--c-vw); outline-offset: 2px; }
+
+  .verdict { display: flex; align-items: center; gap: 12px; padding: 13px 15px; border-radius: var(--radius-sm); margin-bottom: 14px; border: 1px solid; transition: all .25s var(--ease); }
+  .verdict.allow { background: var(--allow-subtle); border-color: color-mix(in srgb, var(--allow) 45%, var(--border)); }
+  .verdict.deny { background: var(--deny-subtle); border-color: color-mix(in srgb, var(--deny) 45%, var(--border)); }
+  .verdict .tag { font-family: var(--mono); font-weight: 700; font-size: 13px; letter-spacing: .04em; padding: 4px 10px; border-radius: 6px; }
+  .verdict.allow .tag { background: var(--allow); color: #fff; }
+  .verdict.deny .tag { background: var(--deny); color: #fff; }
+  .verdict .why { font-size: 13px; color: var(--text); }
+  pre.code { margin: 0; font-family: var(--mono); font-size: 12px; line-height: 1.7; overflow-x: auto; color: var(--muted); }
+  pre.code .ln { display: block; padding: 0 8px; border-radius: 5px; transition: background .2s var(--ease); white-space: pre; }
+  pre.code .ln.hot { background: var(--c-vw-sub); color: var(--text); box-shadow: inset 2px 0 0 var(--c-vw); }
+  pre.code .kw { color: var(--c-vw); }
+  pre.code .fn { color: var(--text); font-weight: 600; }
+  pre.code .cm { color: var(--faint); font-style: italic; }
+  pre.code .allw { color: var(--allow); }
+  pre.code .dny { color: var(--deny); }
+
+  /* isolation visual */
+  .iso { display: grid; grid-template-columns: auto 1fr; gap: 18px; align-items: center; margin-top: 14px; }
+  @media (max-width: 560px) { .iso { grid-template-columns: 1fr; } }
+  .iso .frame { width: 116px; height: 84px; border: 1.5px solid var(--c-vw-bd); border-radius: var(--radius-sm); background: var(--c-vw-sub); position: relative; overflow: hidden; }
+  .iso .frame::before { content: "opaque origin"; position: absolute; inset: auto 0 8px; text-align: center; font-family: var(--mono); font-size: 9.5px; color: var(--c-vw); letter-spacing: .03em; }
+  .iso .frame .bar2 { height: 16px; background: var(--overlay); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 3px; padding: 0 6px; }
+  .iso .frame .bar2 i { width: 5px; height: 5px; border-radius: 50%; background: var(--faint); display: block; }
+  .iso p { margin: 0; color: var(--muted); font-size: 14px; }
+  .iso p code { font-family: var(--mono); font-size: .85em; background: var(--overlay); padding: 1px 6px; border-radius: 5px; color: var(--text); }
+  .iso .no { color: var(--deny); font-weight: 600; }
+
+  footer { padding: 44px 0 64px; margin-top: 30px; border-top: 1px solid var(--border); color: var(--faint); font-size: 13px; }
+  footer b { color: var(--muted); font-weight: 600; }
+  footer .mono { font-family: var(--mono); }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div class="inner">
+    <a class="wordmark" href="#top">
+      <svg width="26" height="26" viewBox="0 0 44 44" aria-hidden="true">
+        <circle cx="22" cy="22" r="18" fill="none" class="t-stroke" stroke-width="2.4"/>
+        <path d="M22 22 L22 4 A18 18 0 0 1 37.6 13 Z" class="a-fill" opacity="0.92"/>
+        <path d="M22 22 L37.6 13 A18 18 0 0 1 37.6 31 Z" class="a-fill" opacity="0.6"/>
+        <path d="M22 22 L37.6 31 A18 18 0 0 1 22 40 Z" class="a-fill" opacity="0.4"/>
+        <path d="M22 22 L22 40 A18 18 0 0 1 6.4 31 Z" class="a-fill" opacity="0.28"/>
+        <circle cx="22" cy="22" r="6.4" fill="var(--base)" class="t-stroke" stroke-width="2.4"/>
+      </svg>
+      <span class="txt">pagevault</span>
+    </a>
+    <span class="badge">architecture</span>
+    <button class="toggle" id="themeBtn" aria-label="Toggle light and dark theme">
+      <span id="themeIcon">◑</span><span id="themeLabel">Dark</span>
+    </button>
+  </div>
+</div>
+
+<div class="wrap" id="top">
+
+  <header class="hero">
+    <p class="eyebrow">The architecture, in two moves</p>
+    <h1>You <span class="op">publish</span> from anywhere. Your client <span class="vw">opens</span> exactly what they’re allowed to.</h1>
+    <p class="lede">Both halves are one <span class="term" tabindex="0" data-tip="worker">Cloudflare Worker<span class="ti"></span><span class="pop"></span></span> on a single hostname. This page walks the operator’s side first — <b>how the collection gets made</b> — then the viewer’s side — <b>how it stays locked down</b>.</p>
+  </header>
+
+  <!-- ===================== ACT 1 ===================== -->
+  <section class="act act-publish" id="publish" aria-labelledby="pub-h">
+    <p class="act-tag"><span class="dot"></span> Act 1 · the operator</p>
+    <h2 id="pub-h">You publish — from whatever tool you’re already in</h2>
+    <p class="say">Every surface below is just an HTTP client of the same Worker, so the <span class="term" tabindex="0" data-tip="mcp">MCP<span class="ti"></span><span class="pop"></span></span> server, the CLI, and anyone’s fork behave identically. <b>Click one to trace how it connects.</b></p>
+
+    <div class="diagram" id="diagram">
+      <div class="layer">
+        <div class="ll op"><span class="t">Where artifacts get made</span><span class="h">many surfaces · one endpoint</span></div>
+        <div class="clients" id="clients"></div>
+      </div>
+
+      <div class="spine"></div>
+
+      <div class="layer infra">
+        <div class="worker-row">
+          <div class="ll inf" style="margin-bottom:0"><span class="t">Cloudflare Workers</span><span class="h"><span class="term" tabindex="0" data-tip="worker">the Worker<span class="ti"></span><span class="pop"></span></span> is the whole product</span></div>
+          <div class="chips">
+            <span class="chip" data-ep="/mcp">/mcp</span>
+            <span class="chip" data-ep="/api">/api</span>
+            <span class="chip" data-ep="/admin">/admin</span>
+          </div>
+        </div>
+        <div class="mods">
+          <span><b>router</b></span><span><b>auth</b> verifies every token itself</span><span><b>canView()</b> the one authorization fn</span><span><b>store</b> KV access</span>
+        </div>
+      </div>
+
+      <div class="spine"></div>
+
+      <div class="layer infra">
+        <div class="ll inf"><span class="t">Workers KV</span><span class="h"><span class="term" tabindex="0" data-tip="kv">key-value store<span class="ti"></span><span class="pop"></span></span> · permissions live on the portal, not the document</span></div>
+        <div class="chips">
+          <span class="chip">portal:{slug}</span><span class="chip">members:{slug}</span><span class="chip">idx:{slug}:{id}</span><span class="chip">doc:{id}</span><span class="chip">meta:{id}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="detail" id="detail" aria-live="polite">
+      <span class="k">Select a surface</span>
+      <h3>Many clients, one Worker</h3>
+      <p>Whatever you make an artifact in, publishing it is the same call to the same Worker — which is why the CLI and the remote MCP server are thin clients, not separate backends.</p>
+    </div>
+    <p class="hint">The console (<b>/admin</b>) is the only operator path behind <span class="term" tabindex="0" data-tip="access">Cloudflare Access<span class="ti"></span><span class="pop"></span></span>; <b>/mcp</b> and <b>/api</b> carry a <span class="term" tabindex="0" data-tip="bearer">bearer token<span class="ti"></span><span class="pop"></span></span> the Worker checks itself.</p>
+  </section>
+
+  <!-- ===================== ACT 2 ===================== -->
+  <section class="act act-secure" id="secure" aria-labelledby="sec-h">
+    <p class="act-tag"><span class="dot"></span> Act 2 · the viewer</p>
+    <h2 id="sec-h">This is how it secures what your client opens</h2>
+    <p class="say">A document is LLM-generated and assumed hostile, and it may be a client’s confidential report. Three gates stand between a link and the bytes — <b>identity, authorization, isolation.</b></p>
+
+    <div class="pillars">
+
+      <div class="pillar">
+        <div class="ph"><span class="num">01</span><h3>Identity</h3><span class="q">“who are you?”</span></div>
+        <p><span class="term" tabindex="0" data-tip="zerotrust">Zero Trust<span class="ti"></span><span class="pop"></span></span> <span class="term" tabindex="0" data-tip="access">Access<span class="ti"></span><span class="pop"></span></span> signs the visitor in at the edge and hands the Worker a signed <span class="term" tabindex="0" data-tip="jwt">token<span class="ti"></span><span class="pop"></span></span> — which the Worker verifies itself, trusting no cookie. People who come back get a <span class="term" tabindex="0" data-tip="seat">seat<span class="ti"></span><span class="pop"></span></span>; people who read once get a <span class="term" tabindex="0" data-tip="capability">capability link<span class="ti"></span><span class="pop"></span></span> that needs no login and costs nothing.</p>
+      </div>
+
+      <div class="pillar">
+        <div class="ph"><span class="num">02</span><h3>Authorization</h3><span class="q">“may you see this?”</span></div>
+        <p>One pure function — <span class="term" tabindex="0" data-tip="canview">canView()<span class="ti"></span><span class="pop"></span></span> — decides every read, with no exceptions (the MCP read tools go through it too). Pick a viewer and a document and watch the exact line that decides fire.</p>
+
+        <div class="cv-grid">
+          <div class="panel">
+            <div class="ctl">
+              <label id="viewer-l">Who is asking</label>
+              <div class="opts" role="radiogroup" aria-labelledby="viewer-l" id="viewers"></div>
+            </div>
+            <div class="ctl">
+              <label id="doc-l">What they’re opening</label>
+              <div class="opts" role="radiogroup" aria-labelledby="doc-l" id="docs"></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="verdict deny" id="verdict"><span class="tag" id="vtag">DENY</span><span class="why" id="vwhy"></span></div>
+            <pre class="code" id="code" aria-hidden="true"></pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="pillar">
+        <div class="ph"><span class="num">03</span><h3>Isolation</h3><span class="q">“and it never runs as us”</span></div>
+        <p>Even allowed, the artifact renders in a <span class="term" tabindex="0" data-tip="sandbox">sandboxed<span class="ti"></span><span class="pop"></span></span> frame with an <span class="term" tabindex="0" data-tip="opaque">opaque origin<span class="ti"></span><span class="pop"></span></span>. Scripts run; reading our cookies or DOM does not.</p>
+        <div class="iso">
+          <div class="frame" aria-hidden="true"><div class="bar2"><i></i><i></i><i></i></div></div>
+          <p><code>&lt;iframe sandbox="allow-scripts"&gt;</code> with <span class="no">no</span> <code>allow-same-origin</code>, plus a <code>sandbox</code> CSP on <code>/render</code>. There is a test asserting the string <code>allow-same-origin</code> appears nowhere in the codebase — the page you’re reading is served exactly this way.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <footer>
+    <p><b>This page is a PageVault artifact.</b> Self-contained HTML, inline CSS/JS, no external hosts, no persistence — the same rules every hosted document obeys. Content derived from <span class="mono">docs/architecture.md</span>.</p>
+  </footer>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var root = document.documentElement;
+
+  /* ---------- theme ---------- */
+  var prefersDark = !(window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches);
+  applyTheme(prefersDark ? "dark" : "light");
+  function applyTheme(t) {
+    root.setAttribute("data-theme", t);
+    document.getElementById("themeLabel").textContent = t === "dark" ? "Dark" : "Light";
+    document.getElementById("themeIcon").textContent = t === "dark" ? "◑" : "◐";
+  }
+  document.getElementById("themeBtn").addEventListener("click", function () {
+    applyTheme(root.getAttribute("data-theme") === "dark" ? "light" : "dark");
+  });
+
+  /* ---------- tooltips ---------- */
+  var TERMS = {
+    worker: { t: "Cloudflare Worker", d: "Code that runs on Cloudflare’s edge network, close to the user — no server to manage. PageVault is <b>one</b> Worker; it is the entire backend." },
+    kv: { t: "Workers KV", d: "Cloudflare’s key-value store at the edge. Holds portals, members, and document metadata. <b>Eventually consistent</b> (~60s), so nothing depends on read-after-write." },
+    mcp: { t: "MCP — Model Context Protocol", d: "An open standard that lets an AI client (Claude, and others) call tools on a server. PageVault’s MCP server is <b>remote</b>, so it works in a browser or on a phone — not just a terminal." },
+    access: { t: "Cloudflare Access", d: "The part of Zero Trust that answers <b>“who are you?”</b> It signs the visitor in at the edge and hands the Worker a verified identity token." },
+    zerotrust: { t: "Cloudflare Zero Trust", d: "Cloudflare’s access-control product. Its <b>Access</b> feature authenticates people before a request ever reaches the Worker." },
+    jwt: { t: "Signed token (JWT)", d: "A cryptographically signed token proving who signed in. The Worker <b>verifies the signature itself</b> against Cloudflare’s rotating keys — it never trusts a bare header or cookie." },
+    seat: { t: "A Cloudflare seat", d: "One person who has <b>ever</b> logged in. The free plan includes 50, held forever. Because capability links skip login, they cost <b>zero</b> seats." },
+    capability: { t: "Capability link", d: "An unguessable <code>/p/…</code> link that opens one specific document with <b>no login</b>. Nobody authenticates, so no seat is used and the link can’t reach the rest of the portal." },
+    bearer: { t: "Bearer token", d: "A secret string sent with each request to prove it’s authorized. The CLI and MCP server use one; it <b>never</b> touches the browser." },
+    canview: { t: "canView()", d: "The single function that decides <b>“may you see this?”</b>. Every read path — including the MCP read tools — goes through it. No exceptions." },
+    sandbox: { t: "iframe sandbox", d: "Browser-level isolation for untrusted code. With <code>allow-scripts</code> but <b>not</b> <code>allow-same-origin</code>, scripts run but can’t read our cookies, touch our DOM, or make credentialed requests." },
+    opaque: { t: "Opaque origin", d: "A frame with no real origin identity — so it can’t make credentialed same-origin requests or reach our data. Every artifact runs in one." }
+  };
+  document.querySelectorAll(".term[data-tip]").forEach(function (el) {
+    var info = TERMS[el.dataset.tip];
+    if (!info) return;
+    var ti = el.querySelector(".ti");
+    var pop = el.querySelector(".pop");
+    // insert term label text before the icon if the element is empty-labelled
+    if (pop) pop.innerHTML = "<b>" + info.t + "</b> — " + info.d;
+    el.setAttribute("aria-label", info.t + ". " + info.d.replace(/<[^>]+>/g, ""));
+    el.setAttribute("role", "button");
+  });
+  // touch / click toggle + dismiss
+  document.addEventListener("click", function (e) {
+    var t = e.target.closest(".term[data-tip]");
+    document.querySelectorAll(".term.open").forEach(function (o) { if (o !== t) o.classList.remove("open"); });
+    if (t) { e.preventDefault(); t.classList.toggle("open"); }
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") document.querySelectorAll(".term.open").forEach(function (o) { o.classList.remove("open"); });
+    if ((e.key === "Enter" || e.key === " ") && document.activeElement && document.activeElement.classList.contains("term")) {
+      e.preventDefault(); document.activeElement.classList.toggle("open");
+    }
+  });
+
+  /* ---------- publish diagram ---------- */
+  var CLIENTS = [
+    { id: "code",    k: "AI surface", n: "Claude Code",         tag: "/mcp",   ep: "/mcp",   d: "Reaches the remote MCP server over Streamable HTTP with a bearer token. The surface that works today — it has a terminal." },
+    { id: "desktop", k: "AI surface", n: "Claude Desktop",      tag: "/mcp",   ep: "/mcp",   d: "Talks to the remote <code>/mcp</code> endpoint. A stdio bin can proxy for it; OAuth for hosted surfaces is a pre-launch task." },
+    { id: "web",     k: "AI surface", n: "claude.ai",           tag: "/mcp",   ep: "/mcp",   d: "A browser surface — the whole reason the MCP server is <b>remote, not stdio</b>. A stdio server can’t run in a browser, and the browser is where artifacts get made." },
+    { id: "mobile",  k: "AI surface", n: "Mobile · Cowork",     tag: "/mcp",   ep: "/mcp",   d: "Phone and Cowork surfaces reach the same remote server. No subprocess to spawn — only a remote server reaches them at all." },
+    { id: "other",   k: "AI surface", n: "Other MCP clients / LLMs", tag: "/mcp", ep: "/mcp", d: "Anything that speaks MCP over HTTP. The endpoint isn’t Anthropic-specific, so other LLM clients connect the same way." },
+    { id: "cli",     k: "Tool",       n: "pagevault CLI",       tag: "/api",   ep: "/api",   d: "A thin HTTP client of <code>/api</code> with a bearer token. It never touches KV directly — it hits the same API anyone’s deployment exposes." },
+    { id: "console", k: "Browser",    n: "Owner console",       tag: "/admin", ep: "/admin", d: "You, managing portals and documents in <code>/admin</code> — the one operator path behind Cloudflare Access (its own application and audience)." }
+  ];
+  var clientsHost = document.getElementById("clients");
+  CLIENTS.forEach(function (c) {
+    var b = document.createElement("button");
+    b.className = "card"; b.dataset.client = c.id;
+    b.innerHTML = '<span class="k">' + c.k + '</span><span class="n">' + c.n + '</span><span class="tag">' + c.tag + '</span>';
+    b.addEventListener("click", function () { selectClient(c); });
+    clientsHost.appendChild(b);
+  });
+  var diagram = document.getElementById("diagram");
+  var detail = document.getElementById("detail");
+  function selectClient(c) {
+    document.querySelectorAll(".card.selected").forEach(function (e) { e.classList.remove("selected"); });
+    document.querySelectorAll(".chip.lit").forEach(function (e) { e.classList.remove("lit"); });
+    diagram.classList.add("active");
+    document.querySelector('.card[data-client="' + c.id + '"]').classList.add("selected");
+    document.querySelectorAll('.chip[data-ep="' + c.ep + '"]').forEach(function (e) { e.classList.add("lit"); });
+    detail.classList.add("lit");
+    detail.innerHTML = '<span class="k">' + c.k + " → " + c.ep + '</span><h3>' + c.n + '</h3><p>' + c.d + '</p>';
+  }
+
+  /* ---------- canView playground ---------- */
+  var OWNER = "you@studio.dev";
+  var VIEWERS = [
+    { id: "owner",    email: OWNER,              lbl: "You (the owner)",  sub: "the operator" },
+    { id: "member",   email: "cto@acme.com",     lbl: "Client CTO",       sub: "a portal member" },
+    { id: "stranger", email: "someone@else.com", lbl: "A stranger",       sub: "signed in, not invited" },
+    { id: "link",     email: null,               lbl: "Capability link",  sub: "/p/… — no login, no seat" }
+  ];
+  var DOCS = [
+    { id: "private",    kind: "private",    ownerOnly: false, extra: [],               lbl: "Private-portal doc",       sub: "just you, by default" },
+    { id: "restricted", kind: "restricted", ownerOnly: false, extra: [],               lbl: "Restricted-portal doc",    sub: "the client’s team" },
+    { id: "public",     kind: "public",     ownerOnly: false, extra: [],               lbl: "Public-portal doc",        sub: "anyone with the link" },
+    { id: "draft",      kind: "restricted", ownerOnly: true,  extra: [],               lbl: "Owner-only draft",         sub: "in a restricted portal" },
+    { id: "shared",     kind: "private",    ownerOnly: false, extra: ["cto@acme.com"], lbl: "Private doc, shared once", sub: "extraEmails → the CTO" }
+  ];
+  function canView(doc, portalKind, members, email, ownerEmail) {
+    if (email !== null && email === ownerEmail) return { v: true, line: 0, why: "You’re the owner — you always see your own work." };
+    if (doc.ownerOnly) return { v: false, line: 1, why: "It’s an owner-only draft. That beats every grant below, checked first on purpose." };
+    if (portalKind === "public") return { v: true, line: 2, why: "The portal is public, so the document is too." };
+    if (email === null) return { v: false, line: 3, why: "No identity, and this isn’t public — a capability link only opens its own document, never a portal." };
+    if (doc.extra.indexOf(email) !== -1) return { v: true, line: 4, why: "They hold an explicit per-document grant (extraEmails). Additive only — it can add a viewer, never remove one." };
+    if (portalKind === "restricted") return members.indexOf(email) !== -1
+      ? { v: true, line: 5, why: "They’re a member of this restricted portal." }
+      : { v: false, line: 5, why: "Not a member of this restricted portal — and membership elsewhere confers nothing here." };
+    return { v: false, line: 6, why: "Private portal, and they’re not the owner. Default deny." };
+  }
+  var CODE = [
+    { t: '<span class="kw">function</span> <span class="fn">canView</span>(doc, portal, members, email, owner) {', plain: true },
+    '  <span class="kw">if</span> (emailsMatch(email, owner)) <span class="kw">return</span> <span class="allw">true</span>;',
+    '  <span class="kw">if</span> (doc.ownerOnly) <span class="kw">return</span> <span class="dny">false</span>;      <span class="cm">// beats everything</span>',
+    '  <span class="kw">if</span> (portal.kind === <span class="allw">"public"</span>) <span class="kw">return</span> <span class="allw">true</span>;',
+    '  <span class="kw">if</span> (email === <span class="kw">null</span>) <span class="kw">return</span> <span class="dny">false</span>;',
+    '  <span class="kw">if</span> (doc.extraEmails?.includes(email)) <span class="kw">return</span> <span class="allw">true</span>;  <span class="cm">// additive</span>',
+    '  <span class="kw">if</span> (portal.kind === <span class="kw">"restricted"</span>) <span class="kw">return</span> members.includes(email);',
+    '  <span class="kw">return</span> <span class="dny">false</span>;',
+    { t: '}', plain: true }
+  ];
+  var state = { viewer: "member", doc: "restricted" };
+  buildOpts("viewers", VIEWERS, "viewer");
+  buildOpts("docs", DOCS, "doc");
+  renderCode();
+  evaluate();
+  function buildOpts(hostId, list, key) {
+    var host = document.getElementById(hostId);
+    list.forEach(function (item) {
+      var el = document.createElement("button");
+      el.className = "opt"; el.setAttribute("role", "radio"); el.dataset.id = item.id;
+      el.innerHTML = '<span class="rd"></span><span class="txt"><span class="lbl">' + item.lbl + '</span><span class="sub">' + item.sub + '</span></span>';
+      el.addEventListener("click", function () { state[key] = item.id; syncOpts(hostId, list, key); evaluate(); });
+      host.appendChild(el);
+    });
+    syncOpts(hostId, list, key);
+  }
+  function syncOpts(hostId, list, key) {
+    Array.prototype.forEach.call(document.getElementById(hostId).children, function (child) {
+      var on = child.dataset.id === state[key];
+      child.classList.toggle("on", on);
+      child.setAttribute("aria-checked", on ? "true" : "false");
+    });
+  }
+  function renderCode() {
+    var pre = document.getElementById("code"); pre.innerHTML = ""; var idx = -1;
+    CODE.forEach(function (row) {
+      var span = document.createElement("span"); span.className = "ln";
+      if (typeof row === "string") { idx++; span.dataset.line = idx; span.innerHTML = row; }
+      else { span.innerHTML = row.t; }
+      pre.appendChild(span);
+    });
+  }
+  function evaluate() {
+    var vw = VIEWERS.filter(function (x) { return x.id === state.viewer; })[0];
+    var dc = DOCS.filter(function (x) { return x.id === state.doc; })[0];
+    var r = canView(dc, dc.kind, ["cto@acme.com"], vw.email, OWNER);
+    var verdict = document.getElementById("verdict");
+    verdict.className = "verdict " + (r.v ? "allow" : "deny");
+    document.getElementById("vtag").textContent = r.v ? "ALLOW" : "DENY";
+    document.getElementById("vwhy").innerHTML = r.why;
+    document.querySelectorAll("pre.code .ln").forEach(function (ln) {
+      ln.classList.toggle("hot", ln.dataset.line !== undefined && Number(ln.dataset.line) === r.line);
+    });
+  }
+})();
+</script>
+</body>
+</html>
