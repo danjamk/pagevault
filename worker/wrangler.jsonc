@@ -21,6 +21,14 @@
     {
       "binding": "PAGEVAULT",
       "id": "REPLACE_WITH_KV_NAMESPACE_ID"
+    },
+    // Owned entirely by the OAuth provider (ADR-006 / #22) — issued tokens, grants, and
+    // client registrations. Placeholder; create with:
+    //   wrangler kv namespace create OAUTH_KV
+    // provision.mjs must learn to create this before #22 merges.
+    {
+      "binding": "OAUTH_KV",
+      "id": "REPLACE_WITH_OAUTH_KV_ID"
     }
   ],
 

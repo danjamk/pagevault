@@ -1,7 +1,10 @@
+import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { handleApi, json } from "./api.js";
+import { isAuthorized } from "./auth.js";
 import { handleConsole } from "./console.js";
 import type { Env } from "./env.js";
-import { handleMcp } from "./mcp.js";
+import { handleMcp, mcpApiHandler } from "./mcp.js";
+import { handleAuthorize } from "./oauth.js";
 import { handlePortalRoute, handlePublicPortalRoute } from "./portal.js";
 import { getMeta, getPublicTokenTarget } from "./store.js";
 import { handleRender, renderShell } from "./viewer.js";
@@ -13,26 +16,29 @@ import { handleRender, renderShell } from "./viewer.js";
  * in exactly one function, `canView()`. The route-to-Access-app mapping is load-bearing:
  * read ADR-001 before changing it.
  *
- * Which paths have an Access application in front of them, and which do not, is a
- * security property of the deployment, not a detail:
+ * As of #22 this router is the OAuthProvider's `defaultHandler`: it receives every request
+ * that is not the MCP apiRoute or an OAuth endpoint (`/token`, `/register`, the
+ * `.well-known` metadata), including the `/authorize` consent screen.
  *
+ *   /mcp      none*     bearer token (Claude Code) OR OAuth 2.1 (hosted surfaces) — ADR-006
+ *   /authorize none     OAuth consent (operator) — app-implemented, see oauth.ts
  *   /v/*      App A     portal + document   (#13)
  *   /admin    App B     owner console       (#5)
  *   /render   none      capability token only
  *   /p/*      none      capability URL, zero Access seats burned
  *   /api/*    none      bearer token
- *   /mcp      none      bearer token, and it CANNOT be Access-covered (ADR-006)
+ *
+ *   * `/mcp` can never sit behind Cloudflare Access (ADR-006). The Worker authenticates it.
  */
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+const router = {
+  async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const { pathname } = url;
 
-    // Remote MCP, Streamable HTTP. Bearer token, and NO Cloudflare Access application —
-    // Anthropic's connectors call this from their cloud, with no browser and no way to
-    // complete an OTP login, so Access would hard-block them. See ADR-006.
-    if (pathname === "/mcp") {
-      return handleMcp(request, env, ctx);
+    // The OAuth consent screen. `authorizeEndpoint` is app-implemented — the provider
+    // routes it here rather than serving it. See oauth.ts and ADR-006 / #22.
+    if (pathname === "/authorize") {
+      return handleAuthorize(request, env);
     }
 
     // An Access app at `/` would cover the entire host, so the console cannot live
@@ -81,6 +87,39 @@ export default {
     }
 
     return json({ error: "Not found", code: "not_found" }, 404);
+  },
+};
+
+/**
+ * OAuth 2.1 for the hosted surfaces — claude.ai, Desktop, mobile, Cowork (ADR-006 / #22).
+ *
+ * The provider serves `/token`, `/register`, and the `.well-known` metadata; it routes
+ * `/mcp` (only with a token it issued) to `mcpApiHandler`, and everything else to the
+ * router. Constructed at module scope — it takes no env, so nothing secret lives here.
+ */
+const oauth = new OAuthProvider({
+  apiRoute: "/mcp",
+  apiHandler: mcpApiHandler,
+  defaultHandler: router,
+  authorizeEndpoint: "/authorize",
+  tokenEndpoint: "/token",
+  clientRegistrationEndpoint: "/register",
+});
+
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // 🔴 Preserve the Claude Code path. The static PAGEVAULT_API_TOKEN bearer is NOT an
+    // OAuth-issued token, so the OAuthProvider would 401 it — killing the one surface that
+    // works today. Intercept it here, before OAuth ever sees it, and hand it to the
+    // existing bearer-gated handler. `isAuthorized` is the same timing-safe compare against
+    // the secret that `/mcp` has always used; nothing else about this shortcut is trusted.
+    // See ADR-006's staged-auth table.
+    const { pathname } = new URL(request.url);
+    if (pathname === "/mcp" && isAuthorized(request, env)) {
+      return handleMcp(request, env, ctx);
+    }
+
+    return oauth.fetch(request, env, ctx);
   },
 } satisfies ExportedHandler<Env>;
 

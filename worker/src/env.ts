@@ -1,5 +1,22 @@
+import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
+
 export interface Env {
   PAGEVAULT: KVNamespace;
+
+  /**
+   * KV owned entirely by the OAuth provider (ADR-006 / #22) — issued tokens, grants, and
+   * client registrations. Separate from PAGEVAULT so the library's key space can never
+   * collide with ours. Create with `wrangler kv namespace create OAUTH_KV`.
+   */
+  OAUTH_KV: KVNamespace;
+
+  /**
+   * Injected at runtime by @cloudflare/workers-oauth-provider before it invokes the api or
+   * default handler — it is the only way to parse a pending auth request and complete a
+   * grant. Not a binding you configure; a per-request handle. Optional in the type because
+   * it is absent anywhere the OAuthProvider is not in front (e.g. tests).
+   */
+  OAUTH_PROVIDER?: OAuthHelpers;
 
   /** Vars — plaintext, written into wrangler.jsonc by the provisioning script. */
   OWNER_EMAIL: string;
