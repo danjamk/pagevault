@@ -6,7 +6,9 @@
 // You never pass the tier — it's a fact in .pagevault.json, set by `make setup`.
 //
 import { execSync } from "node:child_process";
-import { c, ok, info, warn, die, loadContext, saveContext } from "./context.mjs";
+import { createInterface } from "node:readline/promises";
+import { stdin, stdout } from "node:process";
+import { c, ok, info, warn, die, loadContext, saveContext, isInteractive, wranglerAccount } from "./context.mjs";
 
 const CONFIG_OUT = "worker/wrangler.generated.jsonc";
 
@@ -14,6 +16,30 @@ const ctx = loadContext();
 if (!ctx.rung || !ctx.ownerEmail) die("No .pagevault.json yet.", "Run `make setup` first.");
 
 console.log(`\n${c.bold("PageVault — deploy")} ${c.dim(`(rung ${ctx.rung})`)}\n`);
+
+// --- 0. 🔴 WHERE are we deploying? Name it, verify it, confirm it. ----------
+//
+// The guard that stops a wrong-account clobber (#32): preflight pins the account; here we
+// refuse if the live wrangler auth can't reach it, and state the target before mutating.
+
+const acct = wranglerAccount();
+if (!acct.ok) die("Not signed in to wrangler.", "npx wrangler login, or export CLOUDFLARE_API_TOKEN=…");
+if (!ctx.accountId) die("No account pinned yet.", "Run `make preflight` first — it names and pins the account.");
+const target = acct.accounts.find((a) => a.id === ctx.accountId);
+if (!target) {
+  die(
+    `You're signed in as ${acct.email}, which can't reach the pinned account ${ctx.accountId}.`,
+    "Switch accounts (export CLOUDFLARE_API_TOKEN=<that account's token>), or re-pin with `make preflight`.",
+  );
+}
+
+console.log(`  Target: ${c.bold(target.name)} ${c.dim(target.id)}  ${c.dim(`· ${acct.email ?? ""}`)}\n`);
+if (isInteractive()) {
+  const rl = createInterface({ input: stdin, output: stdout });
+  const ans = (await rl.question(`  Deploy "pagevault" to ${c.bold(target.name)}? [y/N] `)).trim().toLowerCase();
+  rl.close();
+  if (ans !== "y") die("Cancelled — nothing was deployed.");
+}
 
 // --- 1. Generate the tier-appropriate config -------------------------------
 

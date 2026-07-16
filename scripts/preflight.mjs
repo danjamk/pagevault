@@ -6,9 +6,8 @@
 //
 // It collects every gap in one pass and names the fix, rather than dying on the first.
 //
-import { execSync } from "node:child_process";
 import { versions } from "node:process";
-import { c, ok, die, loadContext, fromEnv } from "./context.mjs";
+import { c, ok, die, loadContext, saveContext, fromEnv, argValue, wranglerAccount } from "./context.mjs";
 
 const API = "https://api.cloudflare.com/client/v4";
 
@@ -42,16 +41,43 @@ Number(versions.node.split(".")[0]) >= 22
   ? pass("Node", versions.node)
   : fail("Node", `${versions.node} — Wrangler 4 needs 22+`, "nvm install 22 && nvm use 22, or https://nodejs.org");
 
-// --- 2. wrangler is signed in (every rung uses it to deploy) ---------------
+// --- 2. WHICH Cloudflare account? -----------------------------------------
+//
+// 🔴 The one that clobbered a production Worker. wrangler uses an ambient login, and
+// "signed in" says nothing about WHERE it deploys. Name the account, pin it into the
+// context, and once pinned, refuse to proceed against a different one.
 
-try {
-  const who = execSync("npx --yes wrangler@4 whoami", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  /You are logged in|associated with the email|Account Name/i.test(who)
-    ? pass("Wrangler auth", "signed in")
-    : fail("Wrangler auth", "not authenticated", "npx wrangler login  (or export CF_API_TOKEN=…)");
-} catch (err) {
-  fail("Wrangler auth", `couldn't run wrangler (${String(err.message ?? err).split("\n")[0]})`,
-    "Needs Node 22 + a signed-in wrangler. `make preflight` runs it under the right Node.");
+const acct = wranglerAccount();
+if (!acct.ok) {
+  fail("Wrangler auth", `not signed in (${acct.error})`, "npx wrangler login, or export CLOUDFLARE_API_TOKEN=…");
+} else if (acct.accounts.length === 0) {
+  fail("Cloudflare account", `signed in as ${acct.email ?? "?"}, but wrangler reports no accounts`);
+} else {
+  const pinned = ctx.accountId;
+  const match = pinned ? acct.accounts.find((a) => a.id === pinned) : undefined;
+  if (pinned && !match) {
+    fail("Cloudflare account",
+      `pinned to ${pinned}, but you're signed in as ${acct.email} — which can only reach ${acct.accounts.map((a) => a.id).join(", ")}`,
+      "Switch accounts (export CLOUDFLARE_API_TOKEN=<that account's token>), or re-pin by editing .pagevault.json.");
+  } else if (match) {
+    pass("Cloudflare account", `${match.name} ${c.dim(match.id)} ${c.green("(pinned)")}`);
+  } else if (acct.accounts.length === 1) {
+    const a = acct.accounts[0];
+    saveContext({ ...ctx, accountId: a.id, accountName: a.name });
+    pass("Cloudflare account", `${a.name} ${c.dim(a.id)} ${c.dim("— pinned to .pagevault.json")}`);
+  } else {
+    const pick = argValue("--account");
+    const a = acct.accounts.find((x) => x.id === pick || x.name === pick);
+    if (a) {
+      saveContext({ ...ctx, accountId: a.id, accountName: a.name });
+      pass("Cloudflare account", `${a.name} ${c.dim(a.id)} ${c.dim("— pinned")}`);
+    } else {
+      fail("Cloudflare account",
+        `signed in as ${acct.email} with ${acct.accounts.length} accounts — you must pick one`,
+        `Run \`node scripts/preflight.mjs --account <id>\`, or narrow to one with export CLOUDFLARE_API_TOKEN=<token>. ` +
+          `Accounts: ${acct.accounts.map((x) => `${x.name} (${x.id})`).join(" · ")}`);
+    }
+  }
 }
 
 // --- 3. API token — required at rung 3, optional (but useful) below --------

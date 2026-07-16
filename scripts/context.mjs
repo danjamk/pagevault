@@ -8,6 +8,7 @@
 //
 // Zero dependencies beyond Node built-ins, on purpose — this is what a stranger runs.
 
+import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { stdin, stdout } from "node:process";
 
@@ -60,6 +61,30 @@ export function argValue(name) {
 
 /** True when we can actually prompt — a real terminal, and not asked to stay quiet. */
 export const isInteractive = () => stdin.isTTY && !process.argv.includes("--yes");
+
+/**
+ * 🔴 WHO wrangler will act as — the signed-in email and the accounts it can reach.
+ *
+ * wrangler auth is ambient (a machine-wide login, or CLOUDFLARE_API_TOKEN). The single
+ * worst failure in this workflow is deploying to an account you didn't mean to, because
+ * "signed in" told you nothing about WHERE. Everything that mutates Cloudflare calls this
+ * first, names the account, and refuses a mismatch. Returns { ok, email, accounts:[{name,id}] }.
+ */
+export function wranglerAccount() {
+  let out;
+  try {
+    out = execSync("npx --yes wrangler@4 whoami", { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  } catch (err) {
+    return { ok: false, error: String(err?.message ?? err).split("\n")[0] };
+  }
+  const email = out.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)?.[0];
+  const accounts = [];
+  for (const line of out.split("\n")) {
+    const m = line.match(/│\s*([^│]+?)\s*│\s*([0-9a-f]{32})\s*│/);
+    if (m) accounts.push({ name: m[1].trim(), id: m[2] });
+  }
+  return { ok: true, email, accounts };
+}
 
 /**
  * Resolve one value by precedence: flag → env → context → prompt (if interactive) →

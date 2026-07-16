@@ -67,7 +67,6 @@ provision: ## Rung 3: create the KV namespace, Access group, and two Access apps
 	@$(NVM) && node scripts/provision.mjs
 
 deploy: ## Deploy the Worker — rung-aware (Tier 0, or provision at rung 3)
-	@printf "Deploy? [y/N] " && read ans && [ "$$ans" = "y" ]
 	@$(NVM) && node scripts/deploy.mjs
 
 verify: ## Smoke-test the live deployment (run after deploy)

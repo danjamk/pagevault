@@ -79,6 +79,13 @@ let generated = template
   // flips this back off at rung 3, where workers.dev WOULD route around Access.
   .replace(/"workers_dev": false/, `"workers_dev": true`);
 
+// 🔴 Pin the deploy to the account preflight verified. Without this, wrangler falls back to
+// an ambient login and can deploy to the wrong account (it once clobbered production). See #32.
+if (ctx.accountId) {
+  generated = generated.replace(/"name": "pagevault",/, `"name": "pagevault",\n  "account_id": "${ctx.accountId}",`);
+  if (!generated.includes(`"account_id": "${ctx.accountId}"`)) die("Failed to pin account_id into the config.");
+}
+
 if (host) {
   // Rung 2: serve on the custom domain, and generate links to it. Still no Access.
   generated = generated
