@@ -76,21 +76,28 @@ export function loadCloudToken() {
 
 /**
  * A Cloudflare API call with the loaded token. Read-only or not — the caller decides via
- * `init`. Never throws; returns { ok, status, result, errors }. The token is the auth model
+ * `init`. Never throws; returns { ok, status, result, result_info, errors }. `result_info`
+ * carries the pagination cursor for list endpoints (e.g. KV keys). The token is the auth model
  * now (a per-clone .env.local token, explicit — no ambient wrangler login to guess at).
  */
 export async function cfApi(path, init = {}) {
   const token = process.env.CLOUDFLARE_API_TOKEN;
-  if (!token) return { ok: false, status: 0, result: null, errors: [{ code: 0, message: "no CF token loaded" }] };
+  if (!token) return { ok: false, status: 0, result: null, result_info: null, errors: [{ code: 0, message: "no CF token loaded" }] };
   try {
     const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
       ...init,
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...(init.headers ?? {}) },
     });
     const body = await res.json().catch(() => null);
-    return { ok: res.ok && Boolean(body?.success), status: res.status, result: body?.result, errors: body?.errors ?? [] };
+    return {
+      ok: res.ok && Boolean(body?.success),
+      status: res.status,
+      result: body?.result,
+      result_info: body?.result_info ?? null,
+      errors: body?.errors ?? [],
+    };
   } catch (err) {
-    return { ok: false, status: 0, result: null, errors: [{ code: 0, message: String(err) }] };
+    return { ok: false, status: 0, result: null, result_info: null, errors: [{ code: 0, message: String(err) }] };
   }
 }
 
