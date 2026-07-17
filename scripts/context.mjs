@@ -64,11 +64,13 @@ export const saveContext = (ctx) =>
  * .env.local with its own account's token, and every command in that clone targets it.
  */
 export function loadCloudToken() {
-  const token = fromEnv("CLOUDFLARE_API_TOKEN") ?? fromEnv("CF_API_TOKEN");
-  if (token) {
-    process.env.CLOUDFLARE_API_TOKEN = token; // wrangler's preferred variable
-    process.env.CF_API_TOKEN = token; // provision.mjs and the CF API helpers
-  }
+  // CLOUDFLARE_API_TOKEN only — no CF_API_TOKEN fallback. `CF_API_TOKEN` is now reserved for
+  // the Worker's *runtime* secret (a separate, narrowly scoped token, #24); reading it here
+  // would let that narrow token stand in for the broad provisioning credential and target
+  // wrangler at the wrong scope. Using CLOUDFLARE_API_TOKEN also clears wrangler's deprecation
+  // warning about CF_API_TOKEN (#23).
+  const token = fromEnv("CLOUDFLARE_API_TOKEN");
+  if (token) process.env.CLOUDFLARE_API_TOKEN = token; // what wrangler and cfApi both read
   return token;
 }
 
@@ -78,7 +80,7 @@ export function loadCloudToken() {
  * now (a per-clone .env.local token, explicit — no ambient wrangler login to guess at).
  */
 export async function cfApi(path, init = {}) {
-  const token = process.env.CLOUDFLARE_API_TOKEN ?? process.env.CF_API_TOKEN;
+  const token = process.env.CLOUDFLARE_API_TOKEN;
   if (!token) return { ok: false, status: 0, result: null, errors: [{ code: 0, message: "no CF token loaded" }] };
   try {
     const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, {

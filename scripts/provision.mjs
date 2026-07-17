@@ -1,330 +1,190 @@
 #!/usr/bin/env node
 //
-// Provision Cloudflare for a PageVault deployment.
+// Provision Cloudflare for a rung-3 (Tier-1) PageVault deployment:
 //
-//   KV namespace · Access group · two Access applications · the generated Worker config
+//   KV namespace · One-time PIN · the pagevault-viewers Access group · two Access apps ·
+//   the generated Worker config
 //
-// Idempotent: re-running finds what already exists rather than duplicating it.
+// This is the rung-3 config generator: `make deploy` runs it (deploy.mjs:81) before
+// `wrangler deploy`, then deploy sets the secrets. It reads intent from .pagevault.json
+// (setup wrote it) and creates everything over the Cloudflare API with the token-first
+// CLOUDFLARE_API_TOKEN. Idempotent — re-running finds what exists rather than duplicating.
 //
-// Zero dependencies beyond Node built-ins, on purpose — this is the first thing a person
-// who forks this repo runs, and it should not require an install to work.
+// Zero dependencies beyond context.mjs and Node builtins. The pattern is lifted from
+// jonesphillip/sharehtml's setup.ts (Apache-2.0), which solved this first. Credited in the README.
 //
-// The pattern is lifted from jonesphillip/sharehtml's setup.ts (Apache-2.0), which solved
-// this before we did. Credited in the README.
-//
-//   node scripts/provision.mjs
-//
-// Needs a Cloudflare API token in CF_API_TOKEN (or .env.local) with, on the account:
-//   Access: Apps and Policies                              — Edit
-//   Access: Organizations, Identity Providers, and Groups  — Edit   ← groups live here
-//   Workers KV Storage                                     — Edit
-//   Workers Scripts                                        — Edit
-//   Account Settings                                       — Read
-// and, on the zone:
-//   Workers Routes                                         — Edit
-
-import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import {
+  c, ok, info, warn, die, loadCloudToken, loadContext, saveContext, cfApi, cfErr, acct, shortId,
+  fromEnv, writeEnvLocalVar, isInteractive,
+} from "./context.mjs";
 
-const API = "https://api.cloudflare.com/client/v4";
 const CONFIG_IN = "worker/wrangler.jsonc";
 const CONFIG_OUT = "worker/wrangler.generated.jsonc";
-const STATE = ".pagevault-provision.json";
-
+const LEGACY_STATE = ".pagevault-provision.json";
 const GROUP_NAME = "pagevault-viewers";
 
-// ---------------------------------------------------------------------------
+console.log(`\n${c.head("PageVault — provision Access")} ${c.dim("(rung 3)")}\n`);
 
-const c = {
-  dim: (s) => `\x1b[2m${s}\x1b[0m`,
-  bold: (s) => `\x1b[1m${s}\x1b[0m`,
-  green: (s) => `\x1b[32m${s}\x1b[0m`,
-  red: (s) => `\x1b[31m${s}\x1b[0m`,
-  yellow: (s) => `\x1b[33m${s}\x1b[0m`,
-  blue: (s) => `\x1b[36m${s}\x1b[0m`,
-};
+// --- Context: one file, migrating the legacy provision state in once -------
 
-const ok = (s) => console.log(`${c.green("✓")} ${s}`);
-const info = (s) => console.log(`${c.blue("→")} ${s}`);
-const warn = (s) => console.log(`${c.yellow("!")} ${s}`);
-
-function die(message, hint) {
-  console.error(`\n${c.red("✗")} ${message}`);
-  if (hint) console.error(`\n${hint}\n`);
-  process.exit(1);
+let ctx = loadContext();
+if (existsSync(LEGACY_STATE)) {
+  // ctx (.pagevault.json) wins; the legacy file only fills gaps (team, auds, groupId from an
+  // older provision). Then stop depending on it — deploy/destroy read .pagevault.json.
+  const legacy = JSON.parse(readFileSync(LEGACY_STATE, "utf8"));
+  ctx = { ...legacy, ...ctx, rung: ctx.rung ?? 3 };
+  saveContext(ctx);
+  info(`Migrated ${LEGACY_STATE} into .pagevault.json`);
 }
 
-const rl = createInterface({ input: stdin, output: stdout });
-const ask = async (question, fallback) => {
-  const answer = (await rl.question(`  ${question}${fallback ? c.dim(` [${fallback}]`) : ""}: `)).trim();
-  return answer || fallback || "";
-};
+const token = loadCloudToken();
+if (!token) die("No Cloudflare token.", "Run `make setup` first — it captures and saves one.");
 
-/** Every Cloudflare API response has the same envelope. Unwrap it once, here. */
-async function cf(token, path, init = {}) {
-  const res = await fetch(`${API}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...init.headers,
-    },
-  });
+const { host, ownerEmail } = ctx;
+if (!host || !host.includes(".")) die("Rung 3 needs a hostname.", "Run `make setup` and choose rung 3 with a host.");
+if (!ownerEmail || !ownerEmail.includes("@")) die("Rung 3 needs an owner email.", "Run `make setup`.");
 
-  let body;
-  try {
-    body = await res.json();
-  } catch {
-    die(`Cloudflare returned a non-JSON response from ${path} (HTTP ${res.status})`);
-  }
+// --- Account: verify the token reaches the account setup pinned ------------
 
-  if (!body.success) {
-    const errors = (body.errors ?? []).map((e) => `  [${e.code}] ${e.message}`).join("\n");
-    die(`Cloudflare API error on ${init.method ?? "GET"} ${path}\n${errors}`, hintFor(body.errors));
-  }
-
-  return body.result;
+const accts = await cfApi("/accounts");
+const accounts = accts.ok ? accts.result ?? [] : [];
+const account = ctx.accountId ? accounts.find((a) => a.id === ctx.accountId) : accounts[0];
+if (!account) {
+  die(
+    ctx.accountId ? "This token doesn't reach the pinned account." : "This token reaches no account.",
+    "Re-run `make setup` (it pins the account), or check the token.",
+  );
 }
+ok(`Account: ${acct(account)}`);
 
-/** Turn Cloudflare's error codes into something actionable. */
-function hintFor(errors = []) {
-  const codes = errors.map((e) => e.code);
-
-  if (codes.includes(9109) || codes.includes(10000)) {
-    return [
-      "That usually means the API token is missing a permission.",
-      "",
-      "PageVault needs, on the ACCOUNT:",
-      "  Access: Apps and Policies                              — Edit",
-      "  Access: Organizations, Identity Providers, and Groups  — Edit   ← groups live here,",
-      "                                                                     and it is easy to miss",
-      "  Workers KV Storage                                     — Edit",
-      "  Workers Scripts                                        — Edit",
-      "  Account Settings                                       — Read",
-      "and on the ZONE:",
-      "  Workers Routes                                         — Edit",
-      "",
-      "Create one at: https://dash.cloudflare.com/profile/api-tokens",
-    ].join("\n");
-  }
-  return null;
-}
-
-/** Read a value from the environment, or from .env.local, which is gitignored. */
-function fromEnv(key) {
-  if (process.env[key]) return process.env[key];
-  if (!existsSync(".env.local")) return null;
-
-  const line = readFileSync(".env.local", "utf8")
-    .split("\n")
-    .find((l) => l.trim().startsWith(`${key}=`));
-
-  return line ? line.slice(line.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "") : null;
-}
-
-const loadState = () => (existsSync(STATE) ? JSON.parse(readFileSync(STATE, "utf8")) : {});
-const saveState = (state) => writeFileSync(STATE, `${JSON.stringify(state, null, 2)}\n`);
-
-// ---------------------------------------------------------------------------
-
-console.log(`\n${c.bold("PageVault — Cloudflare provisioning")}\n`);
-
-const state = loadState();
-
-// --- 1. Token -------------------------------------------------------------
-
-const token = fromEnv("CF_API_TOKEN") ?? (await ask("Cloudflare API token"));
-if (!token) {
-  die("No API token.", [
-    "Create one at https://dash.cloudflare.com/profile/api-tokens with the permissions",
-    "listed at the top of scripts/provision.mjs, then either:",
-    "",
-    "  echo 'CF_API_TOKEN=...' >> .env.local     (gitignored)",
-    "  export CF_API_TOKEN=...",
-  ].join("\n"));
-}
-
-await cf(token, "/user/tokens/verify");
-ok("API token is valid");
-
-// --- 2. Account -----------------------------------------------------------
-
-const accounts = await cf(token, "/accounts");
-if (accounts.length === 0) die("This token can't see any Cloudflare accounts.");
-
-let account = accounts[0];
-if (accounts.length > 1) {
-  console.log("\n  Accounts:");
-  accounts.forEach((a, i) => console.log(`    ${i + 1}. ${a.name} ${c.dim(a.id)}`));
-  const pick = Number(await ask("\n  Which account? (number)", "1"));
-  account = accounts[pick - 1] ?? accounts[0];
-}
-ok(`Account: ${account.name} ${c.dim(account.id)}`);
-
-// --- 3. Zero Trust --------------------------------------------------------
+// --- Zero Trust: detect, deep-link, stop -----------------------------------
 //
-// The one step that genuinely cannot be automated. The org-creation API has no
-// plan-selection field, and Cloudflare's onboarding requires picking a plan (and, per
-// their docs, entering payment details — even on the free tier, where you are not
-// charged). So: detect, deep-link, and stop.
+// The one step that genuinely can't be automated — the org-creation API has no plan-selection
+// field, and Cloudflare requires picking a plan (and a card, even on free). So: detect and
+// point.
 
-let org;
-try {
-  org = await cf(token, `/accounts/${account.id}/access/organizations`);
-} catch {
-  org = null;
-}
-
-if (!org?.auth_domain) {
+const org = await cfApi(`/accounts/${account.id}/access/organizations`);
+if (!org.ok || !org.result?.auth_domain) {
   die("Cloudflare Zero Trust is not set up on this account.", [
-    "This is the one step that has to be done by hand — the API has no way to pick a plan.",
-    "It takes about a minute:",
+    "This is the one step that has to be done by hand — the API can't pick a plan. ~1 minute:",
     "",
     `  1. Open  ${c.bold(`https://one.dash.cloudflare.com/${account.id}`)}`,
-    "  2. Choose a team name (any short slug — it becomes <team>.cloudflareaccess.com)",
+    "  2. Choose a team name (becomes <team>.cloudflareaccess.com)",
     "  3. Select the FREE plan",
-    "  4. Re-run this script — it will read the team name back automatically",
-  ].join("\n"));
+    "  4. Re-run `make deploy` — it reads the team name back automatically",
+  ]);
 }
-
-// Cloudflare returns auth_domain as the FULL domain ("acme.cloudflareaccess.com"), not the
-// team slug. The Worker builds the JWKS URL as `https://{team}.cloudflareaccess.com/...`,
-// so passing it through unchanged produces
-// "acme.cloudflareaccess.com.cloudflareaccess.com" — every JWT verification fails,
-// nobody can log in, and it surfaces as an opaque 404. Strip it here, and auth.ts tolerates
-// either form for anyone editing the config by hand.
-const team = org.auth_domain.replace(/\.cloudflareaccess\.com$/, "");
+// auth_domain comes back as the FULL domain ("acme.cloudflareaccess.com"). The Worker builds
+// the JWKS URL from the team slug, so strip the suffix here (auth.ts tolerates either form).
+const team = org.result.auth_domain.replace(/\.cloudflareaccess\.com$/, "");
 ok(`Zero Trust team: ${team} ${c.dim(`(${team}.cloudflareaccess.com)`)}`);
 
-// --- 4. What are we deploying? -------------------------------------------
-
-console.log();
-const host = await ask("Hostname to serve PageVault on", state.host);
-if (!host || !host.includes(".")) die("A hostname is required, e.g. pagevault.example.com");
-
-const ownerEmail = (await ask("Your email (the owner)", state.ownerEmail)).toLowerCase();
-if (!ownerEmail.includes("@")) die("A valid owner email is required.");
+// --- Zone: the host must be a Cloudflare zone ------------------------------
 
 const zoneName = host.split(".").slice(-2).join(".");
-const zones = await cf(token, `/zones?name=${encodeURIComponent(zoneName)}`);
-if (zones.length === 0) {
-  die(`No Cloudflare zone found for "${zoneName}".`, "The domain must already be on Cloudflare DNS.");
+const zres = await cfApi(`/zones?name=${encodeURIComponent(zoneName)}`);
+const zone = zres.ok ? zres.result?.[0] : null;
+if (!zone) die(`No Cloudflare zone found for "${zoneName}".`, "The domain must already be on Cloudflare DNS.");
+ok(`Zone: ${zone.name} ${c.dim(shortId(zone.id))}`);
+
+// --- KV: self-healing, same reconcile as tier0 -----------------------------
+
+let kvId = ctx.kvId;
+{
+  const res = await cfApi(`/accounts/${account.id}/storage/kv/namespaces?per_page=100`);
+  const namespaces = res.ok ? res.result ?? [] : [];
+  const live = kvId ? namespaces.find((n) => n.id === kvId) : null;
+  const byTitle = namespaces.find((n) => n.title === "pagevault");
+  if (live) {
+    ok(`KV namespace ${c.dim(kvId)}`);
+  } else {
+    if (kvId) warn(`Saved KV namespace ${c.dim(kvId)} no longer exists — reconciling.`);
+    if (byTitle) {
+      kvId = byTitle.id;
+      ok(`KV namespace ${c.dim(kvId)} ${c.dim('(reusing the existing "pagevault")')}`);
+    } else {
+      const created = await cfApi(`/accounts/${account.id}/storage/kv/namespaces`, {
+        method: "POST",
+        body: JSON.stringify({ title: "pagevault" }),
+      });
+      if (!created.ok) die(`Couldn't create the KV namespace (${cfErr(created.errors)}).`, "Check 'Workers KV Storage — Edit'.");
+      kvId = created.result.id;
+      ok(`KV namespace created ${c.dim(kvId)}`);
+    }
+  }
 }
-ok(`Zone: ${zones[0].name} ${c.dim(zones[0].id)}`);
 
-// --- 5. KV ----------------------------------------------------------------
-
-const namespaces = await cf(token, `/accounts/${account.id}/storage/kv/namespaces?per_page=100`);
-let kv = namespaces.find((n) => n.title === "pagevault" || n.id === state.kvId);
-
-if (kv) {
-  ok(`KV namespace exists: ${kv.title} ${c.dim(kv.id)}`);
-} else {
-  kv = await cf(token, `/accounts/${account.id}/storage/kv/namespaces`, {
-    method: "POST",
-    body: JSON.stringify({ title: "pagevault" }),
-  });
-  ok(`KV namespace created ${c.dim(kv.id)}`);
-}
-
-// --- 6. One-time PIN ------------------------------------------------------
+// --- One-time PIN: the zero-onboarding mechanism ---------------------------
 //
-// 🔴 The zero-onboarding claim lives or dies here.
-//
-// A fresh Zero Trust org ships with "Sign in with Cloudflare" as its only login method —
-// which authenticates against a Cloudflare account, with a password. A client will never
-// have one, and asking them to create one is exactly the client-side onboarding step that
-// this product's entire premise says must not exist.
-//
-// One-time PIN is the mechanism that makes "no account, no invitation, no password — a
-// link, a six-digit code, done" true. Without it there is no product, only a worse
-// SuiteDash. So it is provisioned, not left to be discovered.
+// 🔴 A fresh Zero Trust org ships with "Sign in with Cloudflare" as its only login method,
+// which needs a Cloudflare account + password — which a client never has. One-time PIN is what
+// makes "a link, a six-digit code, done" true. Provisioned, not left to be discovered.
 
-const idps = await cf(token, `/accounts/${account.id}/access/identity_providers`);
-const otp = idps.find((p) => p.type === "onetimepin");
-
-if (otp) {
+const idpsRes = await cfApi(`/accounts/${account.id}/access/identity_providers`);
+const idps = idpsRes.ok ? idpsRes.result ?? [] : [];
+if (idps.some((p) => p.type === "onetimepin")) {
   ok("One-time PIN is enabled");
 } else {
-  await cf(token, `/accounts/${account.id}/access/identity_providers`, {
+  const r = await cfApi(`/accounts/${account.id}/access/identity_providers`, {
     method: "POST",
     body: JSON.stringify({ type: "onetimepin", name: "One-time PIN", config: {} }),
   });
+  if (!r.ok) die(`Couldn't enable One-time PIN (${cfErr(r.errors)}).`);
   ok("One-time PIN enabled");
   info("  A client gets a six-digit code by email. No account, no password, no invitation.");
 }
-
 if (idps.some((p) => p.type === "cloudflare")) {
   warn('"Sign in with Cloudflare" is also enabled as a login method.');
-  console.log(`  ${c.dim("Harmless — the policy still restricts WHO may log in. But it authenticates")}`);
-  console.log(`  ${c.dim("against a Cloudflare account with a password, which no client will have.")}`);
-  console.log(`  ${c.dim("Remove it in Zero Trust → Settings → Authentication if you want the login")}`);
-  console.log(`  ${c.dim("screen to show only the one option a client can actually use.")}`);
+  console.log(`  ${c.dim("Harmless — the policy still restricts WHO may log in, but it needs a Cloudflare")}`);
+  console.log(`  ${c.dim("account with a password, which no client has. Remove it in Zero Trust → Settings →")}`);
+  console.log(`  ${c.dim("Authentication to show only the option a client can use.")}`);
 }
 
-// --- 7. The viewer group --------------------------------------------------
-//
-// ADR-002. This is what bounds seat consumption. With `Include: Everyone`, any stranger
-// who knows the hostname can authenticate, burn one of the 50 free Zero Trust seats, and —
-// once they are gone — lock out your actual clients. Cloudflare lists that config under
-// "common misconfigurations". The group holds the union of every portal's members, so only
-// people you invited can even reach the login screen.
+// --- The viewer group (ADR-002): what bounds seat consumption --------------
 
-const groups = await cf(token, `/accounts/${account.id}/access/groups`);
-let group = groups.find((g) => g.name === GROUP_NAME);
-
+const groupsRes = await cfApi(`/accounts/${account.id}/access/groups`);
+let group = (groupsRes.ok ? groupsRes.result ?? [] : []).find((g) => g.name === GROUP_NAME);
 if (group) {
-  ok(`Access group exists: ${GROUP_NAME} ${c.dim(group.id)}`);
+  ok(`Access group exists: ${GROUP_NAME} ${c.dim(shortId(group.id))}`);
 } else {
-  group = await cf(token, `/accounts/${account.id}/access/groups`, {
+  const r = await cfApi(`/accounts/${account.id}/access/groups`, {
     method: "POST",
-    body: JSON.stringify({
-      name: GROUP_NAME,
-      include: [{ email: { email: ownerEmail } }],
-    }),
+    body: JSON.stringify({ name: GROUP_NAME, include: [{ email: { email: ownerEmail } }] }),
   });
-  ok(`Access group created: ${GROUP_NAME} ${c.dim(group.id)}`);
+  if (!r.ok) {
+    die(`Couldn't create the viewer group (${cfErr(r.errors)}).`, "Check 'Access: Organizations, Identity Providers, and Groups — Edit' (groups live here).");
+  }
+  group = r.result;
+  ok(`Access group created: ${GROUP_NAME} ${c.dim(shortId(group.id))}`);
   info(`  Seeded with ${ownerEmail}. 'pagevault sync-access' keeps it in step with KV.`);
 }
 
-// --- 8. The two Access applications ---------------------------------------
-//
-// ADR-001. Paths belong to the APPLICATION, not the policy — there is no path field on a
-// policy, so "a bypass policy scoped to /api" is not expressible. And a path-less app
-// swallows the entire host, which is why the console lives at /admin and `/` is a redirect.
-//
-// Two apps, two audiences. They are NOT interchangeable: /v accepts only the docs app's
-// token and /admin only the console app's. A single shared AUD would let any portal viewer
-// present their token to the owner console.
-//
-// Everything else — /p, /pub, /render, /api, /mcp — has NO Access application, which is
-// better than a bypass policy: fewer knobs, and nothing to misconfigure.
+// --- The two Access apps (ADR-001): path-scoped, per-audience --------------
 
 async function ensureApp({ label, domain, policyName, include }) {
-  const apps = await cf(token, `/accounts/${account.id}/access/apps`);
+  const apps = (await cfApi(`/accounts/${account.id}/access/apps`)).result ?? [];
   const existing = apps.find((a) => a.domain === domain);
-
   if (existing) {
     ok(`Access app exists: ${label} ${c.dim(domain)}`);
     return existing.aud;
   }
-
-  const app = await cf(token, `/accounts/${account.id}/access/apps`, {
+  const r = await cfApi(`/accounts/${account.id}/access/apps`, {
     method: "POST",
     body: JSON.stringify({
       name: `PageVault — ${label}`,
       type: "self_hosted",
       domain,
       session_duration: "24h",
-      // The AUD comes back on this response, so nothing has to be copied out of a dashboard.
+      // The AUD comes back on this response, so nothing is copied out of a dashboard.
       policies: [{ name: policyName, decision: "allow", include, precedence: 1 }],
     }),
   });
-
+  if (!r.ok) die(`Couldn't create the "${label}" Access app (${cfErr(r.errors)}).`);
   ok(`Access app created: ${label} ${c.dim(domain)}`);
-  return app.aud;
+  return r.result.aud;
 }
 
 const audDocs = await ensureApp({
@@ -333,7 +193,6 @@ const audDocs = await ensureApp({
   policyName: "pagevault-viewers",
   include: [{ group: { id: group.id } }],
 });
-
 const audAdmin = await ensureApp({
   label: "console",
   domain: `${host}/admin`,
@@ -341,16 +200,52 @@ const audAdmin = await ensureApp({
   include: [{ email: { email: ownerEmail } }],
 });
 
-// --- 9. The generated Worker config ---------------------------------------
+// --- The scoped runtime token (#24) ----------------------------------------
 //
-// Deliberately NOT a rewrite of the committed wrangler.jsonc. This is a public repo: your
-// email, team name, AUD tags and KV id would end up on GitHub the moment you committed.
-// The committed config keeps its placeholders and stays what the tests run against.
+// access-group.ts keeps the viewer group in sync via a Worker secret (CF_API_TOKEN). That is a
+// STANDING credential inside the Worker, so it must be a DEDICATED, narrowly scoped token — one
+// permission, "Access: Organizations, Identity Providers, and Groups — Edit" — not the broad
+// provisioning credential. If the Worker is ever compromised, the blast radius is one Access
+// group. Provision only CAPTURES it (to .env.local as CF_RUNTIME_TOKEN); deploy sets it as the
+// secret after the Worker exists.
+
+let runtimeToken = fromEnv("CF_RUNTIME_TOKEN");
+if (runtimeToken) {
+  ok("Scoped runtime token present (CF_RUNTIME_TOKEN) — deploy will set it as the Worker secret.");
+} else {
+  console.log(`\n  ${c.cyan("Scoped runtime token")} ${c.dim("— lets the Worker keep the viewer group in sync (ADR-002)")}`);
+  console.log(`  ${c.dim("A separate, narrow token — not the provisioning one — so a compromised Worker can")}`);
+  console.log(`  ${c.dim("edit one Access group and nothing else.")}\n`);
+  console.log(`  1. Open  ${c.bold("https://dash.cloudflare.com/profile/api-tokens")}  → Create Custom Token`);
+  console.log(`  2. Name it  ${c.bold("pagevault-runtime")}`);
+  console.log(`  3. One permission — ${c.dim("Account")} ${c.bold("Access: Organizations, Identity Providers, and Groups")} ${c.dim("(Edit)")}`);
+  console.log(`  4. Scope it to ${c.bold(account.name)} and create it.`);
+  if (isInteractive()) {
+    const rl = createInterface({ input: stdin, output: stdout });
+    const pasted = (await rl.question(`\n  Paste it to save to .env.local — or press Enter to skip: `)).trim();
+    rl.close();
+    if (pasted) {
+      writeEnvLocalVar("CF_RUNTIME_TOKEN", pasted);
+      runtimeToken = pasted;
+      ok("Saved CF_RUNTIME_TOKEN to .env.local — deploy will set it as the Worker secret.");
+    }
+  }
+  if (!runtimeToken) {
+    warn("No scoped runtime token yet — adding a client to a portal won't grant Access until it's set.");
+    console.log(`  ${c.dim("Add it anytime:")} ${c.bold("echo 'CF_RUNTIME_TOKEN=…' >> .env.local")} ${c.dim("then re-run")} ${c.bold("make deploy")}.`);
+  }
+}
+
+// --- The generated Worker config -------------------------------------------
+//
+// Not a rewrite of the committed wrangler.jsonc — this is a public repo, and your email,
+// team, AUDs and KV id would land on GitHub. The committed config keeps its placeholders and
+// stays what the tests run against. workers_dev stays false (the template default): at rung 3
+// an open workers.dev would route around Access.
 
 const template = readFileSync(CONFIG_IN, "utf8");
-
 const generated = template
-  .replace(/"id": "REPLACE_WITH_KV_NAMESPACE_ID"/, `"id": "${kv.id}"`)
+  .replace(/"id": "REPLACE_WITH_KV_NAMESPACE_ID"/, `"id": "${kvId}"`)
   .replace(/"OWNER_EMAIL": ""/, `"OWNER_EMAIL": "${ownerEmail}"`)
   .replace(/"CF_TEAM_NAME": ""/, `"CF_TEAM_NAME": "${team}"`)
   .replace(/"PUBLIC_HOST": ""/, `"PUBLIC_HOST": "${host}"`)
@@ -363,33 +258,19 @@ const generated = template
     `"routes": [{ "pattern": "${host}", "custom_domain": true }],\n\n  "observability": {`,
   );
 
-// A generated file that silently failed to substitute would deploy a Worker with no KV and
-// no audiences, and the failure would surface as "nothing works" rather than as an error.
-for (const [key, value] of Object.entries({ kv: kv.id, team, host, audDocs, audAdmin, accountId: account.id, groupId: group.id })) {
+// A silent substitution miss would deploy a Worker with no KV and no audiences, surfacing as
+// "nothing works" rather than an error. Fail loud instead.
+for (const [key, value] of Object.entries({ kv: kvId, team, host, audDocs, audAdmin, accountId: account.id, groupId: group.id })) {
   if (!generated.includes(value)) die(`Failed to write ${key} into ${CONFIG_OUT}. Did the template change?`);
 }
-
 writeFileSync(CONFIG_OUT, generated);
-ok(`Wrote ${CONFIG_OUT} ${c.dim("(gitignored)")}`);
+ok(`Wrote ${CONFIG_OUT} ${c.dim("(rung 3, gitignored)")}`);
 
-saveState({ ...state, host, ownerEmail, accountId: account.id, kvId: kv.id, team, audDocs, audAdmin });
+saveContext({ ...loadContext(), host, ownerEmail, accountId: account.id, kvId, team, audDocs, audAdmin, groupId: group.id });
 
-// --- 10. What's left ------------------------------------------------------
-
-const apiToken = randomBytes(32).toString("hex");
-
-console.log(`\n${c.bold("Provisioned.")} Two things left, both yours to run:\n`);
-console.log(`  ${c.bold("1. Set the API token")} — the CLI and the MCP server authenticate with it.`);
-console.log(`     It also derives the capability-token signing key, so there is no second secret.\n`);
-console.log(`     ${c.dim("A fresh one, if you want it:")}`);
-console.log(`     ${c.bold(apiToken)}\n`);
-console.log(`     npx wrangler secret put PAGEVAULT_API_TOKEN --config ${CONFIG_OUT}\n`);
-console.log(`  ${c.bold("2. Deploy")}\n`);
-console.log(`     make deploy\n`);
-console.log(`  Then open ${c.bold(`https://${host}/v/default`)} in a private window.`);
-console.log(`  You should get a Cloudflare Access login. That is the client experience.\n`);
-warn("Disable the workers.dev subdomain and Preview URLs in the Cloudflare dashboard.");
-console.log(`  ${c.dim("They route around Access entirely. The Worker fails closed without a valid")}`);
-console.log(`  ${c.dim("JWT, so it is not an open door — but it is a required step, not a footnote.")}\n`);
-
-rl.close();
+// Provision's job ends here. deploy runs `wrangler deploy` and sets the secrets — the bearer
+// (PAGEVAULT_API_TOKEN) and, next phase, the scoped runtime CF_API_TOKEN. No manual steps.
+console.log();
+warn("After deploy: disable the workers.dev subdomain and Preview URLs in the dashboard.");
+console.log(`  ${c.dim("They route around Access entirely. The Worker fails closed without a valid JWT, so")}`);
+console.log(`  ${c.dim("it's not an open door — but it's a required step, not a footnote.")}`);
