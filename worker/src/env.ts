@@ -1,6 +1,13 @@
 export interface Env {
   PAGEVAULT: KVNamespace;
 
+  /**
+   * The code this Worker was built from: `<version>+<shortsha>` (ADR-010). Baked at deploy
+   * from package.json + git, so the deployment can report exactly what it's running — via
+   * `/health`, the MCP `serverInfo`, and the console footer. Absent on a hand-run dev build.
+   */
+  PAGEVAULT_VERSION?: string;
+
   /** Vars — plaintext, written into wrangler.jsonc by the provisioning script. */
   OWNER_EMAIL: string;
   CF_TEAM_NAME: string;

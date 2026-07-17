@@ -29,6 +29,13 @@ export default {
     const url = new URL(request.url);
     const { pathname } = url;
 
+    // Version, machine-readable and unauthenticated: what code this deployment is running
+    // (<version>+<sha>, ADR-010). Lets `make verify` and CI (#38) answer "am I up to date?".
+    // No secrets here — the source is public — so there's nothing to gate.
+    if (pathname === "/health") {
+      return json({ name: "pagevault", version: env.PAGEVAULT_VERSION || "unknown" });
+    }
+
     // Remote MCP, Streamable HTTP. Bearer token, and NO Cloudflare Access application —
     // Anthropic's connectors call this from their cloud, with no browser and no way to
     // complete an OTP login, so Access would hard-block them. See ADR-006.

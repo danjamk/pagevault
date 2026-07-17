@@ -27,7 +27,7 @@ export async function handleConsole(request: Request, env: Env): Promise<Respons
 
   const nonce = crypto.randomUUID();
 
-  return new Response(page(session, nonce, identity.email), {
+  return new Response(page(session, nonce, identity.email, env.PAGEVAULT_VERSION || "dev"), {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Content-Security-Policy": [
@@ -59,7 +59,7 @@ const esc = (s: string): string =>
  * a JS string and sent as a bearer; on any 401 the page reloads, which re-authenticates
  * through Access and mints a fresh token (ADR-004).
  */
-function page(session: string, nonce: string, owner: string): string {
+function page(session: string, nonce: string, owner: string, version: string): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -94,6 +94,7 @@ function page(session: string, nonce: string, owner: string): string {
   button.x { border:0; background:none; padding:0 .2rem; color:var(--muted); }
   .empty { color:var(--muted); padding:.55rem 1rem; font-size:.85rem; }
   .err { color:#8a2b2b; }
+  footer { max-width:52rem; margin:0 auto; padding:.25rem 1.25rem 1.5rem; color:var(--muted); font-size:.72rem; }
 </style>
 </head>
 <body>
@@ -102,6 +103,7 @@ function page(session: string, nonce: string, owner: string): string {
   <span class="who">${esc(owner)}</span>
 </header>
 <main id="app"><p class="empty">Loading…</p></main>
+<footer>PageVault ${esc(version)}</footer>
 <script nonce="${nonce}">
   const T = ${JSON.stringify(session)};
   const app = document.getElementById("app");

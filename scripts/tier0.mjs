@@ -13,7 +13,7 @@
 //   node scripts/tier0.mjs --kv <id>  # skip KV creation, use this one
 //
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, releaseTag } from "./context.mjs";
 
 const CONFIG_IN = "worker/wrangler.jsonc";
 const CONFIG_OUT = "worker/wrangler.generated.jsonc";
@@ -83,9 +83,11 @@ const template = readFileSync(CONFIG_IN, "utf8");
 // location (and at rung 3 an open workers.dev would route around Access entirely).
 const workersDev = host ? "false" : "true";
 
+const version = releaseTag();
 let generated = template
   .replace(/"id": "REPLACE_WITH_KV_NAMESPACE_ID"/, `"id": "${kvId}"`)
   .replace(/"OWNER_EMAIL": ""/, `"OWNER_EMAIL": "${ownerEmail}"`)
+  .replace(/"PAGEVAULT_VERSION": ""/, `"PAGEVAULT_VERSION": "${version}"`)
   .replace(/"workers_dev": false/, `"workers_dev": ${workersDev}`);
 
 // 🔴 Pin the deploy to the account preflight verified. Without this, wrangler falls back to
