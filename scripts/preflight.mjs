@@ -176,6 +176,7 @@ const url = rung >= 2 && host ? `https://${host}` : `https://pagevault.${subName
 console.log(`  ${c.cyan("Plan")}  ${c.bold(url)}`);
 console.log(`        ${c.dim(`creates a KV namespace${rung >= 3 ? ", Access apps + a viewer group" : ""}, and your bearer secret`)}`);
 if (rung < 2 && !sub.result?.subdomain) console.log(`        ${c.dim(`registers the "${subName}" workers.dev subdomain`)}`);
+if (rung >= 3) console.log(`        ${c.dim("deploy will prompt for a scoped runtime token — skippable (see the README)")}`);
 console.log();
 console.log(`  ${c.green(`Ready for rung ${rung}.`)}${warns ? ` ${warns} note(s) above.` : ""}  Next: ${c.bold("make deploy")}\n`);
 process.exit(0);
