@@ -1,174 +1,191 @@
 #!/usr/bin/env node
 //
-// Tear down a PageVault deployment on Cloudflare.
+// make destroy — tear a PageVault deployment down. Irreversible. It asks.
 //
-//   Worker · DNS record · Access applications · Access group · KV namespace (and its data)
+//   node scripts/destroy.mjs               # tear it all down
+//   node scripts/destroy.mjs --keep-data   # leave the KV namespace and its documents
 //
-// The mirror image of provision.mjs, and it exists for the same reason: the setup path is
-// the product for anyone who isn't you, and you cannot test a setup path you cannot undo.
-// Without this, every rehearsal of the fork experience leaves debris behind and the next
-// one is not a clean surface.
+// Ladder-aware. A rung-3 deployment has Access applications, a viewer group, and a
+// custom-domain DNS record; a rung-1/2 deployment is just a Worker and a KV namespace. This
+// reads the state files to learn which, and only deletes what actually exists.
 //
-//   node scripts/destroy.mjs                 # asks before each step
-//   node scripts/destroy.mjs --keep-data      # leave the KV namespace and its documents
+// 🔴 SAFETY — this is the one command that deletes client data, so it refuses to act on the
+// wrong account. It reads the account the deployment is pinned to, checks the token in THIS
+// clone's .env.local actually reaches that account, and dies on a mismatch — automatically,
+// before any prompt. "Which account" is the mistake a hostname prompt alone does not catch:
+// you can type the right hostname into the wrong account. The token is the token-first
+// CLOUDFLARE_API_TOKEN, the same one every other command uses.
 //
-// This deletes documents. It asks. Twice.
-
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import { c, ok, warn, die, loadCloudToken, cfApi, cfAccounts, isInteractive, printTokenSetup } from "./context.mjs";
 
-const API = "https://api.cloudflare.com/client/v4";
-const CONFIG_OUT = "worker/wrangler.generated.jsonc";
-const STATE = ".pagevault-provision.json";
-const GROUP_NAME = "pagevault-viewers";
 const WORKER_NAME = "pagevault";
-
+const GROUP_NAME = "pagevault-viewers";
+const CONFIG_OUT = "worker/wrangler.generated.jsonc";
+const PROVISION_STATE = ".pagevault-provision.json";
+const CONTEXT_FILE = ".pagevault.json";
 const KEEP_DATA = process.argv.includes("--keep-data");
 
-const c = {
-  dim: (s) => `\x1b[2m${s}\x1b[0m`,
-  bold: (s) => `\x1b[1m${s}\x1b[0m`,
-  green: (s) => `\x1b[32m${s}\x1b[0m`,
-  red: (s) => `\x1b[31m${s}\x1b[0m`,
-  yellow: (s) => `\x1b[33m${s}\x1b[0m`,
-};
-
-const ok = (s) => console.log(`${c.green("✓")} ${s}`);
 const skip = (s) => console.log(`${c.dim(`· ${s}`)}`);
-const warn = (s) => console.log(`${c.yellow("!")} ${s}`);
-
-function die(message) {
-  console.error(`\n${c.red("✗")} ${message}\n`);
-  process.exit(1);
-}
-
 const rl = createInterface({ input: stdin, output: stdout });
 const ask = async (q) => (await rl.question(`  ${q} `)).trim();
 
-async function cf(token, path, init = {}) {
-  const res = await fetch(`${API}${path}`, {
-    ...init,
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", ...init.headers },
-  });
+console.log(`\n${c.head("PageVault — tear down")}\n`);
 
-  // A 404 on a delete means it is already gone, which is success for our purposes.
-  if (res.status === 404) return null;
+// --- Resolve the deployment: rung 3 (provision) or rung 1/2 (context) ------
 
-  const body = await res.json().catch(() => null);
-  if (!body?.success) {
-    const errors = (body?.errors ?? []).map((e) => `  [${e.code}] ${e.message}`).join("\n");
-    warn(`Cloudflare API error on ${init.method ?? "GET"} ${path}\n${errors}`);
-    return null;
-  }
-  return body.result;
+let tier, host, kvId, accountId, state;
+if (existsSync(PROVISION_STATE)) {
+  state = JSON.parse(readFileSync(PROVISION_STATE, "utf8"));
+  tier = 3;
+  ({ host, kvId, accountId } = state);
+} else if (existsSync(CONTEXT_FILE)) {
+  state = JSON.parse(readFileSync(CONTEXT_FILE, "utf8"));
+  tier = (state.rung ?? 1) >= 3 ? 3 : state.rung ?? 1;
+  kvId = state.kvId;
+  accountId = state.accountId;
+  host = state.host || (state.deployedUrl ? new URL(state.deployedUrl).host : "");
+} else {
+  die("Nothing to tear down — no .pagevault.json or .pagevault-provision.json in this clone.");
+}
+if (!accountId) die("State names no account, so a target can't be verified.", "Nothing was touched.");
+
+// --- The token, token-first ------------------------------------------------
+
+const token = loadCloudToken();
+if (!token) {
+  console.log(`  ${c.red("✗")} No Cloudflare token — nothing can be deleted, which is the safe default.\n`);
+  printTokenSetup();
+  console.log();
+  die("Set CLOUDFLARE_API_TOKEN in .env.local, then re-run.");
 }
 
-function fromEnv(key) {
-  if (process.env[key]) return process.env[key];
-  if (!existsSync(".env.local")) return null;
-  const line = readFileSync(".env.local", "utf8").split("\n").find((l) => l.trim().startsWith(`${key}=`));
-  return line ? line.slice(line.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "") : null;
+// --- 🔴 The account guard — refuse a wrong-clone teardown automatically -----
+
+const accounts = await cfAccounts();
+if (accounts.length === 0) {
+  die("The token reaches no accounts.", "Check it, and its 'Account Settings — Read' scope.");
+}
+const account = accounts.find((a) => a.id === accountId);
+if (!account) {
+  die(
+    "This token does not reach the account this deployment is on — wrong clone, or wrong token.",
+    [
+      `  Deployment is on: ${c.bold(accountId)}`,
+      `  Token reaches:    ${accounts.map((a) => `${a.name} (${a.id})`).join(", ")}`,
+      "",
+      "  Nothing was touched.",
+    ],
+  );
 }
 
-// ---------------------------------------------------------------------------
+// --- The plan --------------------------------------------------------------
 
-console.log(`\n${c.bold("PageVault — tear down")}\n`);
-
-if (!existsSync(STATE)) {
-  die(`No ${STATE}. Nothing to tear down — or this was provisioned from somewhere else.`);
+const target = host || `${WORKER_NAME}.workers.dev`;
+console.log(`  Account:  ${c.bold(account.name)} ${c.dim(account.id)}`);
+console.log(`  Target:   ${c.bold(target)} ${c.dim(`· rung ${tier}`)}\n`);
+console.log(`  This will delete:\n`);
+console.log(`    · the Worker "${WORKER_NAME}"${tier >= 2 ? " and its custom-domain DNS record" : ""}`);
+if (tier >= 3) {
+  console.log(`    · both Access applications (${host}/v and ${host}/admin)`);
+  console.log(`    · the "${GROUP_NAME}" Access group`);
 }
-
-const state = JSON.parse(readFileSync(STATE, "utf8"));
-const token = fromEnv("CF_API_TOKEN");
-if (!token) die("No CF_API_TOKEN in the environment or .env.local.");
-
-const { accountId, host, kvId } = state;
-
-console.log(`  This will destroy, on ${c.bold(host)}:\n`);
-console.log(`    · the Worker "${WORKER_NAME}" and its DNS record`);
-console.log(`    · both Access applications (${host}/v and ${host}/admin)`);
-console.log(`    · the "${GROUP_NAME}" Access group`);
 console.log(
   KEEP_DATA
-    ? `    ${c.dim(`· KV namespace KEPT (--keep-data)`)}`
-    : `    · ${c.red("the KV namespace — every portal and every document in it")}`,
+    ? `    ${c.dim("· KV namespace KEPT (--keep-data)")}`
+    : `    · ${c.red("the KV namespace — every document in it")}`,
 );
 console.log();
 
-if ((await ask(`Type the hostname to confirm:`)) !== host) die("Did not match. Nothing was touched.");
+// --- Confirm intent --------------------------------------------------------
+
+if (!isInteractive()) die("Refusing to destroy non-interactively.", "Run it in a terminal so it can confirm.");
+if ((await ask(`Type the target to confirm (${c.bold(target)}):`)) !== target) {
+  die("Did not match. Nothing was touched.");
+}
 if (!KEEP_DATA && (await ask(`This deletes all documents. Type ${c.bold("destroy")}:`)) !== "destroy") {
   die("Nothing was touched.");
 }
 console.log();
 
-// --- The Worker (and, with it, the custom domain) --------------------------
-//
-// Deleting the script removes the Custom Domain binding and the DNS record Cloudflare
-// created for it. That is why this goes first: with the Worker gone, nothing is serving on
-// the hostname while the rest is torn down.
+// --- Delete. A 404 means it is already gone, which is success for us. -------
 
-const worker = await cf(token, `/accounts/${accountId}/workers/scripts/${WORKER_NAME}`, {
-  method: "DELETE",
-});
-if (worker !== null) ok(`Worker "${WORKER_NAME}" deleted (and its DNS record)`);
-else skip(`Worker "${WORKER_NAME}" was already gone`);
+const del = async (path) => {
+  const r = await cfApi(path, { method: "DELETE" });
+  return r.ok || r.status === 404;
+};
 
-// --- Access applications --------------------------------------------------
+// The Worker first: deleting the script removes the custom-domain binding and the DNS record
+// Cloudflare created for it (rung 2+), so nothing serves the hostname while the rest goes.
+(await del(`/accounts/${accountId}/workers/scripts/${WORKER_NAME}`))
+  ? ok(`Worker "${WORKER_NAME}" deleted${tier >= 2 ? " (and its DNS record)" : ""}`)
+  : warn(`Worker "${WORKER_NAME}" may not have been deleted — check the dashboard.`);
 
-const apps = (await cf(token, `/accounts/${accountId}/access/apps`)) ?? [];
-const ours = apps.filter((a) => a.domain === `${host}/v` || a.domain === `${host}/admin`);
+if (tier >= 3) {
+  const apps = (await cfApi(`/accounts/${accountId}/access/apps`)).result ?? [];
+  const ours = apps.filter((a) => a.domain === `${host}/v` || a.domain === `${host}/admin`);
+  for (const app of ours) {
+    await del(`/accounts/${accountId}/access/apps/${app.id}`);
+    ok(`Access app deleted: ${app.domain}`);
+  }
+  if (!ours.length) skip("No Access apps to delete");
 
-for (const app of ours) {
-  await cf(token, `/accounts/${accountId}/access/apps/${app.id}`, { method: "DELETE" });
-  ok(`Access app deleted: ${app.domain}`);
+  const groups = (await cfApi(`/accounts/${accountId}/access/groups`)).result ?? [];
+  const group = groups.find((g) => g.name === GROUP_NAME);
+  if (group) {
+    await del(`/accounts/${accountId}/access/groups/${group.id}`);
+    ok(`Access group deleted: ${GROUP_NAME}`);
+  } else {
+    skip(`No "${GROUP_NAME}" group to delete`);
+  }
 }
-if (ours.length === 0) skip("No Access apps to delete");
-
-// --- The viewer group -----------------------------------------------------
-
-const groups = (await cf(token, `/accounts/${accountId}/access/groups`)) ?? [];
-const group = groups.find((g) => g.name === GROUP_NAME);
-
-if (group) {
-  await cf(token, `/accounts/${accountId}/access/groups/${group.id}`, { method: "DELETE" });
-  ok(`Access group deleted: ${GROUP_NAME}`);
-} else {
-  skip(`No "${GROUP_NAME}" group to delete`);
-}
-
-// --- KV -------------------------------------------------------------------
 
 if (KEEP_DATA) {
-  skip(`KV namespace kept ${c.dim(kvId)}`);
+  skip(`KV namespace kept ${c.dim(kvId ?? "")}`);
 } else if (kvId) {
-  await cf(token, `/accounts/${accountId}/storage/kv/namespaces/${kvId}`, { method: "DELETE" });
-  ok(`KV namespace deleted ${c.dim(kvId)} — every document with it`);
+  (await del(`/accounts/${accountId}/storage/kv/namespaces/${kvId}`))
+    ? ok(`KV namespace deleted ${c.dim(kvId)} — every document with it`)
+    : warn(`KV namespace ${kvId} may not have been deleted — check the dashboard.`);
+} else {
+  skip("No KV namespace id in state");
 }
 
-// --- Local artifacts ------------------------------------------------------
+// --- Local artifacts -------------------------------------------------------
 
-for (const file of [CONFIG_OUT, ...(KEEP_DATA ? [] : [STATE])]) {
-  if (existsSync(file)) {
-    unlinkSync(file);
-    ok(`Removed ${file}`);
-  }
+if (existsSync(CONFIG_OUT)) {
+  unlinkSync(CONFIG_OUT);
+  ok(`Removed ${CONFIG_OUT}`);
+}
+if (tier >= 3 && !KEEP_DATA && existsSync(PROVISION_STATE)) {
+  unlinkSync(PROVISION_STATE);
+  ok(`Removed ${PROVISION_STATE}`);
+}
+// Rung 1/2: keep .pagevault.json — it's your intent (rung, email, host) and re-runnable — but
+// strip the now-dead discovered state, so a later `make deploy` builds fresh rather than
+// reusing a KV id that no longer exists.
+if (tier < 3 && !KEEP_DATA && existsSync(CONTEXT_FILE)) {
+  const ctx = JSON.parse(readFileSync(CONTEXT_FILE, "utf8"));
+  delete ctx.kvId;
+  delete ctx.deployedUrl;
+  writeFileSync(CONTEXT_FILE, `${JSON.stringify(ctx, null, 2)}\n`);
+  ok(`Cleared the stale KV id and URL from ${CONTEXT_FILE} ${c.dim("(kept your rung, email, host)")}`);
 }
 
 // --- What we deliberately do NOT touch -------------------------------------
 
-console.log(`\n${c.bold("Left alone, deliberately:")}\n`);
-console.log(`  · ${c.bold("Zero Trust itself")} — the org, the team name, the login methods.`);
-console.log(`    ${c.dim("Account-wide. Tearing it down would affect anything else using Access,")}`);
-console.log(`    ${c.dim("and re-enabling it is the one step that cannot be automated.")}`);
-console.log();
-console.log(`  · ${c.bold("Access seats")} — anyone who logged in still holds one.`);
-console.log(`    ${c.dim("Zero Trust → Team & Resources → Users → Remove, if you want them back.")}`);
-console.log(`    ${c.dim("Worth knowing: this is the number that runs out at 50, and deleting the")}`);
-console.log(`    ${c.dim("apps does not give them back.")}`);
-console.log();
-console.log(`  · ${c.bold("PAGEVAULT_API_TOKEN")} — the secret died with the Worker.`);
-console.log();
-console.log(`${c.bold("Clean.")} 'make provision' will build it again from nothing.\n`);
+if (tier >= 3) {
+  console.log(`\n${c.bold("Left alone, deliberately:")}\n`);
+  console.log(`  · ${c.bold("Zero Trust itself")} — the org, the team name, the login methods.`);
+  console.log(`    ${c.dim("Account-wide; tearing it down would affect anything else using Access,")}`);
+  console.log(`    ${c.dim("and re-enabling it is the one step that cannot be automated.")}`);
+  console.log();
+  console.log(`  · ${c.bold("Access seats")} — anyone who logged in still holds one.`);
+  console.log(`    ${c.dim("Zero Trust → Team & Resources → Users → Remove, if you want them back.")}`);
+}
+console.log(
+  `\n${c.bold("Clean.")} ${tier >= 3 ? "'make provision'" : "'make deploy'"} will build it again from what's left.\n`,
+);
 
 rl.close();

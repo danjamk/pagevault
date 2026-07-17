@@ -2,6 +2,7 @@ import { handleApi, json } from "./api.js";
 import { handleConsole } from "./console.js";
 import type { Env } from "./env.js";
 import { handleMcp } from "./mcp.js";
+import { rootLanding } from "./pages.js";
 import { handlePortalRoute, handlePublicPortalRoute } from "./portal.js";
 import { getMeta, getPublicTokenTarget } from "./store.js";
 import { handleRender, renderShell } from "./viewer.js";
@@ -35,10 +36,15 @@ export default {
       return handleMcp(request, env, ctx);
     }
 
-    // An Access app at `/` would cover the entire host, so the console cannot live
-    // there. `/` is an unauthenticated redirect. See ADR-001.
+    // An Access app at `/` would cover the entire host, so the console cannot live there;
+    // `/` reaches the Worker unauthenticated, with no Access app (ADR-001). What it serves
+    // depends on whether Access is provisioned: with a console to reach (rung 3), redirect to
+    // it; without one (rung 1/2), /admin is a dead Forbidden — serve a quiet landing instead,
+    // so the bare host isn't PageVault's worst page. CF_ACCESS_AUD_ADMIN is set only at rung 3.
     if (pathname === "/") {
-      return Response.redirect(new URL("/admin", url).toString(), 302);
+      return env.CF_ACCESS_AUD_ADMIN
+        ? Response.redirect(new URL("/admin", url).toString(), 302)
+        : rootLanding();
     }
 
     if (pathname.startsWith("/api/")) {

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>You published this with PageVault</title>
+<style>
+  :root {
+    --bg: #14110c;
+    --panel: #1c1811;
+    --line: #322a1d;
+    --ink: #efe7d6;
+    --muted: #a99c82;
+    --amber: #e0a24a;
+    --amber-dim: #b9822f;
+    --good: #6fbf73;
+    --bad: #d98a72;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f2e9; --panel: #fffdf8; --line: #e4dcc9;
+      --ink: #241d12; --muted: #6c624d; --amber: #b9822f; --amber-dim: #9a6c25;
+      --good: #3f8f47; --bad: #b4553a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.65 var(--sans); -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 46rem; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
+  .mark { display: flex; align-items: center; gap: .6rem; margin-bottom: 2.5rem; }
+  .aperture { width: 26px; height: 26px; flex: none; }
+  .mark span { font: 600 15px/1 var(--mono); letter-spacing: .02em; color: var(--muted); }
+  h1 {
+    font-size: clamp(1.8rem, 5vw, 2.6rem); line-height: 1.1; letter-spacing: -.02em;
+    margin: 0 0 .6rem; text-wrap: balance;
+  }
+  .lede { font-size: 1.12rem; color: var(--muted); margin: 0 0 2.5rem; }
+  .lede b { color: var(--ink); font-weight: 600; }
+  h2 {
+    font-size: .8rem; text-transform: uppercase; letter-spacing: .12em;
+    color: var(--amber); margin: 2.75rem 0 .9rem;
+  }
+  p { margin: 0 0 1rem; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    padding: 1.25rem 1.4rem; margin: 1.2rem 0;
+  }
+  code { font: .88em var(--mono); color: var(--amber); }
+  .steps { list-style: none; counter-reset: s; padding: 0; margin: 1.2rem 0; }
+  .steps li {
+    counter-increment: s; position: relative; padding: .35rem 0 .35rem 2.4rem; color: var(--muted);
+  }
+  .steps li::before {
+    content: counter(s); position: absolute; left: 0; top: .35rem;
+    width: 1.6rem; height: 1.6rem; border: 1px solid var(--amber-dim); border-radius: 50%;
+    color: var(--amber); font: 600 .8rem/1.6rem var(--mono); text-align: center;
+  }
+  .steps li b { color: var(--ink); font-weight: 600; }
+  button {
+    font: 600 .9rem var(--sans); color: var(--bg); background: var(--amber);
+    border: 0; border-radius: 7px; padding: .55rem 1rem; cursor: pointer;
+  }
+  button:hover { background: var(--amber-dim); }
+  .probe-out { margin-top: 1rem; font: .86rem/1.5 var(--mono); }
+  .probe-out div { padding: .15rem 0; }
+  .yes::before { content: "✓ "; color: var(--good); }
+  .no::before  { content: "✗ "; color: var(--bad); }
+  footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; }
+  a { color: var(--amber); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="mark">
+    <svg class="aperture" viewBox="0 0 100 100" aria-hidden="true">
+      <circle cx="50" cy="50" r="44" fill="none" stroke="var(--amber-dim)" stroke-width="4"/>
+      <g fill="var(--amber)">
+        <path d="M50 10 A40 40 0 0 1 84 30 L50 50 Z" opacity=".9"/>
+        <path d="M84 30 A40 40 0 0 1 84 70 L50 50 Z" opacity=".7"/>
+        <path d="M84 70 A40 40 0 0 1 50 90 L50 50 Z" opacity=".55"/>
+        <path d="M50 90 A40 40 0 0 1 16 70 L50 50 Z" opacity=".7"/>
+        <path d="M16 70 A40 40 0 0 1 16 30 L50 50 Z" opacity=".85"/>
+        <path d="M16 30 A40 40 0 0 1 50 10 L50 50 Z" opacity="1"/>
+      </g>
+    </svg>
+    <span>PAGEVAULT</span>
+  </div>
+
+  <h1>It works. This page proves it.</h1>
+  <p class="lede">If you're reading this at a real URL, your deployment just <b>published a
+  document and handed you a link to it</b> — no login, no Access seat, nothing to configure.
+  That's the whole loop, running.</p>
+
+  <h2>What just happened</h2>
+  <p>You ran <code>make deploy</code> and then <code>make verify</code>. Verify didn't just ping
+  the Worker — it published <em>this file</em> as a public document over the API and printed the
+  link you followed here. Publishing and reading are the same system, and you've now used both.</p>
+
+  <h2>The one thing PageVault refuses to trust</h2>
+  <p>Every document it serves is treated as hostile: LLM-generated, running its own JavaScript,
+  possibly built from content the model never controlled. So it renders inside a
+  <b>sandboxed iframe with an opaque origin</b> — sealed off from the page around it, from your
+  session, and from the network. This very page is running under that seal right now. Test it:</p>
+
+  <div class="panel">
+    <button id="probe">Run the escape attempt</button>
+    <div class="probe-out" id="out"></div>
+  </div>
+
+  <h2>Where it goes from here</h2>
+  <ul class="steps">
+    <li><b>Connect Claude.</b> The same deployment is a remote MCP server. Point Claude at
+      <code>/mcp</code> with your bearer token and it can publish and search from the chat.</li>
+    <li><b>Put it on your domain.</b> Re-run <code>make setup</code> and pick rung 2 — the same
+      documents, now on your own hostname.</li>
+    <li><b>Add client portals.</b> Rung 3 turns on Cloudflare Access: email-secured collections
+      where permissions live on the portal, not the link.</li>
+  </ul>
+
+  <p>Delete this document whenever you like — it was only ever a hello. Replace it with the first
+  real thing you publish.</p>
+
+  <footer>
+    Served from your own Cloudflare Worker on the free tier. PageVault is MIT-licensed —
+    fork it, read it in one sitting, make it yours.
+  </footer>
+
+</div>
+
+<script>
+  // A live probe of the sandbox boundary. Each check TRIES to do something a hostile
+  // artifact would want to do, and reports whether the seal stopped it. Under a correct
+  // sandbox the origin is opaque, so both the parent shell and storage are walled off.
+  document.getElementById("probe").addEventListener("click", () => {
+    const out = document.getElementById("out");
+    const rows = [];
+    const add = (ok, msg) => rows.push(`<div class="${ok ? "yes" : "no"}">${msg}</div>`);
+
+    // 1. Cookies — an opaque origin has none, and can set none.
+    add(document.cookie === "", `Your session cookies: ${document.cookie === "" ? "unreachable" : "EXPOSED — " + document.cookie}`);
+
+    // 2. The parent shell — with the origin left opaque, cross-origin access must throw.
+    let reachedParent = false;
+    try { void window.parent.document.title; reachedParent = true; } catch (e) { reachedParent = false; }
+    add(!reachedParent, reachedParent ? "Reached the shell around me — LEAK" : "The trusted shell around me: walled off");
+
+    // 3. Origin — sandboxed artifacts report a null/opaque origin.
+    const opaque = location.origin === "null" || location.origin === "";
+    add(opaque, `My origin reports as "${location.origin || "null"}" ${opaque ? "(opaque — as it should be)" : "(not opaque)"}`);
+
+    // 4. localStorage — often throws outright under the seal.
+    let storageBlocked = false;
+    try { window.localStorage.setItem("x", "1"); window.localStorage.removeItem("x"); } catch (e) { storageBlocked = true; }
+    add(true, storageBlocked ? "Persistent storage: denied" : "Persistent storage: private to this artifact");
+
+    out.innerHTML = rows.join("");
+  });
+</script>
+</body>
+</html>

@@ -1,5 +1,7 @@
 import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import type { Env } from "../src/env.js";
+import { consoleForbidden, rootLanding } from "../src/pages.js";
 
 /**
  * Phase 0 (#1). These prove the toolchain, not the product.
@@ -40,7 +42,9 @@ describe("toolchain", () => {
 });
 
 describe("router", () => {
-  it("redirects / to /admin", async () => {
+  it("redirects / to /admin when Access is provisioned", async () => {
+    // The test bindings set CF_ACCESS_AUD_ADMIN (rung 3), so there is a console to reach.
+    // With it unset (rung 1/2) the router serves the landing instead — see pages.test below.
     const res = await SELF.fetch("https://share.example.com/", { redirect: "manual" });
 
     expect(res.status).toBe(302);
@@ -70,5 +74,30 @@ describe("router", () => {
     // is misconfigured, because an unauthenticated request cannot reach /v/* unless it is.
     const res = await SELF.fetch("https://share.example.com/v/nosuchportal");
     expect(res.status).toBe(500);
+  });
+});
+
+describe("publish-mode pages", () => {
+  it("the root landing is a 200 that leaks nothing about the operator", async () => {
+    const res = rootLanding();
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    // It names the software (fine) but never the owner, a portal, or a document.
+    expect(body).toContain("PageVault");
+    expect(body).not.toContain(env.OWNER_EMAIL);
+    // Static page: no script anywhere, and the CSP forbids it.
+    expect(body).not.toContain("<script");
+    expect(res.headers.get("Content-Security-Policy")).not.toContain("script-src");
+    expect(res.headers.get("X-Robots-Tag")).toContain("noindex");
+  });
+
+  it("the console 403 is friendly and context-aware", async () => {
+    const withAccess = consoleForbidden({ CF_ACCESS_AUD_ADMIN: "some-aud" } as Env);
+    expect(withAccess.status).toBe(403);
+    expect(await withAccess.text()).toContain("Owner only");
+
+    const withoutAccess = consoleForbidden({ CF_ACCESS_AUD_ADMIN: "" } as Env);
+    expect(withoutAccess.status).toBe(403);
+    expect(await withoutAccess.text()).toContain("isn't enabled");
   });
 });
