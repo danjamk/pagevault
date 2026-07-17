@@ -213,16 +213,19 @@ let runtimeToken = fromEnv("CF_RUNTIME_TOKEN");
 if (runtimeToken) {
   ok("Scoped runtime token present (CF_RUNTIME_TOKEN) — deploy will set it as the Worker secret.");
 } else {
-  console.log(`\n  ${c.cyan("Scoped runtime token")} ${c.dim("— lets the Worker keep the viewer group in sync (ADR-002)")}`);
-  console.log(`  ${c.dim("A separate, narrow token — not the provisioning one — so a compromised Worker can")}`);
-  console.log(`  ${c.dim("edit one Access group and nothing else.")}\n`);
+  console.log(`\n  ${c.cyan("Scoped runtime token")} ${c.dim("— a SECOND token, separate from your CLOUDFLARE_API_TOKEN")}`);
+  console.log(`  ${c.dim("This one lives INSIDE the Worker (as the CF_API_TOKEN secret) and keeps the viewer")}`);
+  console.log(`  ${c.dim("group in sync as portal members change (ADR-002). It's deliberately narrow — one")}`);
+  console.log(`  ${c.dim("permission — because your provisioning token is too broad to sit in a Worker.")}\n`);
   console.log(`  1. Open  ${c.bold("https://dash.cloudflare.com/profile/api-tokens")}  → Create Custom Token`);
   console.log(`  2. Name it  ${c.bold("pagevault-runtime")}`);
   console.log(`  3. One permission — ${c.dim("Account")} ${c.bold("Access: Organizations, Identity Providers, and Groups")} ${c.dim("(Edit)")}`);
-  console.log(`  4. Scope it to ${c.bold(account.name)} and create it.`);
+  console.log(`  4. Scope it to ${c.bold(account.name)}, create it, copy the value.`);
   if (isInteractive()) {
     const rl = createInterface({ input: stdin, output: stdout });
-    const pasted = (await rl.question(`\n  Paste it to save to .env.local — or press Enter to skip: `)).trim();
+    const pasted = (await rl.question(
+      `\n  Paste it to save as ${c.bold("CF_RUNTIME_TOKEN")} in .env.local — or Enter to skip ${c.dim("(owner still works; sync off)")}: `,
+    )).trim();
     rl.close();
     if (pasted) {
       writeEnvLocalVar("CF_RUNTIME_TOKEN", pasted);
