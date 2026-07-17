@@ -96,15 +96,30 @@ if (account) {
     else if (zone.status !== "active") warn("Domain zone", `"${zoneName}" is "${zone.status}" — nameservers may not be live yet`);
     else {
       pass("Domain zone", `${zone.name} active`);
-      const dns = await cfApi(`/zones/${zone.id}/dns_records?name=${encodeURIComponent(host)}`);
-      if (!dns.ok) {
-        warn("DNS record", `couldn't check for an existing "${host}" record (${cfErr(dns.errors)})`,
-          "Add 'DNS — Read' to the token, or just watch for a conflict at deploy.");
-      } else if ((dns.result ?? []).length) {
-        fail("DNS record", `"${host}" already has a ${dns.result[0].type} record — a custom domain can't be created over it`,
-          `Delete the "${host}" record in Cloudflare DNS, or pick another hostname (make setup).`);
+
+      // A Worker custom domain for this host is NOT a conflict — redeploying the same custom
+      // domain to the same Worker is idempotent. Check the Workers custom-domains API first: a
+      // Worker custom domain shows in DNS as a locked AAAA record, so a naive "any record here
+      // = conflict" reads our OWN binding as a blocker. Only a foreign record, or a different
+      // Worker's domain, actually blocks.
+      const wd = await cfApi(`/accounts/${account.id}/workers/domains?zone_id=${zone.id}&hostname=${encodeURIComponent(host)}`);
+      const bound = (wd.ok ? wd.result ?? [] : []).find((d) => d.hostname === host);
+      if (bound) {
+        bound.service === "pagevault"
+          ? pass("Custom domain", `${host} already bound to this Worker ${c.dim("— idempotent redeploy")}`)
+          : fail("Custom domain", `${host} is bound to a different Worker ("${bound.service}")`,
+              "Pick another hostname (make setup), or remove that binding in the dashboard.");
       } else {
-        pass("DNS record", `"${host}" is free`);
+        const dns = await cfApi(`/zones/${zone.id}/dns_records?name=${encodeURIComponent(host)}`);
+        if (!dns.ok) {
+          warn("DNS record", `couldn't check for an existing "${host}" record (${cfErr(dns.errors)})`,
+            "Add 'DNS — Read' to the token, or just watch for a conflict at deploy.");
+        } else if ((dns.result ?? []).length) {
+          fail("DNS record", `"${host}" already has a ${dns.result[0].type} record — a custom domain can't be created over it`,
+            `Delete the "${host}" record in Cloudflare DNS, or pick another hostname (make setup).`);
+        } else {
+          pass("DNS record", `"${host}" is free`);
+        }
       }
     }
   }
@@ -137,6 +152,15 @@ for (const f of findings) {
 
 const fails = findings.filter((f) => f.level === "fail").length;
 const warns = findings.filter((f) => f.level === "warn").length;
+
+// If any check couldn't run because the token was refused (auth error), it's almost always a
+// missing SCOPE, not a missing resource — and a scattered set of per-check errors reads as
+// several unrelated problems. Name the real one, once. (Edit scopes can't be probed without
+// mutating, so this is a heuristic, not a guarantee — the deploy is the final word.)
+const authErr = findings.some((f) => /\b(10000|9109)\b|authentication error/i.test(f.detail ?? ""));
+if (authErr) {
+  console.log(`\n  ${c.yellow("!")} ${c.dim(`Auth errors above usually mean the token is missing scopes for rung ${rung} — grant the full set from the README token table.`)}`);
+}
 console.log();
 
 if (fails || !account) {
