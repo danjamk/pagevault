@@ -19,10 +19,6 @@ if (!base) die("No deployed URL in .pagevault.json.", "Run `make deploy` first."
 
 console.log(`\n${c.head("PageVault — verify")} ${c.dim(base)}\n`);
 
-const findings = [];
-const pass = (m) => findings.push(["pass", m]);
-const fail = (m) => findings.push(["fail", m]);
-
 async function get(path, init) {
   try {
     const res = await fetch(`${base}${path}`, { redirect: "manual", ...init });
@@ -32,42 +28,57 @@ async function get(path, init) {
   }
 }
 
-// 1. The Worker is reachable and it is OURS. An unknown path returns our 404 envelope —
-//    a fingerprint no default Cloudflare page or stray Worker would produce.
-{
-  const { status, res, error } = await get("/does-not-exist-" + "x".repeat(8));
-  if (status === 0) fail(`unreachable — ${error}`);
-  else if (status !== 404) fail(`unknown path returned ${status}, expected 404 (is this our Worker?)`);
-  else {
-    const body = await res.json().catch(() => ({}));
-    if (body?.code === "not_found") pass("Worker is live and serving PageVault (404 envelope matches)");
-    else fail(`404, but not our envelope (got ${JSON.stringify(body)}) — different Worker on this host?`);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 1. The Worker is reachable and it is OURS — an unknown path returns our 404 JSON envelope,
+//    a fingerprint Cloudflare's own 404 page (which has no JSON body) never produces. A
+//    brand-new workers.dev route can take up to a minute to go live after the first deploy,
+//    so POLL for it rather than failing on a transient Cloudflare 404 — that's propagation,
+//    not a broken deploy.
+const isOurs = async () => {
+  const { status, res } = await get("/does-not-exist-" + "x".repeat(8));
+  if (status !== 404) return false;
+  const body = await res.json().catch(() => ({}));
+  return body?.code === "not_found";
+};
+
+let live = await isOurs();
+if (!live) {
+  process.stdout.write(`  ${c.dim("Waiting for the route to go live")}`);
+  for (let i = 0; i < 12 && !live; i++) {
+    await sleep(5000);
+    process.stdout.write(c.dim("."));
+    live = await isOurs();
   }
+  process.stdout.write("\n");
 }
 
+if (!live) {
+  console.log(`\n  ${c.red("✗")} The route isn't serving our Worker yet.`);
+  console.log(`\n  ${c.dim("workers.dev routes can take a minute or two to go live on a brand-new subdomain —")}`);
+  console.log(`  ${c.dim("this is propagation, not a broken deploy. Give it a moment, then re-run")} ${c.bold("make verify")}.\n`);
+  process.exit(1);
+}
+console.log(`  ${c.green("✓")} Worker is live and serving PageVault`);
+
 // 2. Root behaves for the rung. At rung 3 (Access) it redirects to the console; below that
-//    there is no console to reach, so it serves the quiet landing (a 200, not a Forbidden).
+//    there is no console to reach, so it serves the quiet landing (200, not a Forbidden).
 {
   const { status, res } = await get("/");
   const loc = res?.headers.get("location") ?? "";
-  if ((ctx.rung ?? 1) >= 3) {
-    if (status === 302 && loc.endsWith("/admin")) pass("Root redirects to /admin");
-    else warn(`Root returned ${status}${loc ? ` → ${loc}` : ""} (expected 302 → /admin at rung 3)`);
+  const rung = ctx.rung ?? 1;
+  if (rung >= 3) {
+    status === 302 && loc.endsWith("/admin")
+      ? console.log(`  ${c.green("✓")} Root redirects to /admin`)
+      : console.log(`  ${c.yellow("!")} Root returned ${status}${loc ? ` → ${loc}` : ""} (expected 302 → /admin at rung 3)`);
   } else {
-    if (status === 200) pass("Root serves the landing page (no console at this rung)");
-    else warn(`Root returned ${status} (expected 200 landing at rung ${ctx.rung ?? 1})`);
+    status === 200
+      ? console.log(`  ${c.green("✓")} Root serves the landing page`)
+      : console.log(`  ${c.yellow("!")} Root returned ${status} (expected 200 landing at rung ${rung})`);
   }
 }
 
-// --- report the smoke test -------------------------------------------------
-
 console.log();
-for (const [level, m] of findings) {
-  console.log(level === "pass" ? `  ${c.green("✓")} ${m}` : `  ${c.red("✗")} ${m}`);
-}
-const fails = findings.filter(([l]) => l === "fail").length;
-console.log();
-if (fails) die(`${fails} check(s) failed — the deployment is up but not serving correctly.`);
 ok("Deployment verified.");
 
 // --- 3. Publish the first document, so there is something to open ----------
