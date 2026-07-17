@@ -62,7 +62,7 @@ re-scoping:
 
 **Account** — `Workers Scripts` (Edit) · `Workers KV Storage` (Edit) · `Account Settings`
 (Read)  ← *rung 1*
-plus for rungs 2–3: `Workers Routes` (Edit) · `Access: Apps and Policies` (Edit) ·
+plus for rungs 2–3: `Workers Routes` (Edit) · `DNS` (Edit) · `Access: Apps and Policies` (Edit) ·
 `Access: Organizations, Identity Providers, and Groups` (Edit — *groups hide here, easy to miss*)
 
 - **Save it:** `echo 'CLOUDFLARE_API_TOKEN=…' > .env.local`  (gitignored, never committed)

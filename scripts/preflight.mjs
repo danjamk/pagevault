@@ -8,8 +8,9 @@
 // to guess at (which is how a wrong-account deploy once clobbered production). Collects every
 // gap in one pass and names the fix.
 //
-import { versions } from "node:process";
-import { c, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr } from "./context.mjs";
+import { createInterface } from "node:readline/promises";
+import { stdin, stdout, versions } from "node:process";
+import { c, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, tokenSetupFlow, isInteractive, slug } from "./context.mjs";
 
 const ctx = loadContext();
 const rung = ctx.rung ?? 1;
@@ -50,11 +51,10 @@ Number(versions.node.split(".")[0]) >= 22
 // --- 2. The token — required at every rung ---------------------------------
 
 if (!token) {
-  fail("Cloudflare token", "no API token — nothing can deploy", [
-    "Create one at https://dash.cloudflare.com/profile/api-tokens (scopes in docs/setup/prerequisites.md),",
-    "then save it:  echo 'CLOUDFLARE_API_TOKEN=…' > .env.local",
-  ].join(" "));
-  report();
+  console.log(`  ${c.red("✗")} ${c.bold("Cloudflare token")} — none set; nothing can deploy.\n`);
+  const saved = await tokenSetupFlow();
+  if (saved) console.log(`\n  ${c.green("✓")} Re-run ${c.bold("make preflight")} — it'll use the token you just saved.\n`);
+  process.exit(1);
 }
 
 const verify = await cfApi("/user/tokens/verify");
@@ -117,7 +117,21 @@ if (rung >= 2 && host) {
   if (!zone) fail("Domain zone", `"${zoneName}" is not a zone on this account`, "Add it via Cloudflare Registrar, or move it in.");
   else if (zone.account?.id !== account.id) fail("Domain zone", `"${zoneName}" is in a different account`, "Move it into this account.");
   else if (zone.status !== "active") warn("Domain zone", `"${zoneName}" is "${zone.status}" — nameservers may not be live yet`);
-  else pass("Domain zone", `${zone.name} active`);
+  else {
+    pass("Domain zone", `${zone.name} active`);
+    // 🔴 A Worker custom domain creates its OWN DNS record for the hostname, and Cloudflare
+    // refuses if one already exists. Catch the conflict here, not at deploy.
+    const dns = await cfApi(`/zones/${zone.id}/dns_records?name=${encodeURIComponent(host)}`);
+    if (!dns.ok) {
+      warn("DNS record", `couldn't check for an existing "${host}" record (${cfErr(dns.errors)})`,
+        "Add 'DNS — Read' to the token, or just watch for a conflict at deploy.");
+    } else if ((dns.result ?? []).length) {
+      fail("DNS record", `"${host}" already has a ${dns.result[0].type} record — a custom domain can't be created over it`,
+        `Delete the "${host}" record in Cloudflare DNS, or pick another hostname (make setup).`);
+    } else {
+      pass("DNS record", `"${host}" is free`);
+    }
+  }
 }
 
 // --- 6. rung 3: Zero Trust enabled (detect only — never enable) -----------
@@ -127,6 +141,50 @@ if (rung >= 3) {
   org.ok && org.result?.auth_domain
     ? pass("Zero Trust", `enabled (${org.result.auth_domain.replace(/\.cloudflareaccess\.com$/, "")})`)
     : fail("Zero Trust", "not enabled", "Enable at https://one.dash.cloudflare.com (Free plan; needs a card). Do this last.");
+}
+
+// --- 7. The plan — what deploy will do, and a domain you could use instead --
+//
+// Preflight is the last stop before a mutation, so it doubles as a preview: name the
+// account and the exact URL, and — at rung 1 — offer a domain you already own, so you
+// don't have to know up front that rung 2 exists.
+
+if (!findings.some((f) => f.level === "fail")) {
+  const sub = await cfApi(`/accounts/${account.id}/workers/subdomain`);
+  const subName = sub.result?.subdomain ?? slug(ctx.ownerEmail?.split("@")[0] ?? "pagevault");
+  const workersUrl = `https://pagevault.${subName}.workers.dev`;
+
+  console.log();
+  console.log(`  ${c.bold("Plan")} ${c.dim(`(rung ${rung})`)}`);
+  console.log(`     Account:  ${account.name} ${c.dim(account.id)}`);
+  console.log(
+    rung >= 2 && host
+      ? `     URL:      ${c.bold(`https://${host}`)}  ${c.dim("(your domain)")}`
+      : `     URL:      ${c.bold(workersUrl)}  ${sub.result?.subdomain ? "" : c.dim(`(subdomain "${subName}" created at deploy)`)}`,
+  );
+  console.log(`     Creates:  a KV namespace${rung >= 3 ? ", Access apps + viewer group" : ""}, and your bearer secret`);
+
+  // At rung 1, if you already own a domain in this account, offer it — no need to know
+  // rung 2 exists to find it.
+  if (rung < 2 && isInteractive()) {
+    const z = await cfApi("/zones?per_page=50");
+    const zones = (z.ok ? z.result ?? [] : []).filter((x) => x.account?.id === account.id && x.status === "active");
+    if (zones.length) {
+      console.log();
+      console.log(`  You own ${zones.length === 1 ? "a domain" : "domains"} here: ${c.bold(zones.map((x) => x.name).join(", "))}`);
+      const rl = createInterface({ input: stdin, output: stdout });
+      const yes = (await rl.question(`  Serve PageVault on your domain instead of workers.dev? [y/N] `)).trim().toLowerCase();
+      if (yes === "y" || yes === "yes") {
+        const suggested = `pagevault.${zones[0].name}`;
+        const h = (await rl.question(`  Hostname? [${suggested}] `)).trim() || suggested;
+        rl.close();
+        saveContext({ ...loadContext(), rung: 2, host: h });
+        console.log(`\n  ${c.green("Switched to rung 2")} — ${c.bold(h)}. Re-run ${c.bold("make preflight")} to verify it, then ${c.bold("make deploy")}.\n`);
+        process.exit(0);
+      }
+      rl.close();
+    }
+  }
 }
 
 report();

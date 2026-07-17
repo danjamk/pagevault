@@ -6,26 +6,21 @@
 // directly.
 //
 // The symmetric, minimal sibling of provision.mjs — same generated file, a fraction of it.
-// Climbing to rung 3 is `deploy` running provision.mjs instead, which overwrites the file
-// with Access. Auth here is your `wrangler login` session; NO API token is needed.
+// Climbing to rung 3 is `deploy` running provision.mjs instead. Auth is the .env.local token,
+// and the KV is created over the Cloudflare API — no wrangler subprocess to go wrong.
 //
 //   node scripts/tier0.mjs            # act on .pagevault.json
 //   node scripts/tier0.mjs --kv <id>  # skip KV creation, use this one
 //
-import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { c, ok, info, die, loadContext, saveContext, loadCloudToken, argValue } from "./context.mjs";
+import { c, ok, info, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr } from "./context.mjs";
 
 const CONFIG_IN = "worker/wrangler.jsonc";
 const CONFIG_OUT = "worker/wrangler.generated.jsonc";
 
-const findKvId = (text) => text.match(/"id":\s*"([0-9a-f]{32})"/)?.[1];
-
-// ---------------------------------------------------------------------------
-
 if (!existsSync(CONFIG_IN)) die(`Can't find ${CONFIG_IN}. Run this from the repo root.`);
 
-loadCloudToken(); // .env.local token → environment, so `wrangler kv namespace create` targets the right account
+loadCloudToken();
 const ctx = loadContext();
 if (!ctx.ownerEmail) die("No .pagevault.json yet.", "Run `make setup` first.");
 
@@ -35,33 +30,24 @@ const host = ctx.rung >= 2 ? ctx.host : ""; // rung 1 publishes on workers.dev; 
 // --- The KV namespace ------------------------------------------------------
 //
 // Precedence: an explicit --kv, then the id already in the context (idempotent re-run),
-// then create one via wrangler using your login session (no API token). If wrangler isn't
-// available, say exactly what to run rather than failing opaquely.
+// then create one over the Cloudflare API using the token. One robust API call — not a
+// wrangler subprocess that has to guess at Node and auth.
 
 let kvId = argValue("--kv") ?? ctx.kvId;
-if (kvId) ok(`KV namespace ${c.dim(kvId)}`);
-else {
-  info("Creating a KV namespace via wrangler…");
-  try {
-    const out = execSync("npx --yes wrangler@4 kv namespace create PAGEVAULT", {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    kvId = findKvId(out);
-    if (!kvId) throw new Error("could not read the namespace id from wrangler's output");
-    ok(`KV namespace created ${c.dim(kvId)}`);
-  } catch (err) {
-    die("Couldn't create the KV namespace automatically.", [
-      c.dim(String(err.message ?? err).split("\n")[0]),
-      "",
-      "This needs Node 22 and a signed-in wrangler. Easiest: `make login` then `make deploy`",
-      "(both select the right Node). Or, under Node 22 yourself:",
-      "",
-      `  ${c.bold("make login")}`,
-      `  ${c.bold("npx wrangler kv namespace create PAGEVAULT")}   ${c.dim("(needs Node 22)")}`,
-      `  ${c.bold("node scripts/tier0.mjs --kv <id>")}`,
-    ]);
+if (kvId) {
+  ok(`KV namespace ${c.dim(kvId)}`);
+} else {
+  if (!ctx.accountId) die("No account pinned.", "Run `make preflight` first — it pins the account.");
+  info("Creating a KV namespace…");
+  const created = await cfApi(`/accounts/${ctx.accountId}/storage/kv/namespaces`, {
+    method: "POST",
+    body: JSON.stringify({ title: "pagevault" }),
+  });
+  if (!created.ok) {
+    die(`Couldn't create the KV namespace (${cfErr(created.errors)}).`, "Check the token has 'Workers KV Storage — Edit'.");
   }
+  kvId = created.result.id;
+  ok(`KV namespace created ${c.dim(kvId)}`);
   saveContext({ ...ctx, kvId }); // remember it so a re-run doesn't make a second namespace
 }
 

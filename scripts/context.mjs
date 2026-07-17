@@ -10,6 +10,7 @@
 
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 
 export const CONTEXT_FILE = ".pagevault.json";
@@ -91,6 +92,63 @@ export const cfErr = (errors = []) => errors.map((e) => `[${e.code}] ${e.message
 /** A Cloudflare-safe slug: lowercase, alphanumerics and single hyphens. */
 export const slug = (s) =>
   String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 54) || "pagevault";
+
+/**
+ * The full "create a Cloudflare API token" instructions. Shared by setup and preflight so
+ * the link, the name, and the exact scopes live in ONE place — and match the README table.
+ */
+export function printTokenSetup() {
+  const scopes = [
+    ["Account", "Workers Scripts", "Edit", "rung 1 · deploy"],
+    ["Account", "Workers KV Storage", "Edit", "rung 1 · documents"],
+    ["Account", "Account Settings", "Read", "rung 1 · identify the account"],
+    ["Zone", "Workers Routes", "Edit", "rung 2 · custom domain"],
+    ["Zone", "DNS", "Edit", "rung 2 · custom-domain record"],
+    ["Account", "Access: Apps and Policies", "Edit", "rung 3 · portals"],
+    ["Account", "Access: Organizations, Identity Providers, and Groups", "Edit", "rung 3 · the viewer group lives here"],
+  ];
+  console.log(`  ${c.bold("Create a Cloudflare API token")} ${c.dim("— how PageVault reaches your account (one per clone)")}`);
+  console.log();
+  console.log(`  1. Open  ${c.bold("https://dash.cloudflare.com/profile/api-tokens")}  → Create Custom Token`);
+  console.log(`  2. Name it  ${c.bold("pagevault")}`);
+  console.log(`  3. Add these permissions ${c.dim("(grant all now, so climbing never means editing the token)")}:`);
+  console.log();
+  for (const [type, perm, access, forr] of scopes) {
+    console.log(`       ${c.dim(type.padEnd(7))} ${c.bold(perm)} ${c.dim(`(${access})`)}  ${c.dim("— " + forr)}`);
+  }
+  console.log();
+  console.log(`  4. Create it, copy the value, and save it ${c.dim("(gitignored)")}:`);
+  console.log(`       ${c.bold("echo 'CLOUDFLARE_API_TOKEN=<paste>' > .env.local")}`);
+}
+
+/** Update-or-append CLOUDFLARE_API_TOKEN in .env.local, leaving any other lines intact. */
+function writeEnvLocalToken(token) {
+  const path = ".env.local";
+  const lines = existsSync(path) ? readFileSync(path, "utf8").split("\n").filter((l) => l.trim() !== "") : [];
+  const kept = lines.filter((l) => !l.trim().startsWith("CLOUDFLARE_API_TOKEN="));
+  kept.push(`CLOUDFLARE_API_TOKEN=${token}`);
+  writeFileSync(path, `${kept.join("\n")}\n`);
+}
+
+/**
+ * Print the token instructions, then offer to take it right here: paste it and we write
+ * .env.local, or press Enter to save it yourself (with the command). Returns true if a token
+ * was written. Shared by setup and preflight so the "no token" moment is handled identically.
+ */
+export async function tokenSetupFlow() {
+  printTokenSetup();
+  if (!isInteractive()) return false;
+  const rl = createInterface({ input: stdin, output: stdout });
+  const pasted = (await rl.question(`\n  Paste your token to save it to .env.local now — or press Enter to save it yourself: `)).trim();
+  rl.close();
+  if (!pasted) {
+    console.log(`  ${c.dim("Fine —")} ${c.bold("echo 'CLOUDFLARE_API_TOKEN=<paste>' > .env.local")}`);
+    return false;
+  }
+  writeEnvLocalToken(pasted);
+  console.log(`  ${c.green("✓")} Saved to .env.local.`);
+  return true;
+}
 
 /** A value from the environment, or from gitignored .env.local. */
 export function fromEnv(key) {

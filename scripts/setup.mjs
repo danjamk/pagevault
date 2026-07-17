@@ -10,7 +10,7 @@
 //
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, versions } from "node:process";
-import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cfAccounts } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cfAccounts, tokenSetupFlow } from "./context.mjs";
 
 console.log(`\n${c.bold("PageVault — setup")} ${c.dim("(nothing is created)")}\n`);
 
@@ -92,37 +92,40 @@ ok(`Saved to ${c.bold(".pagevault.json")}`);
 // Where does this deploy? NOT the email above — that's who you are in the app. The account
 // comes from your wrangler login. Surface it now (or point a not-logged-in newbie at the one
 // command they need), so the distinction is concrete before preflight.
-const token = loadCloudToken();
+let token = loadCloudToken();
 console.log();
 if (!token) {
-  warn("No Cloudflare API token yet — that's how PageVault reaches your account.");
-  console.log(`  ${c.dim("This is WHERE it deploys, and it's separate from the owner email above.")}\n`);
-  console.log(`  1. Create a token:  ${c.bold("https://dash.cloudflare.com/profile/api-tokens")}  → Create Custom Token`);
-  console.log(`     ${c.dim("Rung 1: Workers Scripts (Edit), Workers KV Storage (Edit), Account Settings (Read).")}`);
-  console.log(`     ${c.dim("Full progression scopes: docs/setup/prerequisites.md.")}`);
-  console.log(`  2. Save it:          ${c.bold("echo 'CLOUDFLARE_API_TOKEN=…' > .env.local")}   ${c.dim("(gitignored)")}`);
-  console.log(`  3. Then:             ${c.bold("make preflight")}\n`);
-} else {
-  const accounts = await cfAccounts();
-  if (accounts.length === 0) {
-    warn("Token is set, but Cloudflare returned no account for it — check the token and its scopes.");
-    console.log(`\n${c.bold("Next:")} ${c.bold("make preflight")} ${c.dim("— it names the exact problem.")}\n`);
-  } else {
-    const a = accounts[0];
-    info(`Token found. This is WHERE it deploys (not the email above):`);
-    console.log(
-      `     ${c.bold(a.name)} ${c.dim(a.id)}` +
-        (accounts.length > 1 ? c.dim(`  (+${accounts.length - 1} more — preflight will have you pick)`) : ""),
-    );
-    if (isInteractive()) {
-      const rl2 = createInterface({ input: stdin, output: stdout });
-      const ans = (await rl2.question(`\n  Deploy to that account? [Y/n] `)).trim().toLowerCase();
-      rl2.close();
-      if (ans === "n" || ans === "no") {
-        console.log(`\n  Put a token for a different account in ${c.bold(".env.local")}, then re-run ${c.bold("make setup")}.\n`);
-        process.exit(0);
-      }
-    }
-    console.log(`\n${c.bold("Next:")} ${c.bold("make preflight")}\n`);
+  warn("No Cloudflare API token yet — setup saved your rung and email, nothing more.");
+  console.log(`  ${c.dim("The token is separate from the owner email above — it is WHERE it deploys.")}\n`);
+  const saved = await tokenSetupFlow();
+  if (!saved) {
+    console.log(`\n  ${c.bold("Next:")} save the token, then ${c.bold("make preflight")}.\n`);
+    process.exit(0);
   }
+  token = loadCloudToken(); // pick up what we just wrote to .env.local
+  console.log();
+}
+
+// Have a token — name the account and confirm it.
+const accounts = await cfAccounts();
+if (accounts.length === 0) {
+  warn("Token is set, but Cloudflare returned no account for it — check the token and its scopes.");
+  console.log(`\n${c.bold("Next:")} ${c.bold("make preflight")} ${c.dim("— it names the exact problem.")}\n`);
+} else {
+  const a = accounts[0];
+  info(`Token found. This is WHERE it deploys (not the email above):`);
+  console.log(
+    `     ${c.bold(a.name)} ${c.dim(a.id)}` +
+      (accounts.length > 1 ? c.dim(`  (+${accounts.length - 1} more — preflight will have you pick)`) : ""),
+  );
+  if (isInteractive()) {
+    const rl2 = createInterface({ input: stdin, output: stdout });
+    const ans = (await rl2.question(`\n  Use this account? [Y/n] `)).trim().toLowerCase();
+    rl2.close();
+    if (ans === "n" || ans === "no") {
+      console.log(`\n  Put a token for a different account in ${c.bold(".env.local")}, then re-run ${c.bold("make setup")}.\n`);
+      process.exit(0);
+    }
+  }
+  console.log(`\n${c.bold("Next:")} ${c.bold("make preflight")}\n`);
 }

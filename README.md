@@ -88,29 +88,54 @@ account, no password).
 
 ## Quick start
 
-Full prerequisites, and where to get each, are in
-[`docs/setup/prerequisites.md`](docs/setup/prerequisites.md). `make preflight`
-checks them for you before you deploy.
+Rung 1 — publish public links, no domain, no card. Two things: a Cloudflare account,
+and an API token.
 
-**Rung 1 — publish public links** (no domain, no card):
+### 1. Clone it
 
 ```bash
 git clone https://github.com/danjamk/pagevault && cd pagevault
-make setup            # install deps, pick your rung, check your environment
-# create a Cloudflare API token (setup links you to it + the scopes), then:
-echo 'CLOUDFLARE_API_TOKEN=…' > .env.local
-make preflight        # verify readiness — names the account it will deploy to
-make deploy           # creates KV + a workers.dev subdomain, deploys, sets your bearer token
-make verify           # smoke-test the live deployment
 ```
 
-Auth is a Cloudflare API token in `.env.local` — explicit and per-clone, so a deploy
-can never land in the wrong account. Scopes and the token link are in
-[`docs/setup/prerequisites.md`](docs/setup/prerequisites.md).
+### 2. Create a Cloudflare API token
 
-Then publish from a chat over MCP (or the CLI), and share the `/p/` link — anyone
-opens it, no login. Locally, `make dev` runs the Worker against Miniflare and
-`make demo` seeds a sample engagement.
+PageVault reaches your account with an API token — one per clone, kept in `.env.local`.
+It's explicit and per-clone, so a deploy can never land in the wrong account, and it
+lets the setup do everything over the API (KV, your workers.dev subdomain, your bearer
+secret) with no interactive prompts.
+
+1. Open **[Cloudflare → API Tokens](https://dash.cloudflare.com/profile/api-tokens)** → **Create Custom Token**.
+2. Name it **`pagevault`**.
+3. Add these permissions. Grant them all now, so climbing the ladder never means editing the token:
+
+   | Type | Permission | Access | For |
+   |---|---|---|---|
+   | Account | Workers Scripts | Edit | rung 1 · deploy |
+   | Account | Workers KV Storage | Edit | rung 1 · documents |
+   | Account | Account Settings | Read | rung 1 · identify the account |
+   | Zone | Workers Routes | Edit | rung 2 · custom domain |
+   | Zone | DNS | Edit | rung 2 · the custom-domain record |
+   | Account | Access: Apps and Policies | Edit | rung 3 · portals |
+   | Account | Access: Organizations, Identity Providers, and Groups | Edit | rung 3 · the viewer group lives here — easy to miss |
+
+4. Create it, copy the value, and save it into the clone (gitignored):
+
+   ```bash
+   echo 'CLOUDFLARE_API_TOKEN=<paste-your-token>' > .env.local
+   ```
+
+### 3. Run the ladder
+
+```bash
+make setup       # install deps, pick your rung, check your environment
+make preflight   # verify the token, name the account it will deploy to
+make deploy      # creates KV + a workers.dev subdomain, deploys, sets your bearer secret
+make verify      # smoke-test the live deployment
+```
+
+Then publish from a chat over MCP (or the CLI), and share the `/p/` link — anyone opens
+it, no login. Locally, `make dev` runs the Worker against Miniflare and `make demo` seeds
+a sample engagement.
 
 **Climbing the ladder:** to add your domain (rung 2) or turn on portals (rung 3),
 re-run `make setup`, pick the higher rung, then `make preflight` and `make deploy`
