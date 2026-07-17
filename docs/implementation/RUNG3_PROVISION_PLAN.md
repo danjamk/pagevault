@@ -87,36 +87,34 @@ only** (drop the fallback — #23), and the scoped token gets a distinct `.env.l
 - [x] Two-token model documented in `env.ts` (`CF_API_TOKEN` = scoped runtime, distinct from
       the broad `CLOUDFLARE_API_TOKEN`). Fuller prose in prerequisites/README lands in Phase 5.
 
-### Phase 3 — `pagevault init` / `upgrade` / `sync-access` (Part 2, overlaps #7)
-- [ ] `pagevault init` — thin wrapper over the run-for-real provision flow; masked token input,
-      prefilled scope URL, Zero-Trust deep-link-and-stop with team-name readback on re-run.
+### Phase 3 — `pagevault init` / `upgrade` / `sync-access` (Part 2)  ⏭️ DEFERRED → #7
+Split out of this PR (Option A). The provisioning flow works through `make`; the CLI wrapper
+is Layer-1 polish that overlaps #7, so it moves there rather than growing this branch.
+- [ ] `pagevault init` — thin wrapper over provision; masked token input, prefilled scope URL.
 - [ ] `pagevault upgrade` — redeploy the bundled Worker, keep KV + config.
-- [ ] `pagevault sync-access [--reap]` — recompute the viewer group from KV, PUT the full list
-      (Access group PUT is a full replace), optionally reap seats not on any allowlist.
-- [ ] Shell out to `npx --yes wrangler@4`; **no** wrangler dependency.
+- [ ] `pagevault sync-access [--reap]` — recompute the viewer group from KV, PUT the full list.
 
-### Phase 4 — create-portal in `/admin` (Part 3)
+### Phase 4 — create-portal in `/admin` (Part 3)  ⏭️ DEFERRED → own issue
+Split out of this PR (Option A). It's the console's first mutation (CSP + session-token care),
+independent of the deploy story.
 - [ ] Create-portal control (slug, name, kind, description) → existing `POST /api/portals`.
-- [ ] State each `kind`'s meaning inline (restricted = the only one `canView` reads a member
-      list for; private = owner-only; public = no login, no seat). Surface `isValidSlug`
-      (`store.ts`) errors rather than reimplementing the rule.
-- [ ] Hide/disable the control at Tier 0 (rung < 3) — reuse the `CF_ACCESS_AUD_ADMIN` signal.
-- [ ] The `/admin` console is currently read-only; this is its first mutation — mind the
-      nonced CSP and the session-token model.
+- [ ] State each `kind`'s meaning inline; surface `isValidSlug` errors; hide at Tier 0.
 
-### Phase 5 — verify, docs, credit
-- [ ] `verify.mjs` rung-3 path: confirm `/` → 302 `/admin` (already coded), and that `/v/…`
-      is Access-gated (a no-JWT request 302s to Cloudflare login, not a 200). The publish→read
-      round-trip still works via a **public** doc (`/p/`), which bypasses Access.
-- [ ] README: the rung-3 story + **credit `jonesphillip/sharehtml`** (the provisioning pattern).
-- [ ] `docs/setup/prerequisites.md`: the two-token model, the scoped runtime token scope.
-- [ ] ADR note if the two-token split warrants one (or fold into ADR-002's consequences).
+### Phase 5 — verify, docs, credit  ✅ DONE
+- [x] `verify.mjs` rung-3 path already coded: `/` → 302 `/admin` at rung 3; publish→read
+      round-trips via a **public** `/p/` doc that bypasses Access.
+- [x] README: **credit `jonesphillip/sharehtml`** — already present (Credits: the Access
+      provisioning script, the capability-token model, the sandboxed iframe).
+- [x] README: removed the stale "rung 3 not wired to the shared config" note; Status now
+      reflects the full ladder. Two-token model captured in the README token section.
+- [~] `docs/setup/prerequisites.md` two-token prose → deferred to the docs-refactor pass (the
+      README covers it for now; env.ts documents the model).
 
-### Phase 6 — live validation (Zero Trust now enabled on the test account)
-- [ ] Clean account → `setup(rung 3)` → `preflight` → `deploy` → `verify`.
-- [ ] Open `/v/default` in a private window → Cloudflare Access OTP login → the client
-      experience. Confirm a non-invited email is refused (seat-bounding, ADR-002).
-- [ ] `make destroy` tears the rung-3 deployment down cleanly (it's already ladder-aware).
+### Phase 6 — live validation  ✅ CORE DONE
+- [x] Clean(ish) Zero-Trust account → `setup(rung 3)` → `preflight` → `deploy` → owner OTP
+      login reached. Rung 2 → 3 climb carried documents across.
+- [ ] Still to confirm before/after merge: a non-invited email is refused (seat-bounding), and
+      member-sync works with the runtime token set. `make destroy` teardown.
 
 ## Files
 

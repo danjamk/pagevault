@@ -165,17 +165,14 @@ a sample engagement.
 re-run `make setup`, pick the higher rung, then `make preflight` and `make deploy`
 again. Your documents carry across. `make help` lists every target.
 
-> Rung 3 (portals) provisioning works, but is not yet wired to the shared config
-> file — it prompts you through the details itself for now
-> ([#9](../../issues/9)).
-
 ## Status
 
-- **Works today:** publishing over MCP (Claude Code), public-link sharing,
-  email-secured sharing, portals, and the owner console — end to end on a live
-  deployment.
-- **In progress:** the one-command ladder above ([#32](../../issues/32),
-  [#9](../../issues/9)) and its docs.
+- **Works today:** the full deploy ladder — publish on `*.workers.dev` (rung 1),
+  your own domain (rung 2), client portals with Cloudflare Access (rung 3) — plus
+  publishing over MCP (Claude Code), public-link and email-secured sharing, and the
+  owner console. End to end on a live deployment.
+- **In progress:** the `pagevault` CLI ([#7](../../issues/7)) and creating a portal
+  from the console ([#9](../../issues/9)); documentation cleanup.
 - **Parked:** OAuth for the hosted surfaces (claude.ai / Desktop / mobile) is built
   and proven end to end, but blocked upstream by a current claude.ai-side connector
   regression that drops token binding for newly added connectors
