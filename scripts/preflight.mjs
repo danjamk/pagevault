@@ -112,9 +112,17 @@ if (account) {
   // rung 3: Zero Trust must be enabled (detect only — never enable).
   if (rung >= 3) {
     const org = await cfApi(`/accounts/${account.id}/access/organizations`);
-    org.ok && org.result?.auth_domain
-      ? pass("Zero Trust", `enabled (${org.result.auth_domain.replace(/\.cloudflareaccess\.com$/, "")})`)
-      : fail("Zero Trust", "not enabled", "Enable at https://one.dash.cloudflare.com (Free plan; needs a card). Do this last.");
+    if (org.ok && org.result?.auth_domain) {
+      pass("Zero Trust", `enabled (${org.result.auth_domain.replace(/\.cloudflareaccess\.com$/, "")})`);
+    } else if (!org.ok) {
+      // Can't READ the Access org — almost always a token missing the rung-3 Access scopes,
+      // not Zero Trust being off. Say that, instead of a misleading "not enabled".
+      fail("Zero Trust", `couldn't check — ${cfErr(org.errors)}`,
+        "The token can't read Access. Add the rung-3 scopes: 'Access: Apps and Policies' (Edit) and 'Access: Organizations, Identity Providers, and Groups' (Edit).");
+    } else {
+      fail("Zero Trust", "not enabled",
+        "Enable at https://one.dash.cloudflare.com (Free plan; needs a card). Do this last.");
+    }
   }
 }
 
