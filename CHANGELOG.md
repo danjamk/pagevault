@@ -7,6 +7,23 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **Push-button production deploys** ([#38](https://github.com/danjamk/pagevault/issues/38)) —
+  a manual `workflow_dispatch` GitHub Action that ships prod through CI, reusing the existing
+  `scripts/` (no forked deploy logic). Maintainer tooling: the environment is simply whichever
+  Cloudflare token is active — dev in a clone's `.env.local`, prod only in GitHub Environment
+  secrets — so the prod credential is never on a developer's machine. A forker can delete the
+  workflow and nothing breaks. See [docs/deploy-prod.md](docs/deploy-prod.md).
+- **`make health`** — assert the live `/health` reports the exact `<version>+<sha>` of your
+  checkout; the post-deploy gate that fails a CI deploy on a rollout that didn't take.
+
+### Changed
+- **Deploy reuses the bearer, never mints a throwaway** — `make deploy` now prefers an
+  environment-provided `PAGEVAULT_API_TOKEN` (a CI secret) and fails loud in a non-interactive
+  deploy into a fresh Worker, rather than generating a random prod bearer stranded on the runner.
+- **CI runs the `scripts/` `node --test` suites** (schema migration, KV backup, bearer policy) —
+  `pnpm test` is vitest only, so these had been guarding nothing on GitHub.
+
 ## [0.2.0] — 2026-07-17
 
 Version identity and release discipline — a deployment can now report exactly what it runs.

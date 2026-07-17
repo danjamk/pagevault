@@ -27,3 +27,7 @@ jobs:
       - run: pnpm typecheck
 
       - run: pnpm test
+
+      # The setup/deploy scripts carry their own node --test suites (schema migration, KV backup,
+      # bearer policy). `pnpm test` is vitest only, so run these too or they guard nothing in CI.
+      - run: node --test scripts/*.test.mjs

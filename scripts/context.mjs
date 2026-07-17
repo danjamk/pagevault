@@ -301,6 +301,25 @@ export function wranglerAccount() {
 }
 
 /**
+ * Decide how a deploy should obtain the PAGEVAULT_API_TOKEN bearer, given what the Worker already
+ * has and what the environment provides. Pure, so the policy is tested without a live deploy.
+ *
+ *   skip     — the Worker already has it. Never rotate a live bearer: it would break every CLI and
+ *              MCP client mid-flight. This beats everything else, including a provided value.
+ *   set      — nothing on the Worker, but a value was provided (a GitHub Environment secret in CI,
+ *              or .env.local locally). Set THAT exact value, so the operator's clients keep working.
+ *   generate — nothing on the Worker, nothing provided, and we can prompt: mint one and save it.
+ *   fail     — nothing on the Worker, nothing provided, and non-interactive (CI). Refuse, rather than
+ *              mint a throwaway prod bearer that lives only on a runner that is about to disappear.
+ */
+export function chooseBearer({ hasSecret, provided, interactive }) {
+  if (hasSecret) return { action: "skip" };
+  if (provided) return { action: "set", value: provided };
+  if (interactive) return { action: "generate" };
+  return { action: "fail" };
+}
+
+/**
  * Resolve one value. A flag or env var is authoritative and never prompts — that is the
  * whole design: an LLM or CI passes flags and is never asked. Otherwise, an interactive run
  * PROMPTS, defaulting to the saved context value (enter keeps, type changes). That default is
