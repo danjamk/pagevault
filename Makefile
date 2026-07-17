@@ -82,11 +82,11 @@ verify: ## Smoke-test the live deployment (run after deploy)
 destroy: ## Tear the deployment down — Worker, DNS, Access apps, group, and KV data
 	@$(NVM) && node scripts/destroy.mjs
 
-backup: ## Snapshot the KV namespace to a JSON file (OUT=path optional)
-	@$(NVM) && node scripts/kv-backup.mjs $(if $(OUT),--out $(OUT),)
+backup: ## Snapshot the KV namespace to a JSON file (OUT=path, KV=id optional)
+	@$(NVM) && node scripts/kv-backup.mjs $(if $(OUT),--out $(OUT),) $(if $(KV),--kv $(KV),)
 
-restore: ## Restore a backup into the KV namespace (make restore FILE=backup.json [FORCE=1])
-	@$(NVM) && node scripts/kv-restore.mjs --in "$(FILE)" $(if $(FORCE),--force,)
+restore: ## Restore a backup into the KV namespace (make restore FILE=backup.json [KV=id] [FORCE=1])
+	@$(NVM) && node scripts/kv-restore.mjs --in "$(FILE)" $(if $(KV),--kv $(KV),) $(if $(FORCE),--force,)
 
 logs: ## Tail the deployed Worker
 	@$(NVM) && npx wrangler tail --config $(DEPLOY_CONFIG)
