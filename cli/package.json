@@ -1,0 +1,33 @@
+{
+  "name": "pagevault",
+  "version": "0.1.0",
+  "description": "Publish self-contained HTML to your own PageVault deployment from the terminal.",
+  "type": "module",
+  "bin": {
+    "pagevault": "bin/pagevault.mjs"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danjamk/pagevault.git",
+    "directory": "cli"
+  },
+  "homepage": "https://github.com/danjamk/pagevault#readme",
+  "bugs": "https://github.com/danjamk/pagevault/issues",
+  "keywords": [
+    "pagevault",
+    "html",
+    "publish",
+    "cloudflare",
+    "cli",
+    "sharing"
+  ]
+}
