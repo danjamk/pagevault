@@ -42,7 +42,7 @@ demo: ## Seed a running local Worker with a demo client engagement, and print wh
 
 test: ## Run the test suite
 	@$(NVM) && pnpm test
-	@$(NVM) && node --test scripts/*.test.mjs
+	@$(NVM) && node --test scripts/*.test.mjs cli/*.test.mjs
 
 test-security: ## Run only canView() + identity — the suite where a bug is an incident
 	@$(NVM) && pnpm test:security

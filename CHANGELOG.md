@@ -8,6 +8,13 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 ## [Unreleased]
 
 ### Added
+- **The `pagevault` CLI** ([#7](https://github.com/danjamk/pagevault/issues/7)) — a standalone,
+  zero-dependency npm package (versioned independently, first cut `0.1.0`) that publishes from the
+  terminal: `pagevault publish report.html` → a URL. A thin HTTP client of `/api` that works against
+  any deployment. `publish` / `list` / `share` / `rm` / `login`; config from `~/.pagevault/config.json`
+  or `PAGEVAULT_URL` + `PAGEVAULT_API_TOKEN`; a read-after-write retry so the URL it hands back
+  resolves; and a stdout=URL / stderr=everything-else contract so `publish … | pbcopy` just works.
+  (`rotate`, the rung-ladder wrapper, and the MCP bin remain on #7 as follow-ups.)
 - **Push-button production deploys** ([#38](https://github.com/danjamk/pagevault/issues/38)) —
   a manual `workflow_dispatch` GitHub Action that ships prod through CI, reusing the existing
   `scripts/` (no forked deploy logic). Maintainer tooling: the environment is simply whichever
