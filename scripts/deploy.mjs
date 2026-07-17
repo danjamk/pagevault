@@ -33,7 +33,12 @@ if (!target) {
     "Use the token for the pinned account, or re-pin with `make setup`.");
 }
 
-console.log(`  ${c.cyan("Deploying to")} ${acct(target)}\n`);
+const targetUrl = ctx.rung >= 2 && ctx.host ? `https://${ctx.host}` : "*.workers.dev";
+const row = (label, val) => console.log(`  ${c.cyan(label.padStart(12))}  ${val}`);
+row("Deploying to", acct(target));
+row("Owner", ctx.ownerEmail);
+row("URL", c.bold(targetUrl));
+console.log();
 if (isInteractive()) {
   const rl = createInterface({ input: stdin, output: stdout });
   const ans = (await rl.question(`  Continue? [y/N] `)).trim().toLowerCase();
@@ -101,7 +106,13 @@ try {
 
 // --- 3. Remember where it landed, so `make verify` knows what to test -------
 
-const url = out.match(/https:\/\/[^\s]+\.workers\.dev[^\s]*/)?.[0] ?? (ctx.host ? `https://${ctx.host}` : undefined);
+// At rung 2+ the canonical URL is the custom domain (workers.dev is off there); at rung 1 it's
+// the workers.dev URL wrangler printed. Getting this right is what points verify and the /p/
+// links at the domain, not a stray workers.dev address.
+const url =
+  ctx.rung >= 2 && ctx.host
+    ? `https://${ctx.host}`
+    : (out.match(/https:\/\/[^\s]+\.workers\.dev[^\s]*/)?.[0] ?? (ctx.host ? `https://${ctx.host}` : undefined));
 if (url) {
   saveContext({ ...loadContext(), deployedUrl: url });
   ok(`Live at ${c.bold(url)}`);

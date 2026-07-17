@@ -20,7 +20,7 @@ export const CONTEXT_FILE = ".pagevault.json";
 // hierarchy into mush. So structure is carried by hue — cyan for headers and labels — and
 // readability never leans on three shades of white. Kept moderate: no bright fills.
 export const c = {
-  dim: (s) => `\x1b[90m${s}\x1b[0m`, // gray — secondary text, ids, hints
+  dim: (s) => `\x1b[38;5;245m${s}\x1b[0m`, // a fixed mid-gray (256-color) — readable on dark
   bold: (s) => `\x1b[1m${s}\x1b[0m`, // one key value on a line
   green: (s) => `\x1b[32m${s}\x1b[0m`,
   red: (s) => `\x1b[31m${s}\x1b[0m`,

@@ -78,12 +78,15 @@ if (kvId) {
 
 const template = readFileSync(CONFIG_IN, "utf8");
 
+// Rung 1 lives on workers.dev, so it's on. Rung 2+ serves on the custom domain, so workers.dev
+// goes OFF — otherwise the worker answers on two URLs and the domain isn't really "the"
+// location (and at rung 3 an open workers.dev would route around Access entirely).
+const workersDev = host ? "false" : "true";
+
 let generated = template
   .replace(/"id": "REPLACE_WITH_KV_NAMESPACE_ID"/, `"id": "${kvId}"`)
   .replace(/"OWNER_EMAIL": ""/, `"OWNER_EMAIL": "${ownerEmail}"`)
-  // 🔴 Tier 0 has no Access, so workers.dev is the whole point, not a hole. provision.mjs
-  // flips this back off at rung 3, where workers.dev WOULD route around Access.
-  .replace(/"workers_dev": false/, `"workers_dev": true`);
+  .replace(/"workers_dev": false/, `"workers_dev": ${workersDev}`);
 
 // 🔴 Pin the deploy to the account preflight verified. Without this, wrangler falls back to
 // an ambient login and can deploy to the wrong account (it once clobbered production). See #32.
@@ -102,7 +105,7 @@ if (host) {
     );
 }
 
-if (!generated.includes(kvId) || !generated.includes(ownerEmail) || !generated.includes(`"workers_dev": true`)) {
+if (!generated.includes(kvId) || !generated.includes(ownerEmail) || !generated.includes(`"workers_dev": ${workersDev}`)) {
   die(`Failed to write ${CONFIG_OUT}. Did the template change?`);
 }
 if (host && !generated.includes(`"pattern": "${host}"`)) die(`Failed to write the ${host} route.`);
