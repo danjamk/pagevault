@@ -15,7 +15,7 @@ help: ## List targets
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 install: ## Install dependencies
-	@$(NVM) && pnpm install --frozen-lockfile
+	@$(NVM) && pnpm install --frozen-lockfile --silent
 
 setup: install ## Decide your rung and get the repo ready (local; nothing created)
 	@if [ ! -f worker/.dev.vars ]; then \

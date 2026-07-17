@@ -13,7 +13,7 @@
 //   node scripts/tier0.mjs --kv <id>  # skip KV creation, use this one
 //
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { c, ok, info, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr } from "./context.mjs";
 
 const CONFIG_IN = "worker/wrangler.jsonc";
 const CONFIG_OUT = "worker/wrangler.generated.jsonc";
@@ -29,35 +29,45 @@ const host = ctx.rung >= 2 ? ctx.host : ""; // rung 1 publishes on workers.dev; 
 
 // --- The KV namespace ------------------------------------------------------
 //
-// Precedence: an explicit --kv, then the id already in the context (idempotent re-run),
-// then an EXISTING "pagevault" namespace on the account, and only then create one. That
-// find-by-title step matters: without it, a run whose .pagevault.json lost its kvId (a
-// re-clone, a deleted context file) would happily create a *second* "pagevault" namespace —
-// which is exactly how a duplicate ends up in the dashboard.
+// Precedence: an explicit --kv wins. Otherwise reconcile against what is ACTUALLY on the
+// account, rather than trusting the id saved in context — because a kvId can go stale. Delete
+// the namespace in the dashboard and .pagevault.json still names it; wrangler then fails the
+// deploy with "KV namespace not found" (code 10041). So: trust the saved id only if it still
+// exists, then fall back to an existing "pagevault" by title, then create. The by-title step
+// also stops a lost kvId (re-clone, deleted context) from spawning a duplicate namespace.
 
-let kvId = argValue("--kv") ?? ctx.kvId;
+let kvId = argValue("--kv");
 if (kvId) {
-  ok(`KV namespace ${c.dim(kvId)}`);
+  ok(`KV namespace ${c.dim(kvId)} ${c.dim("(--kv)")}`);
 } else {
   if (!ctx.accountId) die("No account pinned.", "Run `make preflight` first — it pins the account.");
-  const existing = await cfApi(`/accounts/${ctx.accountId}/storage/kv/namespaces?per_page=100`);
-  const found = existing.ok ? (existing.result ?? []).find((n) => n.title === "pagevault") : null;
-  if (found) {
-    kvId = found.id;
-    ok(`KV namespace ${c.dim(kvId)} ${c.dim('(reusing the existing "pagevault")')}`);
+  const res = await cfApi(`/accounts/${ctx.accountId}/storage/kv/namespaces?per_page=100`);
+  const namespaces = res.ok ? res.result ?? [] : [];
+  const live = ctx.kvId ? namespaces.find((n) => n.id === ctx.kvId) : null;
+  const byTitle = namespaces.find((n) => n.title === "pagevault");
+
+  if (live) {
+    kvId = live.id;
+    ok(`KV namespace ${c.dim(kvId)}`);
   } else {
-    info("Creating a KV namespace…");
-    const created = await cfApi(`/accounts/${ctx.accountId}/storage/kv/namespaces`, {
-      method: "POST",
-      body: JSON.stringify({ title: "pagevault" }),
-    });
-    if (!created.ok) {
-      die(`Couldn't create the KV namespace (${cfErr(created.errors)}).`, "Check the token has 'Workers KV Storage — Edit'.");
+    if (ctx.kvId) warn(`Saved KV namespace ${c.dim(ctx.kvId)} no longer exists (deleted?) — reconciling.`);
+    if (byTitle) {
+      kvId = byTitle.id;
+      ok(`KV namespace ${c.dim(kvId)} ${c.dim('(reusing the existing "pagevault")')}`);
+    } else {
+      info("Creating a KV namespace…");
+      const created = await cfApi(`/accounts/${ctx.accountId}/storage/kv/namespaces`, {
+        method: "POST",
+        body: JSON.stringify({ title: "pagevault" }),
+      });
+      if (!created.ok) {
+        die(`Couldn't create the KV namespace (${cfErr(created.errors)}).`, "Check the token has 'Workers KV Storage — Edit'.");
+      }
+      kvId = created.result.id;
+      ok(`KV namespace created ${c.dim(kvId)}`);
     }
-    kvId = created.result.id;
-    ok(`KV namespace created ${c.dim(kvId)}`);
   }
-  saveContext({ ...ctx, kvId }); // remember it so a re-run doesn't make a second namespace
+  saveContext({ ...ctx, kvId }); // remember the reconciled id
 }
 
 // --- Write the config ------------------------------------------------------

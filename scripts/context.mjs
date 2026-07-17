@@ -15,18 +15,30 @@ import { stdin, stdout } from "node:process";
 
 export const CONTEXT_FILE = ".pagevault.json";
 
+// Terminal styling. The muted tier is a real gray (90m), NOT the "dim" attribute (2m):
+// many dark-mode terminals render 2m as near-invisible, which collapses a bold/normal/dim
+// hierarchy into mush. So structure is carried by hue — cyan for headers and labels — and
+// readability never leans on three shades of white. Kept moderate: no bright fills.
 export const c = {
-  dim: (s) => `\x1b[2m${s}\x1b[0m`,
-  bold: (s) => `\x1b[1m${s}\x1b[0m`,
+  dim: (s) => `\x1b[90m${s}\x1b[0m`, // gray — secondary text, ids, hints
+  bold: (s) => `\x1b[1m${s}\x1b[0m`, // one key value on a line
   green: (s) => `\x1b[32m${s}\x1b[0m`,
   red: (s) => `\x1b[31m${s}\x1b[0m`,
   yellow: (s) => `\x1b[33m${s}\x1b[0m`,
-  blue: (s) => `\x1b[36m${s}\x1b[0m`,
+  cyan: (s) => `\x1b[36m${s}\x1b[0m`, // labels, in-progress →
+  blue: (s) => `\x1b[36m${s}\x1b[0m`, // alias for existing callers
+  head: (s) => `\x1b[1m\x1b[36m${s}\x1b[0m`, // bold cyan — the top line of a command
 };
 
 export const ok = (s) => console.log(`${c.green("✓")} ${s}`);
-export const info = (s) => console.log(`${c.blue("→")} ${s}`);
+export const info = (s) => console.log(`${c.cyan("→")} ${s}`);
 export const warn = (s) => console.log(`${c.yellow("!")} ${s}`);
+
+/** First 8 chars of a Cloudflare id — enough to recognize, short enough to repeat. */
+export const shortId = (id) => String(id ?? "").slice(0, 8);
+
+/** A one-line account label: Name (shortid). The canonical way to name WHERE it deploys. */
+export const acct = (a) => `${a.name} ${c.dim(`(${shortId(a.id)})`)}`;
 
 export function die(message, hint) {
   console.error(`\n${c.red("✗")} ${message}`);

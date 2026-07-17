@@ -10,9 +10,9 @@
 //
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, versions } from "node:process";
-import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cfAccounts, tokenSetupFlow } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cfApi, cfAccounts, acct, tokenSetupFlow } from "./context.mjs";
 
-console.log(`\n${c.bold("PageVault — setup")} ${c.dim("(nothing is created)")}\n`);
+console.log(`\n${c.head("PageVault — setup")} ${c.dim("(configuring — nothing deployed yet)")}\n`);
 
 // --- Sanity: the most basic thing, checked plainly -------------------------
 
@@ -89,43 +89,75 @@ rl.close();
 saveContext({ ...ctx, rung, ownerEmail, host });
 ok(`Saved to ${c.bold(".pagevault.json")}`);
 
-// Where does this deploy? NOT the email above — that's who you are in the app. The account
-// comes from your wrangler login. Surface it now (or point a not-logged-in newbie at the one
-// command they need), so the distinction is concrete before preflight.
+// --- The token: WHERE it deploys -------------------------------------------
+//
+// The only cloud-touching part of setup, and it only READS — to pin the account now, so the
+// difference between "who you are" (the email above) and "where it deploys" (the account) is
+// concrete before anything is built. Its own labeled step, so the two never blur.
+
 let token = loadCloudToken();
 console.log();
 if (!token) {
-  warn("No Cloudflare API token yet — setup saved your rung and email, nothing more.");
-  console.log(`  ${c.dim("The token is separate from the owner email above — it is WHERE it deploys.")}\n`);
+  console.log(`${c.cyan("The token")} — this is ${c.bold("where")} PageVault deploys.\n`);
   const saved = await tokenSetupFlow();
   if (!saved) {
-    console.log(`\n  ${c.bold("Next:")} save the token, then ${c.bold("make preflight")}.\n`);
+    console.log(`\n${c.bold("Next:")} save the token, then run ${c.bold("make setup")} again.\n`);
     process.exit(0);
   }
   token = loadCloudToken(); // pick up what we just wrote to .env.local
   console.log();
 }
 
-// Have a token — name the account and confirm it.
 const accounts = await cfAccounts();
 if (accounts.length === 0) {
-  warn("Token is set, but Cloudflare returned no account for it — check the token and its scopes.");
+  warn("The token is set, but Cloudflare returns no account for it — check the token and its scopes.");
   console.log(`\n${c.bold("Next:")} ${c.bold("make preflight")} ${c.dim("— it names the exact problem.")}\n`);
+  process.exit(0);
+}
+
+// One account → pin and show it; there is no other option to confirm. Several → pick one, and
+// preflight will hold the deploy to it.
+let account;
+if (accounts.length === 1) {
+  account = accounts[0];
+} else if (isInteractive()) {
+  console.log(`The token reaches ${accounts.length} accounts:`);
+  accounts.forEach((a, i) => console.log(`  ${c.bold(String(i + 1))}  ${acct(a)}`));
+  const rl2 = createInterface({ input: stdin, output: stdout });
+  const pick = (await rl2.question(`Which one? [1] `)).trim() || "1";
+  rl2.close();
+  account = accounts[Number(pick) - 1] ?? accounts[0];
 } else {
-  const a = accounts[0];
-  info(`Token found. This is WHERE it deploys (not the email above):`);
-  console.log(
-    `     ${c.bold(a.name)} ${c.dim(a.id)}` +
-      (accounts.length > 1 ? c.dim(`  (+${accounts.length - 1} more — preflight will have you pick)`) : ""),
-  );
-  if (isInteractive()) {
-    const rl2 = createInterface({ input: stdin, output: stdout });
-    const ans = (await rl2.question(`\n  Use this account? [Y/n] `)).trim().toLowerCase();
-    rl2.close();
-    if (ans === "n" || ans === "no") {
-      console.log(`\n  Put a token for a different account in ${c.bold(".env.local")}, then re-run ${c.bold("make setup")}.\n`);
+  account = accounts[0];
+  warn(`Token reaches ${accounts.length} accounts; using the first. Pass --account to be explicit.`);
+}
+saveContext({ ...loadContext(), accountId: account.id, accountName: account.name });
+ok(`Deploys to: ${acct(account)}`);
+
+// --- Own a domain here? Offer the rung-2 bump ------------------------------
+//
+// Changing your mind about the rung is an INTENT decision, so it lives in setup — not in
+// preflight, whose one job is to verify the rung you chose. Rung 1 only; 2 and 3 already
+// picked a host.
+if (rung < 2 && isInteractive()) {
+  const z = await cfApi("/zones?per_page=50");
+  const zones = (z.ok ? z.result ?? [] : []).filter((x) => x.account?.id === account.id && x.status === "active");
+  if (zones.length) {
+    console.log();
+    console.log(`You own ${zones.length === 1 ? "a domain" : "domains"} here: ${c.bold(zones.map((x) => x.name).join(", "))}`);
+    const rl3 = createInterface({ input: stdin, output: stdout });
+    const yes = (await rl3.question(`Publish on it instead of *.workers.dev? (rung 2) [y/N] `)).trim().toLowerCase();
+    if (yes === "y" || yes === "yes") {
+      const suggested = `pagevault.${zones[0].name}`;
+      const h = (await rl3.question(`Hostname? [${suggested}] `)).trim() || suggested;
+      rl3.close();
+      saveContext({ ...loadContext(), rung: 2, host: h });
+      ok(`Switched to rung 2 — ${c.bold(h)}`);
+      console.log(`\n${c.bold("Next:")} ${c.bold("make preflight")}\n`);
       process.exit(0);
     }
+    rl3.close();
   }
-  console.log(`\n${c.bold("Next:")} ${c.bold("make preflight")}\n`);
 }
+
+console.log(`\n${c.bold("Next:")} ${c.bold("make preflight")}\n`);

@@ -11,7 +11,7 @@ import { randomBytes } from "node:crypto";
 import { stdin, stdout } from "node:process";
 import {
   c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, isInteractive, cfApi, cfAccounts, cfErr, slug,
-  writeEnvLocalVar,
+  writeEnvLocalVar, acct, shortId,
 } from "./context.mjs";
 
 const CONFIG_OUT = "worker/wrangler.generated.jsonc";
@@ -20,23 +20,23 @@ loadCloudToken();
 const ctx = loadContext();
 if (!ctx.rung || !ctx.ownerEmail) die("No .pagevault.json yet.", "Run `make setup` first.");
 
-console.log(`\n${c.bold("PageVault — deploy")} ${c.dim(`(rung ${ctx.rung})`)}\n`);
+console.log(`\n${c.head("PageVault — deploy")} ${c.dim(`(rung ${ctx.rung} → ${shortId(ctx.accountId)})`)}\n`);
 
-// --- 0. WHERE? Verify the pinned account, state it, confirm it -------------
+// --- 0. WHERE? Verify the pinned account, name it once, confirm it ---------
 
 const accounts = await cfAccounts();
 if (accounts.length === 0) die("No Cloudflare token, or it reaches no account.", "Run `make preflight` — it names the problem.");
-if (!ctx.accountId) die("No account pinned yet.", "Run `make preflight` first — it pins the account.");
+if (!ctx.accountId) die("No account pinned yet.", "Run `make setup` first — it pins the account.");
 const target = accounts.find((a) => a.id === ctx.accountId);
 if (!target) {
-  die(`Your token reaches ${accounts.map((a) => a.id).join(", ")}, not the pinned ${ctx.accountId}.`,
-    "Use the token for the pinned account, or re-pin with `make preflight`.");
+  die(`Your token reaches ${accounts.map((a) => shortId(a.id)).join(", ")}, not the pinned ${shortId(ctx.accountId)}.`,
+    "Use the token for the pinned account, or re-pin with `make setup`.");
 }
 
-console.log(`  Target: ${c.bold(target.name)} ${c.dim(target.id)}\n`);
+console.log(`  ${c.cyan("Deploying to")} ${acct(target)}\n`);
 if (isInteractive()) {
   const rl = createInterface({ input: stdin, output: stdout });
-  const ans = (await rl.question(`  Deploy "pagevault" to ${c.bold(target.name)}? [y/N] `)).trim().toLowerCase();
+  const ans = (await rl.question(`  Continue? [y/N] `)).trim().toLowerCase();
   rl.close();
   if (ans !== "y") die("Cancelled — nothing was deployed.");
 }

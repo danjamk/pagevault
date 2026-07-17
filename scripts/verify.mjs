@@ -17,7 +17,7 @@ const ctx = loadContext();
 const base = (ctx.deployedUrl ?? (ctx.host ? `https://${ctx.host}` : "")).replace(/\/$/, "");
 if (!base) die("No deployed URL in .pagevault.json.", "Run `make deploy` first.");
 
-console.log(`\n${c.bold("PageVault — verify")} ${c.dim(base)}\n`);
+console.log(`\n${c.head("PageVault — verify")} ${c.dim(base)}\n`);
 
 const findings = [];
 const pass = (m) => findings.push(["pass", m]);
