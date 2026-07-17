@@ -214,15 +214,20 @@ export function wranglerAccount() {
 }
 
 /**
- * Resolve one value by precedence: flag → env → context → prompt (if interactive) →
- * undefined. The precedence is the whole design: a person gets asked, an LLM or CI passes
- * flags and is never asked. Pass `rl` (a readline interface) to allow the prompt.
+ * Resolve one value. A flag or env var is authoritative and never prompts — that is the
+ * whole design: an LLM or CI passes flags and is never asked. Otherwise, an interactive run
+ * PROMPTS, defaulting to the saved context value (enter keeps, type changes). That default is
+ * what makes a re-run an EDIT rather than a silent replay of `.pagevault.json` — without it,
+ * you could never change a value once saved (e.g. climb rung 2 → 3). Non-interactive with no
+ * flag falls back to context, then `fallback`. Pass `rl` to allow the prompt.
  */
 export async function resolve({ flag, envKey, ctxValue, promptText, rl, fallback }) {
-  let v = (flag && argValue(flag)) ?? (envKey && fromEnv(envKey)) ?? ctxValue;
-  if ((v === undefined || v === "") && rl && isInteractive() && promptText) {
-    const answer = (await rl.question(`  ${promptText}${fallback ? c.dim(` [${fallback}]`) : ""}: `)).trim();
-    v = answer || fallback;
+  const forced = (flag && argValue(flag)) ?? (envKey && fromEnv(envKey));
+  if (forced === undefined && rl && isInteractive() && promptText) {
+    const def = ctxValue ?? fallback;
+    const shown = def !== undefined && def !== "" ? c.dim(` [${def}]`) : "";
+    const answer = (await rl.question(`  ${promptText}${shown}: `)).trim();
+    return answer || def;
   }
-  return v === undefined ? fallback : v;
+  return forced ?? ctxValue ?? fallback;
 }
