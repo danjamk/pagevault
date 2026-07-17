@@ -39,9 +39,17 @@ export interface Env {
   /** Signs capability and console session tokens. See ADR-007. */
   VIEWER_CAPABILITY_SECRET?: string;
   /**
-   * Optional. Enables the Access group sync (ADR-002). Absent (with the ids above) = Tier 0
-   * (ADR-008): email-secured sharing is unavailable, and a grant with emails fails loudly
-   * rather than falling back to a weaker `Include: Everyone` policy.
+   * The RUNTIME Cloudflare token — the second half of the two-token model. This is a standing
+   * credential inside the Worker, so it is deliberately NARROW: a dedicated token scoped to a
+   * single permission (Access: Organizations, Identity Providers, and Groups — Edit), enough to
+   * read and PUT the `pagevault-viewers` group and nothing else (#24). It is NOT the broad
+   * provisioning credential (`CLOUDFLARE_API_TOKEN` in `.env.local`, deploy-time only) — a
+   * compromised Worker must not be able to touch KV, Workers, or the Access apps.
+   *
+   * Provisioning captures it as `CF_RUNTIME_TOKEN` in `.env.local`; `make deploy` sets it here.
+   * Enables the Access group sync (ADR-002). Absent (with the ids above) = Tier 0 (ADR-008):
+   * email-secured sharing is unavailable, and a grant with emails fails loudly rather than
+   * falling back to a weaker `Include: Everyone` policy.
    */
   CF_API_TOKEN?: string;
 }

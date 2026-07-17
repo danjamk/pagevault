@@ -11,7 +11,7 @@ import { randomBytes } from "node:crypto";
 import { stdin, stdout } from "node:process";
 import {
   c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, isInteractive, cfApi, cfAccounts, cfErr, slug,
-  writeEnvLocalVar, acct, shortId,
+  writeEnvLocalVar, fromEnv, acct, shortId,
 } from "./context.mjs";
 
 const CONFIG_OUT = "worker/wrangler.generated.jsonc";
@@ -148,6 +148,35 @@ if (hasSecret) {
   } else {
     warn(`Couldn't set PAGEVAULT_API_TOKEN automatically (${cfErr(put.errors)}).`);
     console.log(`  Set it by hand under Node 22: ${c.bold(`npx wrangler secret put PAGEVAULT_API_TOKEN --config ${CONFIG_OUT}`)}`);
+  }
+}
+
+// --- 5. rung 3: the scoped runtime secret (CF_API_TOKEN) -------------------
+//
+// access-group.ts uses a Worker secret, CF_API_TOKEN, to keep the pagevault-viewers group in
+// step as portal members change (ADR-002). It's the SCOPED runtime token the operator created
+// (CF_RUNTIME_TOKEN in .env.local) — deliberately NOT the broad provisioning credential, so a
+// compromised Worker can touch one Access group and nothing else. Set post-deploy, like the
+// bearer, because the Worker script must exist first. Absent = email-grant sync stays off, but
+// the owner can still log in — degraded, not broken.
+
+if (ctx.rung >= 3) {
+  console.log();
+  const runtime = fromEnv("CF_RUNTIME_TOKEN");
+  const hasRuntime = existing.ok && (existing.result ?? []).some((s) => s.name === "CF_API_TOKEN");
+  if (runtime) {
+    const put = await cfApi(`/accounts/${target.id}/workers/scripts/pagevault/secrets`, {
+      method: "PUT",
+      body: JSON.stringify({ name: "CF_API_TOKEN", text: runtime, type: "secret_text" }),
+    });
+    put.ok
+      ? ok("CF_API_TOKEN (scoped runtime secret) set — the Worker can sync the viewer group.")
+      : warn(`Couldn't set CF_API_TOKEN (${cfErr(put.errors)}). Check the token, or set it with wrangler.`);
+  } else if (hasRuntime) {
+    ok("CF_API_TOKEN (scoped runtime secret) is already set.");
+  } else {
+    warn("No CF_RUNTIME_TOKEN in .env.local — email-grant sync is off until CF_API_TOKEN is set.");
+    console.log(`  ${c.dim("Provision printed how to create it. Add it, then re-run `make deploy`.")}`);
   }
 }
 
