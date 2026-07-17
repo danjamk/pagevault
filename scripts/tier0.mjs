@@ -30,24 +30,33 @@ const host = ctx.rung >= 2 ? ctx.host : ""; // rung 1 publishes on workers.dev; 
 // --- The KV namespace ------------------------------------------------------
 //
 // Precedence: an explicit --kv, then the id already in the context (idempotent re-run),
-// then create one over the Cloudflare API using the token. One robust API call — not a
-// wrangler subprocess that has to guess at Node and auth.
+// then an EXISTING "pagevault" namespace on the account, and only then create one. That
+// find-by-title step matters: without it, a run whose .pagevault.json lost its kvId (a
+// re-clone, a deleted context file) would happily create a *second* "pagevault" namespace —
+// which is exactly how a duplicate ends up in the dashboard.
 
 let kvId = argValue("--kv") ?? ctx.kvId;
 if (kvId) {
   ok(`KV namespace ${c.dim(kvId)}`);
 } else {
   if (!ctx.accountId) die("No account pinned.", "Run `make preflight` first — it pins the account.");
-  info("Creating a KV namespace…");
-  const created = await cfApi(`/accounts/${ctx.accountId}/storage/kv/namespaces`, {
-    method: "POST",
-    body: JSON.stringify({ title: "pagevault" }),
-  });
-  if (!created.ok) {
-    die(`Couldn't create the KV namespace (${cfErr(created.errors)}).`, "Check the token has 'Workers KV Storage — Edit'.");
+  const existing = await cfApi(`/accounts/${ctx.accountId}/storage/kv/namespaces?per_page=100`);
+  const found = existing.ok ? (existing.result ?? []).find((n) => n.title === "pagevault") : null;
+  if (found) {
+    kvId = found.id;
+    ok(`KV namespace ${c.dim(kvId)} ${c.dim('(reusing the existing "pagevault")')}`);
+  } else {
+    info("Creating a KV namespace…");
+    const created = await cfApi(`/accounts/${ctx.accountId}/storage/kv/namespaces`, {
+      method: "POST",
+      body: JSON.stringify({ title: "pagevault" }),
+    });
+    if (!created.ok) {
+      die(`Couldn't create the KV namespace (${cfErr(created.errors)}).`, "Check the token has 'Workers KV Storage — Edit'.");
+    }
+    kvId = created.result.id;
+    ok(`KV namespace created ${c.dim(kvId)}`);
   }
-  kvId = created.result.id;
-  ok(`KV namespace created ${c.dim(kvId)}`);
   saveContext({ ...ctx, kvId }); // remember it so a re-run doesn't make a second namespace
 }
 

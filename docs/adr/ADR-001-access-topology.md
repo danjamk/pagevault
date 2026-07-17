@@ -80,3 +80,9 @@ than a protected route.
   Access to have run (see ADR-004). It is also why the `workers.dev` subdomain must
   be disabled — it is another unprotected path to the same Worker.
 - The public URL is `/admin`, not `/`. Slightly less elegant. Worth it.
+- `/` stays unauthenticated with no Access app, as decided here — but what the Worker
+  *serves* there became rung-aware once the ladder (ADR-008) landed. With Access provisioned
+  (`CF_ACCESS_AUD_ADMIN` set) it 302s to `/admin` as above; below that there is no console to
+  reach, so a redirect would dump visitors on a dead `Forbidden`. Instead `/` serves a quiet
+  landing that reveals nothing about portals, documents, or the owner. The topology is
+  unchanged; only the publish-mode response is new. See `worker/src/pages.ts`.

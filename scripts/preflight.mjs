@@ -15,7 +15,7 @@ import { c, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, to
 const ctx = loadContext();
 const rung = ctx.rung ?? 1;
 const host = ctx.host ?? "";
-const token = loadCloudToken();
+let token = loadCloudToken();
 
 console.log(`\n${c.bold("PageVault — preflight")} ${c.dim(`(read-only · rung ${rung})`)}\n`);
 
@@ -53,8 +53,12 @@ Number(versions.node.split(".")[0]) >= 22
 if (!token) {
   console.log(`  ${c.red("✗")} ${c.bold("Cloudflare token")} — none set; nothing can deploy.\n`);
   const saved = await tokenSetupFlow();
-  if (saved) console.log(`\n  ${c.green("✓")} Re-run ${c.bold("make preflight")} — it'll use the token you just saved.\n`);
-  process.exit(1);
+  if (!saved) {
+    console.log(`\n  ${c.bold("Next:")} save the token, then re-run ${c.bold("make preflight")}.\n`);
+    process.exit(1);
+  }
+  token = loadCloudToken(); // pick up what we just wrote — and keep going, no second run needed
+  console.log(`\n  ${c.green("✓")} Token saved — continuing preflight.\n`);
 }
 
 const verify = await cfApi("/user/tokens/verify");

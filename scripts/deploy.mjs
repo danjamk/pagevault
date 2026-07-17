@@ -11,6 +11,7 @@ import { randomBytes } from "node:crypto";
 import { stdin, stdout } from "node:process";
 import {
   c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, isInteractive, cfApi, cfAccounts, cfErr, slug,
+  writeEnvLocalVar,
 } from "./context.mjs";
 
 const CONFIG_OUT = "worker/wrangler.generated.jsonc";
@@ -127,14 +128,17 @@ if (hasSecret) {
     body: JSON.stringify({ name: "PAGEVAULT_API_TOKEN", text: value, type: "secret_text" }),
   });
   if (put.ok) {
-    ok("PAGEVAULT_API_TOKEN set. This is your CLI / MCP bearer — save it, you can't see it again:");
+    // Save it locally too: the Worker now has this secret, but so must the CLI, the MCP
+    // bearer, and `make verify` (which publishes the welcome doc). .env.local is gitignored.
+    writeEnvLocalVar("PAGEVAULT_API_TOKEN", value);
+    ok("PAGEVAULT_API_TOKEN set on the Worker and saved to .env.local (your CLI / MCP bearer):");
     console.log(`     ${c.bold(value)}`);
-    console.log(`     ${c.dim("e.g. add PAGEVAULT_API_TOKEN=… to .env.local, and use it as the MCP bearer.")}`);
+    console.log(`     ${c.dim("Same token the Worker uses — verify will publish your first document with it.")}`);
   } else {
     warn(`Couldn't set PAGEVAULT_API_TOKEN automatically (${cfErr(put.errors)}).`);
     console.log(`  Set it by hand under Node 22: ${c.bold(`npx wrangler secret put PAGEVAULT_API_TOKEN --config ${CONFIG_OUT}`)}`);
   }
 }
 
-console.log(`\n${c.bold("Next:")} ${c.bold("make verify")} ${c.dim("— smoke-test the live deployment.")}`);
-console.log(`  ${c.dim("Then publish a document over MCP and open its /p/ link.")}\n`);
+console.log(`\n${c.bold("Next:")} ${c.bold("make verify")} ${c.dim("— smoke-test the deployment and publish your first document.")}`);
+console.log(`  ${c.dim("It hands back a public /p/ link you can open immediately — no login, no Access.")}\n`);

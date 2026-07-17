@@ -121,14 +121,17 @@ export function printTokenSetup() {
   console.log(`       ${c.bold("echo 'CLOUDFLARE_API_TOKEN=<paste>' > .env.local")}`);
 }
 
-/** Update-or-append CLOUDFLARE_API_TOKEN in .env.local, leaving any other lines intact. */
-function writeEnvLocalToken(token) {
+/** Update-or-append `KEY=value` in .env.local, leaving any other lines intact. */
+export function writeEnvLocalVar(key, value) {
   const path = ".env.local";
   const lines = existsSync(path) ? readFileSync(path, "utf8").split("\n").filter((l) => l.trim() !== "") : [];
-  const kept = lines.filter((l) => !l.trim().startsWith("CLOUDFLARE_API_TOKEN="));
-  kept.push(`CLOUDFLARE_API_TOKEN=${token}`);
+  const kept = lines.filter((l) => !l.trim().startsWith(`${key}=`));
+  kept.push(`${key}=${value}`);
   writeFileSync(path, `${kept.join("\n")}\n`);
 }
+
+/** Update-or-append CLOUDFLARE_API_TOKEN in .env.local, leaving any other lines intact. */
+const writeEnvLocalToken = (token) => writeEnvLocalVar("CLOUDFLARE_API_TOKEN", token);
 
 /**
  * Print the token instructions, then offer to take it right here: paste it and we write

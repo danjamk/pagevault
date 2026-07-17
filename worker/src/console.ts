@@ -1,6 +1,7 @@
 import { emailsMatch } from "./access.js";
 import { identify } from "./auth.js";
 import type { Env } from "./env.js";
+import { consoleForbidden } from "./pages.js";
 import { mintSession } from "./session.js";
 
 /**
@@ -16,7 +17,7 @@ import { mintSession } from "./session.js";
 export async function handleConsole(request: Request, env: Env): Promise<Response> {
   const identity = await identify(request, env, "admin");
   if (!identity || !emailsMatch(identity.email, env.OWNER_EMAIL)) {
-    return new Response("Forbidden", { status: 403, headers: { "Content-Type": "text/plain" } });
+    return consoleForbidden(env);
   }
 
   const session = await mintSession(env, identity.email);
