@@ -24,3 +24,10 @@ PR_COMMENT.md
 # worker/wrangler.jsonc keeps its placeholders and is what the tests run against.
 worker/wrangler.generated.jsonc
 .pagevault-provision.json
+
+# The ladder's per-clone intent + discovered state (account id, owner email, host, KV id).
+# Per-clone and account-specific — never belongs on the public repo.
+.pagevault.json
+
+# KV backups (`make backup`). Contains your documents and portal data — keep it out of git.
+pagevault-backup-*.json

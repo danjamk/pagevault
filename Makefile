@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install setup login logout preflight dev demo test test-security check-sandbox check provision deploy verify destroy logs
+.PHONY: help install setup login logout preflight dev demo test test-security check-sandbox check provision deploy verify destroy backup restore logs
 
 # Written by `make provision`. Gitignored — it holds your email, team name, AUD tags and
 # KV id, and this is a public repo.
@@ -42,6 +42,7 @@ demo: ## Seed a running local Worker with a demo client engagement, and print wh
 
 test: ## Run the test suite
 	@$(NVM) && pnpm test
+	@$(NVM) && node --test scripts/*.test.mjs
 
 test-security: ## Run only canView() + identity — the suite where a bug is an incident
 	@$(NVM) && pnpm test:security
@@ -80,6 +81,12 @@ verify: ## Smoke-test the live deployment (run after deploy)
 
 destroy: ## Tear the deployment down — Worker, DNS, Access apps, group, and KV data
 	@$(NVM) && node scripts/destroy.mjs
+
+backup: ## Snapshot the KV namespace to a JSON file (OUT=path, KV=id optional)
+	@$(NVM) && node scripts/kv-backup.mjs $(if $(OUT),--out $(OUT),) $(if $(KV),--kv $(KV),)
+
+restore: ## Restore a backup into the KV namespace (make restore FILE=backup.json [KV=id] [FORCE=1])
+	@$(NVM) && node scripts/kv-restore.mjs --in "$(FILE)" $(if $(KV),--kv $(KV),) $(if $(FORCE),--force,)
 
 logs: ## Tail the deployed Worker
 	@$(NVM) && npx wrangler tail --config $(DEPLOY_CONFIG)
