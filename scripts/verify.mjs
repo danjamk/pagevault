@@ -81,6 +81,14 @@ console.log(`  ${c.green("✓")} Worker is live and serving PageVault`);
 console.log();
 ok("Deployment verified.");
 
+// Report the deployed build (ADR-010) — confirms the version bake landed, and is the field CI
+// reads to compare deployed-vs-upstream.
+{
+  const { res } = await get("/health");
+  const body = await res?.json().catch(() => null);
+  if (body?.version && body.version !== "unknown") console.log(`  ${c.dim("Running")} ${c.bold(body.version)}`);
+}
+
 // --- 3. Publish the first document, so there is something to open ----------
 
 const bearer = fromEnv("PAGEVAULT_API_TOKEN");

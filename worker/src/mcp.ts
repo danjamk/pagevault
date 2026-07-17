@@ -74,7 +74,9 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
 }
 
 function buildServer(env: Env, origin: string): McpServer {
-  const server = new McpServer({ name: "pagevault", version: "0.1.0" });
+  // The version a client sees in serverInfo is the deployed build, not a hardcoded string —
+  // baked at deploy (ADR-010).
+  const server = new McpServer({ name: "pagevault", version: env.PAGEVAULT_VERSION || "0.0.0" });
 
   // -------------------------------------------------------------------------
   // Write

@@ -58,6 +58,14 @@ describe("router", () => {
     expect(await res.json()).toEqual({ error: "Not found", code: "not_found" });
   });
 
+  it("serves /health with the deployment version, unauthenticated", async () => {
+    const res = await SELF.fetch("https://share.example.com/health");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { name: string; version: string };
+    expect(body.name).toBe("pagevault");
+    expect(typeof body.version).toBe("string");
+  });
+
   // /api/* (#2), /render + /p/* (#3), /v/* (#13), and /admin (#5) are all live now.
   it("403s an unauthenticated /admin — the console is live and identity-gated", async () => {
     const res = await SELF.fetch("https://share.example.com/admin");

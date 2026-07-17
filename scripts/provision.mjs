@@ -18,7 +18,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import {
   c, ok, info, warn, die, loadCloudToken, loadContext, saveContext, cfApi, cfErr, acct, shortId,
-  fromEnv, writeEnvLocalVar, isInteractive, banner,
+  fromEnv, writeEnvLocalVar, isInteractive, banner, releaseTag,
 } from "./context.mjs";
 
 const CONFIG_IN = "worker/wrangler.jsonc";
@@ -249,6 +249,7 @@ if (runtimeToken) {
 const template = readFileSync(CONFIG_IN, "utf8");
 const generated = template
   .replace(/"id": "REPLACE_WITH_KV_NAMESPACE_ID"/, `"id": "${kvId}"`)
+  .replace(/"PAGEVAULT_VERSION": ""/, `"PAGEVAULT_VERSION": "${releaseTag()}"`)
   .replace(/"OWNER_EMAIL": ""/, `"OWNER_EMAIL": "${ownerEmail}"`)
   .replace(/"CF_TEAM_NAME": ""/, `"CF_TEAM_NAME": "${team}"`)
   .replace(/"PUBLIC_HOST": ""/, `"PUBLIC_HOST": "${host}"`)

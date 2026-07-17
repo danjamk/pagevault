@@ -25,6 +25,10 @@
   ],
 
   "vars": {
+    // The code this Worker was built from: <version>+<shortsha>. Baked at deploy from
+    // package.json + git; reported by /health, the MCP server, and the console. See ADR-010.
+    "PAGEVAULT_VERSION": "",
+
     "OWNER_EMAIL": "",
     "CF_TEAM_NAME": "",
     "PUBLIC_HOST": "",

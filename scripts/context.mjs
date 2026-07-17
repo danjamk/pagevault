@@ -66,6 +66,22 @@ export const VERSION = (() => {
   }
 })();
 
+/**
+ * The exact code a deploy is built from: `<version>+<shortsha>`, with `-dirty` when the tree has
+ * uncommitted changes. This is the "build number" (ADR-010) — a commit pins a deployment to code
+ * far more usefully than a counter. Baked into the Worker at deploy so it can report itself.
+ * Falls back to the bare version outside a git checkout (e.g. a tarball).
+ */
+export function releaseTag() {
+  try {
+    const sha = execSync("git rev-parse --short HEAD", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+    const dirty = execSync("git status --porcelain", { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim() ? "-dirty" : "";
+    return sha ? `${VERSION}+${sha}${dirty}` : VERSION;
+  } catch {
+    return VERSION;
+  }
+}
+
 /** The current .pagevault.json schema version. Bump when the file's shape changes. */
 export const SCHEMA_VERSION = 1;
 
