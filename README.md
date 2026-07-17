@@ -97,32 +97,56 @@ and an API token.
 git clone https://github.com/danjamk/pagevault && cd pagevault
 ```
 
-### 2. Create a Cloudflare API token
+### 2. Create your Cloudflare API token
 
-PageVault reaches your account with an API token — one per clone, kept in `.env.local`.
-It's explicit and per-clone, so a deploy can never land in the wrong account, and it
-lets the setup do everything over the API (KV, your workers.dev subdomain, your bearer
-secret) with no interactive prompts.
+PageVault reaches your account with an API token, kept in `.env.local` — explicit and
+per-clone, so a deploy can never land in the wrong account, and setup does everything over
+the API (KV, your workers.dev subdomain, your bearer secret) with no interactive prompts.
 
-1. Open **[Cloudflare → API Tokens](https://dash.cloudflare.com/profile/api-tokens)** → **Create Custom Token**.
-2. Name it **`pagevault`**.
-3. Add these permissions. Grant them all now, so climbing the ladder never means editing the token:
+Open **[Cloudflare → API Tokens](https://dash.cloudflare.com/profile/api-tokens)** →
+**Create Custom Token**, name it **`pagevault`**, and grant all of these now — so climbing
+the ladder never means editing the token:
 
-   | Type | Permission | Access | For |
-   |---|---|---|---|
-   | Account | Workers Scripts | Edit | rung 1 · deploy |
-   | Account | Workers KV Storage | Edit | rung 1 · documents |
-   | Account | Account Settings | Read | rung 1 · identify the account |
-   | Zone | Workers Routes | Edit | rung 2 · custom domain |
-   | Zone | DNS | Edit | rung 2 · the custom-domain record |
-   | Account | Access: Apps and Policies | Edit | rung 3 · portals |
-   | Account | Access: Organizations, Identity Providers, and Groups | Edit | rung 3 · the viewer group lives here — easy to miss |
+| Type | Permission | Access | For |
+|---|---|---|---|
+| Account | Workers Scripts | Edit | rung 1 · deploy |
+| Account | Workers KV Storage | Edit | rung 1 · documents |
+| Account | Account Settings | Read | rung 1 · identify the account |
+| Zone | Workers Routes | Edit | rung 2 · custom domain |
+| Zone | DNS | Edit | rung 2 · the custom-domain record |
+| Account | Access: Apps and Policies | Edit | rung 3 · portals |
+| Account | Access: Organizations, Identity Providers, and Groups | Edit | rung 3 · the viewer group lives here — easy to miss |
 
-4. Create it, copy the value, and save it into the clone (gitignored):
+Copy the value and save it into the clone (gitignored):
 
-   ```bash
-   echo 'CLOUDFLARE_API_TOKEN=<paste-your-token>' > .env.local
-   ```
+```bash
+echo 'CLOUDFLARE_API_TOKEN=<paste-your-token>' > .env.local
+```
+
+This is your **deployment** token — broad, on your machine, used only when you run `make`.
+**Rungs 1 and 2 need nothing else — skip ahead to the ladder.**
+
+#### Rung 3 only: a second, runtime token
+
+Client portals need one more — a **runtime** token that lives *inside the Worker* (as its
+`CF_API_TOKEN` secret) to keep the viewer group in sync as you add and remove members. It's
+separate from the deployment token above and deliberately narrow: a single permission, so a
+compromised Worker can edit one Access group and nothing else — never your KV or Workers.
+
+Create another Custom Token, name it **`pagevault-runtime`**, with just:
+
+| Type | Permission | Access | For |
+|---|---|---|---|
+| Account | Access: Organizations, Identity Providers, and Groups | Edit | keep the viewer group in sync |
+
+`make deploy` prompts you for it during rung-3 provisioning and saves it as `CF_RUNTIME_TOKEN`
+— or add it yourself:
+
+```bash
+echo 'CF_RUNTIME_TOKEN=<paste-your-token>' >> .env.local
+```
+
+You can skip it and add it later: the owner still logs in, and only member-sync waits on it.
 
 ### 3. Run the ladder
 
