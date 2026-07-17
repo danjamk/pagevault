@@ -12,7 +12,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { c, ok, info, warn, die, loadCloudToken, loadContext, cfApi, cfErr, argValue, isInteractive } from "./context.mjs";
+import { c, ok, info, warn, die, loadCloudToken, loadContext, cfApi, cfErr, argValue, isInteractive, banner } from "./context.mjs";
 
 // KV bulk write caps: 10,000 keys and 100 MB per request. Stay well under both.
 const MAX_KEYS_PER_CALL = 1000;
@@ -44,7 +44,7 @@ if (!Array.isArray(entries) || entries.some((e) => typeof e?.key !== "string")) 
 
 const nsPath = `/accounts/${account}/storage/kv/namespaces/${nsId}`;
 
-console.log(`\n${c.head("PageVault — restore")} ${c.dim(`(KV ${nsId})`)}\n`);
+console.log(banner("restore", `(KV ${nsId})`));
 
 // Refuse a non-empty target unless forced — restore is same-host recovery into a fresh
 // namespace, not a merge. Overwriting live keys is a data-loss footgun, so it must be explicit.

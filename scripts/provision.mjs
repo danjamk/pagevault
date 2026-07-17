@@ -18,7 +18,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import {
   c, ok, info, warn, die, loadCloudToken, loadContext, saveContext, cfApi, cfErr, acct, shortId,
-  fromEnv, writeEnvLocalVar, isInteractive,
+  fromEnv, writeEnvLocalVar, isInteractive, banner,
 } from "./context.mjs";
 
 const CONFIG_IN = "worker/wrangler.jsonc";
@@ -26,7 +26,7 @@ const CONFIG_OUT = "worker/wrangler.generated.jsonc";
 const LEGACY_STATE = ".pagevault-provision.json";
 const GROUP_NAME = "pagevault-viewers";
 
-console.log(`\n${c.head("PageVault — provision Access")} ${c.dim("(rung 3)")}\n`);
+console.log(banner("provision Access", "(rung 3)"));
 
 // --- Context: one file, migrating the legacy provision state in once -------
 

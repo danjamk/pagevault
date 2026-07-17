@@ -11,13 +11,13 @@
 // confirm:true and updates the same document in place.
 //
 import { readFileSync, existsSync } from "node:fs";
-import { c, ok, warn, die, loadContext, fromEnv } from "./context.mjs";
+import { c, ok, warn, die, loadContext, fromEnv, banner } from "./context.mjs";
 
 const ctx = loadContext();
 const base = (ctx.deployedUrl ?? (ctx.host ? `https://${ctx.host}` : "")).replace(/\/$/, "");
 if (!base) die("No deployed URL in .pagevault.json.", "Run `make deploy` first.");
 
-console.log(`\n${c.head("PageVault — verify")} ${c.dim(base)}\n`);
+console.log(banner("verify", base));
 
 async function get(path, init) {
   try {

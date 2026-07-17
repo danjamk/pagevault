@@ -19,7 +19,7 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { c, ok, warn, die, loadCloudToken, cfApi, cfAccounts, isInteractive, printTokenSetup } from "./context.mjs";
+import { c, ok, warn, die, loadCloudToken, cfApi, cfAccounts, isInteractive, printTokenSetup, banner } from "./context.mjs";
 
 const WORKER_NAME = "pagevault";
 const GROUP_NAME = "pagevault-viewers";
@@ -32,7 +32,7 @@ const skip = (s) => console.log(`${c.dim(`· ${s}`)}`);
 const rl = createInterface({ input: stdin, output: stdout });
 const ask = async (q) => (await rl.question(`  ${q} `)).trim();
 
-console.log(`\n${c.head("PageVault — tear down")}\n`);
+console.log(banner("tear down"));
 
 // --- Resolve the deployment: rung 3 (provision) or rung 1/2 (context) ------
 

@@ -11,14 +11,14 @@
 // preflight just points there.
 //
 import { versions } from "node:process";
-import { c, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, acct, shortId, slug } from "./context.mjs";
+import { c, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, acct, shortId, slug, banner } from "./context.mjs";
 
 const ctx = loadContext();
 const rung = ctx.rung ?? 1;
 const host = ctx.host ?? "";
 const token = loadCloudToken();
 
-console.log(`\n${c.head("PageVault — preflight")} ${c.dim(`(read-only · rung ${rung})`)}\n`);
+console.log(banner("preflight", `(read-only · rung ${rung})`));
 
 const findings = [];
 const pass = (label, detail) => findings.push({ level: "pass", label, detail });
