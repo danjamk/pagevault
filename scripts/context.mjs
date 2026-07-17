@@ -40,18 +40,82 @@ export const shortId = (id) => String(id ?? "").slice(0, 8);
 /** A one-line account label: Name (shortid). The canonical way to name WHERE it deploys. */
 export const acct = (a) => `${a.name} ${c.dim(`(${shortId(a.id)})`)}`;
 
+/** A command header with the product version: "PageVault — <verb>  v<x>  <note>". */
+export const banner = (verb, note = "") =>
+  `\n${c.head(`PageVault — ${verb}`)}  ${c.dim(`v${VERSION}`)}${note ? `  ${c.dim(note)}` : ""}\n`;
+
 export function die(message, hint) {
   console.error(`\n${c.red("✗")} ${message}`);
   if (hint) console.error(`\n${Array.isArray(hint) ? hint.join("\n") : hint}\n`);
   process.exit(1);
 }
 
-/** The context, or an empty object if there is none yet. */
-export const loadContext = () =>
-  existsSync(CONTEXT_FILE) ? JSON.parse(readFileSync(CONTEXT_FILE, "utf8")) : {};
+// --- Versioning -------------------------------------------------------------
+//
+// Two versions, deliberately distinct. PRODUCT version (below) is the semver of the code you're
+// running, read from package.json and surfaced to a human. SCHEMA_VERSION is the internal format
+// version of .pagevault.json — plumbing, so migrations are ordered and deterministic instead of
+// the ad-hoc patching we'd been doing.
 
+/** The PageVault product version (semver), from package.json. Shown in command headers. */
+export const VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync("package.json", "utf8")).version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+})();
+
+/** The current .pagevault.json schema version. Bump when the file's shape changes. */
+export const SCHEMA_VERSION = 1;
+
+/**
+ * Ordered migrations for .pagevault.json. `MIGRATIONS[i]` migrates a v(i+1) file to v(i+2):
+ * index 0 is v1 → v2, index 1 is v2 → v3, and so on. Empty at v1 — v1 IS the current shape.
+ * Every future schema change lands here as one pure function, so an old operator's file upgrades
+ * the same way every time.
+ */
+export const MIGRATIONS = [];
+
+/**
+ * Bring a context object up to `target` schema version by applying registered migrations in
+ * order. A file with no `schemaVersion` is assumed v1 (its shape is v1 — see #39). A file NEWER
+ * than the code fails loud rather than being silently mishandled — that means you're running an
+ * older PageVault than the one that wrote the state. Pure; exported for testing with synthetic
+ * migrations.
+ */
+export function migrate(ctx, migrations = MIGRATIONS, target = SCHEMA_VERSION) {
+  let version = ctx.schemaVersion ?? 1;
+  if (version > target) {
+    throw new Error(
+      `.pagevault.json is schema v${version}, but this PageVault understands only up to v${target} — ` +
+        "you're running an older PageVault than the one that wrote this state.",
+    );
+  }
+  let out = { ...ctx };
+  while (version < target) {
+    const step = migrations[version - 1]; // migrations[0] : v1 → v2
+    if (typeof step !== "function") throw new Error(`No migration registered for schema v${version} → v${version + 1}.`);
+    out = step(out);
+    version += 1;
+  }
+  out.schemaVersion = target;
+  return out;
+}
+
+/** The context — migrated to the current schema — or an empty object if there is none yet. */
+export function loadContext() {
+  if (!existsSync(CONTEXT_FILE)) return {};
+  try {
+    return migrate(JSON.parse(readFileSync(CONTEXT_FILE, "utf8")));
+  } catch (err) {
+    die(err.message, "`git pull` to update the code, or delete .pagevault.json and re-run `make setup`.");
+  }
+}
+
+/** Persist the context, stamped with the current schema version. */
 export const saveContext = (ctx) =>
-  writeFileSync(CONTEXT_FILE, `${JSON.stringify(ctx, null, 2)}\n`);
+  writeFileSync(CONTEXT_FILE, `${JSON.stringify({ ...ctx, schemaVersion: SCHEMA_VERSION }, null, 2)}\n`);
 
 /**
  * Put a Cloudflare API token from .env.local (or the environment) where wrangler will see

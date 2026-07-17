@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install setup login logout preflight dev demo test test-security check-sandbox check provision deploy verify destroy backup restore logs
+.PHONY: help install setup status login logout preflight dev demo test test-security check-sandbox check provision deploy verify destroy backup restore logs
 
 # Written by `make provision`. Gitignored — it holds your email, team name, AUD tags and
 # KV id, and this is a public repo.
@@ -66,6 +66,9 @@ check-sandbox: ## Fail the build if the iframe is ever granted our origin (ADR-0
 
 check: check-sandbox ## Typecheck + test — the pre-PR gate, and what CI runs
 	@$(NVM) && pnpm check
+
+status: ## Show what this clone is configured for (versions, rung, account)
+	@$(NVM) && node scripts/status.mjs
 
 preflight: ## Check your Cloudflare account is ready for your rung (read-only)
 	@$(NVM) && node scripts/preflight.mjs

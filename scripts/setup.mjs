@@ -10,9 +10,9 @@
 //
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, versions } from "node:process";
-import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cfApi, cfAccounts, acct, tokenSetupFlow } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cfApi, cfAccounts, acct, tokenSetupFlow, banner } from "./context.mjs";
 
-console.log(`\n${c.head("PageVault — setup")} ${c.dim("(configuring — nothing deployed yet)")}\n`);
+console.log(banner("setup", "(configuring — nothing deployed yet)"));
 
 // --- Sanity: the most basic thing, checked plainly -------------------------
 

@@ -14,7 +14,7 @@
 // us the body and the keys endpoint gives us the metadata inline.
 //
 import { writeFileSync } from "node:fs";
-import { c, ok, info, warn, die, loadCloudToken, loadContext, cfApi, cfErr, argValue } from "./context.mjs";
+import { c, ok, info, warn, die, loadCloudToken, loadContext, cfApi, cfErr, argValue, banner } from "./context.mjs";
 
 const CF = "https://api.cloudflare.com/client/v4";
 
@@ -51,7 +51,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const out = argValue("--out") ?? defaultOutName();
   const nsPath = `/accounts/${account}/storage/kv/namespaces/${nsId}`;
 
-  console.log(`\n${c.head("PageVault — backup")} ${c.dim(`(KV ${nsId})`)}\n`);
+  console.log(banner("backup", `(KV ${nsId})`));
 
   // 1. Every key, with its metadata inline — paginated by the cursor in result_info.
   info("Listing keys…");

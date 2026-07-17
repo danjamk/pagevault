@@ -11,7 +11,7 @@ import { randomBytes } from "node:crypto";
 import { stdin, stdout } from "node:process";
 import {
   c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, isInteractive, cfApi, cfAccounts, cfErr, slug,
-  writeEnvLocalVar, fromEnv, acct, shortId,
+  writeEnvLocalVar, fromEnv, acct, shortId, banner,
 } from "./context.mjs";
 
 const CONFIG_OUT = "worker/wrangler.generated.jsonc";
@@ -20,7 +20,7 @@ loadCloudToken();
 const ctx = loadContext();
 if (!ctx.rung || !ctx.ownerEmail) die("No .pagevault.json yet.", "Run `make setup` first.");
 
-console.log(`\n${c.head("PageVault — deploy")} ${c.dim(`(rung ${ctx.rung} → ${shortId(ctx.accountId)})`)}\n`);
+console.log(banner("deploy", `(rung ${ctx.rung} → ${shortId(ctx.accountId)})`));
 
 // --- 0. WHERE? Verify the pinned account, name it once, confirm it ---------
 
