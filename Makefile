@@ -82,6 +82,9 @@ deploy: ## Deploy the Worker — rung-aware (Tier 0, or provision at rung 3)
 verify: ## Smoke-test the live deployment (run after deploy)
 	@$(NVM) && node scripts/verify.mjs
 
+health: ## Assert the live /health matches this checkout's build (<version>+<sha>)
+	@$(NVM) && node scripts/health-check.mjs
+
 destroy: ## Tear the deployment down — Worker, DNS, Access apps, group, and KV data
 	@$(NVM) && node scripts/destroy.mjs
 

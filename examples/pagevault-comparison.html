@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sharing private HTML — a field guide</title>
+<meta name="description" content="A dozen tools turn an AI-made HTML file into a private link. They're not interchangeable. This guide sorts them by what you actually care about.">
+<style>
+  :root{
+    --ink:#0E1522; --ink2:#141D2E; --ink3:#1C2740;
+    --line:#26324d; --line2:#33436a;
+    --brass:#C8A253; --brass-hi:#E7C67E; --brass-dim:#6f5c33;
+    --teal:#57BEB9;
+    --paper:#ECE7DB; --muted:#8B93A4; --faint:#5c6577;
+    --yes:#C8A253; --no:#454d61; --part:#8B93A4;
+    --mono: ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --sans: system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --maxw:1080px;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--ink); color:var(--paper); font-family:var(--sans); line-height:1.6; font-size:17px; letter-spacing:.005em;
+    background-image:radial-gradient(1100px 560px at 82% -10%, rgba(200,162,83,.09), transparent 60%), radial-gradient(900px 500px at 6% 4%, rgba(87,190,185,.045), transparent 55%);}
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 22px}
+  section{padding:60px 0; border-top:1px solid var(--line)}
+  section:first-of-type{border-top:0}
+  h1,h2,h3{line-height:1.13; margin:0}
+  a{color:var(--brass-hi); text-decoration:none; border-bottom:1px solid rgba(231,198,126,.3)}
+  a:hover{border-bottom-color:var(--brass-hi)}
+  .eyebrow{font-family:var(--mono); font-size:12.5px; letter-spacing:.28em; text-transform:uppercase; color:var(--brass); margin:0 0 18px}
+  .lede{color:var(--muted); font-size:19px; max-width:64ch}
+  .kicker{font-family:var(--mono); font-size:12px; letter-spacing:.22em; text-transform:uppercase; color:var(--faint)}
+  h2.big{font-size:clamp(24px,4vw,34px); font-weight:800; letter-spacing:-.015em; max-width:24ch}
+
+  .hero{padding-top:72px}
+  .hero h1{font-size:clamp(33px,5.6vw,56px); font-weight:800; letter-spacing:-.02em; max-width:19ch}
+  .hero h1 em{font-style:normal; color:var(--brass-hi)}
+  .hero .lede{margin-top:22px}
+  .fieldstrip{margin-top:32px}
+  .fieldstrip .kicker{margin-bottom:12px}
+  .chips{display:flex; flex-wrap:wrap; gap:8px}
+  .chip{font-family:var(--mono); font-size:12px; color:var(--muted); border:1px solid var(--line); background:var(--ink2); border-radius:6px; padding:6px 10px}
+
+  .qgrid{margin-top:24px; display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px}
+  .qcard{border:1px solid var(--line); border-radius:12px; background:var(--ink2); padding:20px 22px; display:flex; flex-direction:column}
+  .qcard:hover{border-color:var(--line2)}
+  .qcard .qh{font-size:18px; font-weight:800; letter-spacing:-.01em; color:var(--paper)}
+  .qcard .qs{color:var(--muted); font-size:14.5px; margin-top:8px; flex:1}
+  .qcard .qp{margin-top:16px; padding-top:14px; border-top:1px solid var(--line); font-family:var(--mono); font-size:13px; color:var(--brass-hi)}
+  .qcard .qp::before{content:"→ "; color:var(--brass)}
+  .subtle{color:var(--faint); font-family:var(--mono); font-size:12px; margin-top:18px}
+
+  .pickpair{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:24px}
+  .pickcol .kicker{margin-bottom:9px}
+  .pickset{display:flex; flex-wrap:wrap; gap:7px}
+  .selbtn{font-family:var(--mono); font-size:12.5px; color:var(--muted); background:var(--ink2); border:1px solid var(--line); border-radius:7px; padding:7px 11px; cursor:pointer; transition:.14s}
+  .selbtn:hover{border-color:var(--line2); color:var(--paper)}
+  .selbtn.active{color:var(--ink); background:var(--brass); border-color:var(--brass)}
+  .selbtn:focus-visible{outline:2px solid var(--brass-hi); outline-offset:2px}
+  .vpair{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:22px}
+  .vcard{border:1px solid var(--line); border-radius:10px; background:var(--ink2); padding:15px 17px}
+  .vcard .vn{font-family:var(--mono); font-weight:700; font-size:14.5px; color:var(--paper)}
+  .vcard .who{font-family:var(--mono); font-size:11.5px; color:var(--brass); text-transform:uppercase; letter-spacing:.05em; margin:8px 0}
+  .vcard p{margin:0; font-size:14.5px; color:var(--muted)}
+  .vcard a{font-family:var(--mono); font-size:12.5px; display:inline-block; margin-top:10px}
+  .togglerow{display:flex; align-items:center; gap:14px; margin:22px 0 2px; flex-wrap:wrap}
+  .toggle{font-family:var(--mono); font-size:12.5px; color:var(--muted); background:none; border:1px solid var(--line); border-radius:8px; padding:7px 12px; cursor:pointer}
+  .toggle[aria-pressed="true"]{color:var(--teal); border-color:rgba(87,190,185,.4); background:rgba(87,190,185,.07)}
+  .legend{font-family:var(--mono); font-size:11.5px; color:var(--faint); display:flex; gap:15px; flex-wrap:wrap}
+  .legend b{color:var(--muted); font-weight:400}
+  table.cmp{width:100%; border-collapse:collapse; margin-top:12px; font-size:15px}
+  table.cmp th,table.cmp td{text-align:left; padding:11px 10px; border-bottom:1px solid var(--line)}
+  table.cmp thead th{font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); font-weight:600; border-bottom:1px solid var(--line2)}
+  table.cmp thead th.col{text-align:center; width:130px}
+  table.cmp tr.grouprow td{font-family:var(--mono); font-size:10.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--brass); padding:18px 10px 7px; border-bottom:1px solid var(--line2)}
+  table.cmp td.cap{color:var(--paper)}
+  table.cmp td.cap .u{color:var(--brass)}
+  table.cmp td.cap .u::after{content:" ★"; color:var(--brass)}
+  table.cmp td.cap small{display:block; color:var(--faint); font-size:12px; font-family:var(--mono); margin-top:3px; line-height:1.45}
+  table.cmp td.mark{text-align:center; font-family:var(--mono); font-weight:700; font-size:16px; width:130px}
+  table.cmp td.mark.win{background:rgba(200,162,83,.11)}
+  .m-yes{color:var(--yes)} .m-no{color:var(--no)} .m-part{color:var(--part)}
+  .cmpnote{font-family:var(--mono); font-size:12px; color:var(--faint); margin-top:12px}
+
+  .map .kicker{margin-bottom:10px}
+  .frameset{display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 8px}
+  .plotwrap{margin-top:26px; display:grid; grid-template-columns:26px 1fr; gap:12px}
+  .yaxis{display:flex; flex-direction:column; justify-content:space-between; align-items:center; padding:6px 0}
+  .yaxis span{transform:rotate(-90deg); white-space:nowrap; font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--faint)}
+  .plot{position:relative; aspect-ratio:1.4/1; min-height:330px; border:1px solid var(--line); border-radius:14px;
+    background:linear-gradient(var(--ink2),var(--ink2)) padding-box,
+      repeating-linear-gradient(0deg, transparent, transparent 24px, rgba(255,255,255,.016) 24px, rgba(255,255,255,.016) 25px),
+      repeating-linear-gradient(90deg, transparent, transparent 24px, rgba(255,255,255,.016) 24px, rgba(255,255,255,.016) 25px);
+    overflow:hidden}
+  .openlane{position:absolute; right:3%; top:5%; width:34%; height:38%; border:1px dashed rgba(200,162,83,.5); border-radius:10px; background:rgba(200,162,83,.05); pointer-events:none; display:none}
+  .openlane span{position:absolute; top:8px; left:11px; font-family:var(--mono); font-size:10.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--brass)}
+  .pt{position:absolute; transform:translate(-50%,-50%); width:12px; height:12px; padding:0; border-radius:50%; background:var(--muted); border:2px solid var(--ink2); cursor:pointer; outline:none;
+    transition:left .55s cubic-bezier(.4,0,.2,1), top .55s cubic-bezier(.4,0,.2,1), transform .15s, box-shadow .15s}
+  .pt:hover,.pt:focus-visible{transform:translate(-50%,-50%) scale(1.5); box-shadow:0 0 0 4px rgba(139,147,164,.18)}
+  .pt.sel{box-shadow:0 0 0 4px rgba(139,147,164,.24)}
+  .pt.leader{background:var(--brass); width:17px; height:17px; box-shadow:0 0 0 4px rgba(200,162,83,.16), 0 0 20px rgba(200,162,83,.5)}
+  .ptlabel{position:absolute; transform:translate(-50%,-140%); font-family:var(--mono); font-size:10.5px; color:var(--paper); background:rgba(8,12,20,.92); border:1px solid var(--line2); padding:2px 6px; border-radius:5px; white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .12s}
+  .xaxis{grid-column:2; display:flex; justify-content:space-between; font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); margin-top:10px}
+  .mapcap{grid-column:2; margin-top:18px; border:1px solid var(--line); border-left:3px solid var(--brass); border-radius:10px; background:var(--ink2); padding:15px 18px}
+  .mapcap .lead{font-family:var(--mono); font-size:12px; letter-spacing:.05em; text-transform:uppercase; color:var(--brass); margin-bottom:7px}
+  .mapcap p{margin:0; color:var(--muted); font-size:15px}
+  .mapdetail{grid-column:2; margin-top:12px; font-family:var(--mono); font-size:12.5px; color:var(--faint); min-height:20px}
+  .mapdetail b{color:var(--paper); font-weight:700}
+
+  .reveal{border-top:1px solid var(--brass-dim)}
+  .reveal .eyebrow{color:var(--brass)}
+  .reveal p{max-width:70ch; color:var(--muted)}
+  .reveal p.big-p{color:var(--paper); font-size:18px}
+  .reveal .cols{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:26px}
+  .rc{border:1px solid var(--line); border-radius:10px; background:var(--ink2); padding:18px 20px}
+  .rc h3{font-family:var(--mono); font-size:12px; letter-spacing:.06em; text-transform:uppercase; margin-bottom:12px}
+  .rc.win h3{color:var(--brass)} .rc.skip h3{color:var(--muted)}
+  .rc ul{margin:0; padding-left:18px; color:var(--muted); font-size:14.5px}
+  .rc li{margin:7px 0} .rc li b{color:var(--paper); font-weight:600}
+
+  .links{margin-top:24px; display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:12px; overflow:hidden}
+  .lk{background:var(--ink2); padding:13px 16px; display:block; border-bottom:0}
+  .lk:hover{background:var(--ink3)}
+  .lk .n{font-family:var(--mono); font-size:13.5px; color:var(--paper)}
+  .lk .u{font-size:12px; color:var(--faint); margin-top:2px}
+  .lk .d{font-size:12.5px; color:var(--muted); margin-top:6px}
+
+  footer{border-top:1px solid var(--line); padding:48px 0 70px}
+  .dogfood{border:1px solid var(--brass-dim); background:rgba(200,162,83,.06); border-radius:14px; padding:22px 24px}
+  .dogfood .k{font-family:var(--mono); font-size:11.5px; letter-spacing:.2em; text-transform:uppercase; color:var(--brass); margin-bottom:9px}
+  .dogfood p{margin:0; color:var(--paper); font-size:15.5px; max-width:70ch}
+  .dogfood p + p{margin-top:9px; color:var(--muted); font-size:14px}
+  .fine{font-family:var(--mono); font-size:12px; color:var(--faint); margin-top:24px}
+
+  @media (max-width:680px){
+    body{font-size:16px} section{padding:48px 0}
+    .pickpair{grid-template-columns:1fr; gap:20px} .vpair{grid-template-columns:1fr}
+    .reveal .cols{grid-template-columns:1fr}
+    .plotwrap{grid-template-columns:1fr; gap:6px}
+    .yaxis{flex-direction:row; padding:0 0 4px} .yaxis span{transform:none}
+    .xaxis,.mapcap,.mapdetail{grid-column:1}
+    .route-row{grid-template-columns:1fr} .route-row .pick{text-align:left}
+    table.cmp{font-size:14px} table.cmp thead th.col,table.cmp td.mark{width:auto}
+  }
+  @media (prefers-reduced-motion:reduce){ *{transition:none!important; animation:none!important} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <section class="hero">
+    <p class="eyebrow">Field guide · 2026</p>
+    <h1>Sharing a private HTML report is a solved problem. <em>Choosing the right tool isn't.</em></h1>
+    <p class="lede">A dozen tools turn an AI-made HTML file into a link only the right people can open. They are not interchangeable — each is optimizing for something different. This guide sorts them by what you actually care about, and states plainly where each one wins.</p>
+    <div class="fieldstrip">
+      <p class="kicker">The field, at a glance</p>
+      <div class="chips" id="chips"></div>
+    </div>
+  </section>
+
+  <section class="answer">
+    <p class="eyebrow">Start here</p>
+    <h2 class="big">Find the situation that sounds like yours.</h2>
+    <div class="qgrid">
+      <div class="qcard">
+        <div class="qh">Just needs to be seen</div>
+        <div class="qs">It isn't sensitive — a demo, a one-pager, a portfolio piece. You want the shortest path to a link that renders.</div>
+        <div class="qp">Anthropic Publish · ShareDuo</div>
+      </div>
+      <div class="qcard">
+        <div class="qh">It has to stay private</div>
+        <div class="qs">A leak would cost you. Either prove exactly who opened it, or keep the host from being able to read it at all.</div>
+        <div class="qp">Peony · Stacktree</div>
+      </div>
+      <div class="qcard">
+        <div class="qh">One client, over months</div>
+        <div class="qs">You'll hand the same person work again and again, and want it collected in one durable place — not scattered across links and inboxes.</div>
+        <div class="qp">PageVault · SuiteDash</div>
+      </div>
+      <div class="qcard">
+        <div class="qh">The doc is a conversation</div>
+        <div class="qs">You want comments, reactions and iteration on the artifact itself, not a one-way hand-off.</div>
+        <div class="qp">jonesphillip/sharehtml · HTML Share</div>
+      </div>
+      <div class="qcard">
+        <div class="qh">You own the whole stack</div>
+        <div class="qs">Free, self-hosted, on your own domain, open enough to read the source. No vendor sitting in the middle.</div>
+        <div class="qp">PageVault · jonesphillip/sharehtml</div>
+      </div>
+    </div>
+    <p class="subtle">Most of these overlap on the basics — a link, a password, HTML that renders. The differences that decide it are below.</p>
+  </section>
+
+  <section class="h2h">
+    <p class="eyebrow">Compare</p>
+    <h2 class="big">Put any two side by side.</h2>
+    <div class="pickpair">
+      <div class="pickcol"><p class="kicker">Tool A</p><div class="pickset" id="setA"></div></div>
+      <div class="pickcol"><p class="kicker">Tool B</p><div class="pickset" id="setB"></div></div>
+    </div>
+    <div class="vpair" id="vpair"></div>
+    <div class="togglerow">
+      <button class="toggle" id="diffonly" aria-pressed="false">Differences only</button>
+      <div class="legend"><b><span class="m-yes">✓</span> yes</b><b><span class="m-part">~</span> partial</b><b><span class="m-no">✕</span> no</b><b>highlight = leads that row</b><b><span style="color:var(--brass)">★</span> effectively unique to PageVault</b></div>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="cmp"><thead><tr><th>Capability</th><th class="col" id="hA">A</th><th class="col" id="hB">B</th></tr></thead><tbody id="cmpbody"></tbody></table>
+    </div>
+    <p class="cmpnote" id="cmpnote"></p>
+  </section>
+
+  <section class="map">
+    <p class="eyebrow">The map</p>
+    <h2 class="big">Change what matters. Watch the leader change.</h2>
+    <p class="kicker" style="margin-top:14px">What are you optimizing for?</p>
+    <div class="frameset" id="frameset"></div>
+    <div class="plotwrap">
+      <div class="yaxis"><span>AI-native</span><span>manual</span></div>
+      <div class="plot" id="plot" aria-label="Positioning map. Vertical axis: manual at bottom to AI-native at top. Horizontal axis changes with the selected priority. Tap a point for detail.">
+        <div class="openlane" id="openlane"><span>the open lane</span></div>
+        <div class="ptlabel" id="ptlabel"></div>
+      </div>
+      <div class="xaxis"><span id="xlow">—</span><span id="xhigh">—</span></div>
+      <div class="mapcap" id="mapcap"><div class="lead">—</div><p>—</p></div>
+      <div class="mapdetail" id="mapdetail">Tap any point to read what it is.</div>
+    </div>
+  </section>
+
+  <section class="reveal">
+    <p class="eyebrow">Where we fit</p>
+    <h2 class="big">This guide was made by PageVault. Here's our hand, face up.</h2>
+    <p class="big-p" style="margin-top:18px">On the map above, PageVault leads two frames — <b style="color:var(--brass-hi)">the collection</b> and <b style="color:var(--brass-hi)">artifact handling</b> — and sits mid-pack or lower on every other one. We're not the most private (Stacktree is), the most accountable (Peony is), or the most collaborative (sharehtml is). That's fine. We're aiming at a different square.</p>
+    <p style="margin-top:14px">Almost every other tool treats the link as the unit: publish a file, get a URL, done. PageVault treats the <em>client</em> as the unit — every artifact lands in one durable portal, gated to their email, that they bookmark once. No single capability below is ours alone anymore; data rooms have collections, five tools have an MCP server. What's rare is the shape of the whole thing:</p>
+    <div class="cols">
+      <div class="rc win">
+        <h3>What's genuinely rare here</h3>
+        <ul>
+          <li><b>The whole combination.</b> Free, self-hosted on your own domain, renders the artifact <em>and</em> Markdown, keeps it as a per-client collection, open-source enough to read in a sitting. Any one piece you can find elsewhere; the set is the gap.</li>
+          <li><b>Agent read-back of the collection.</b> An MCP server lets Claude search and read a client's whole corpus later — "what did we decide about the CDC migration in March?" The nearest rival, Peony, has a bidirectional MCP, but it's a $30+/mo data room, not a free deliverable portal.</li>
+        </ul>
+      </div>
+      <div class="rc skip">
+        <h3>When to skip PageVault</h3>
+        <ul>
+          <li><b>The artifact is confidential.</b> Watermarks, NDA gates, named audit → Peony.</li>
+          <li><b>The host must never see plaintext</b> → Stacktree's client-side encryption.</li>
+          <li><b>You want live feedback on the doc</b> → jonesphillip/sharehtml.</li>
+          <li><b>You need a CRM, invoicing, e-sign</b> → SuiteDash or Copilot.</li>
+          <li><b>You have under ~5 clients.</b> A shared folder per client is genuinely faster until the artifacts pile up.</li>
+        </ul>
+      </div>
+    </div>
+    <p style="margin-top:22px">Free, MIT-licensed, self-hosted on Cloudflare's free tier. Publishing over MCP works in Claude Code today; the hosted chat surfaces (claude.ai, Desktop, mobile) are in progress. <a href="https://github.com/danjamk/pagevault">github.com/danjamk/pagevault →</a></p>
+  </section>
+
+  <section class="dir">
+    <p class="eyebrow">Every tool in this guide</p>
+    <div class="links" id="links"></div>
+  </section>
+
+</div>
+
+<footer>
+  <div class="wrap">
+    <div class="dogfood">
+      <div class="k">A note on this page</div>
+      <p>It's a single self-contained HTML file — inline styles, inline script, no build step, no external assets, no tracking. It happens to be exactly what PageVault serves into its sandbox, so it doubles as a working sample.</p>
+      <p>Written in a conversation, not a terminal, and handed over as a link.</p>
+    </div>
+    <p class="fine">Landscape researched July 2026, drawing on public product, pricing and docs pages. Categories here move fast — verify current details on each vendor's own site.</p>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+
+  var frames = [
+    {key:"collection", label:"A per-client collection", xlow:"one-off link", xhigh:"durable collection",
+      lead:"Only PageVault sits in the extreme top-right: AI-native and built around a durable per-client collection. Data rooms (Peony) and portal suites (SuiteDash, Clinked) have collections too, but they're on the manual half — they don't take an agent, and most won't render your artifact."},
+    {key:"artifact", label:"Artifact handling", xlow:"hosts a file", xhigh:"renders & exports it",
+      lead:"PageVault and sharehtml lead: both render HTML and Markdown and hand the file back, instead of just hosting it. Most link tools do HTML only; the portal suites don't render artifacts at all."},
+    {key:"privacy", label:"Privacy", xlow:"open link", xhigh:"host-blind",
+      lead:"Stacktree leads — client-side AES-GCM, so the host stores only ciphertext. PageVault gates by email but still reads your document: an honestly weaker guarantee."},
+    {key:"collab", label:"Collaboration", xlow:"read-only", xhigh:"live comments",
+      lead:"jonesphillip/sharehtml leads with threaded comments, reactions and live presence. PageVault has none of it, on purpose."},
+    {key:"ownership", label:"You own it (free, self-hosted)", xlow:"hosted SaaS", xhigh:"free & self-hosted",
+      lead:"sharehtml and PageVault lead — both free, self-hosted, open-source, on your own domain. Stacktree self-hosts too, but as a $999 one-time build. Most of the field is hosted SaaS you don't control."},
+    {key:"accountability", label:"Accountability", xlow:"anonymous", xhigh:"audit trail",
+      lead:"Peony leads: per-viewer watermarks, NDA gates, named verified who-viewed logs. PageVault logs access decisions but has no per-view receipts today — near the bottom here."}
+  ];
+
+  var tools = [
+    {id:"pv", name:"PageVault", url:"https://github.com/danjamk/pagevault", y:92,
+      s:{collection:95,artifact:88,privacy:70,collab:5,ownership:90,accountability:40},
+      blurb:"Free, self-hosted per-client portals that render HTML and Markdown, with an MCP server an agent can publish into and read back. No live collaboration, no encryption, not a CRM."},
+    {id:"sharehtml", name:"jonesphillip/sharehtml", url:"https://github.com/jonesphillip/sharehtml", y:66,
+      s:{collection:12,artifact:82,privacy:65,collab:92,ownership:92,accountability:18},
+      blurb:"OSS, Cloudflare Workers + Access, by a Cloudflare Group PM. Live comments, reactions and presence; renders Markdown and code. Its agent story is a CLI skill — terminal only — and there's no per-client collection."},
+    {id:"sharehtmlcom", name:"share-html.com", url:"https://share-html.com", y:84,
+      s:{collection:12,artifact:52,privacy:44,collab:8,ownership:20,accountability:24},
+      blurb:"Paste, drop or push. Ships an MCP server with edit tokens so an agent can rewrite the same URL across a conversation. It can write; it can't read a collection back."},
+    {id:"shareduo", name:"ShareDuo", url:"https://shareduo.com", y:76,
+      s:{collection:14,artifact:56,privacy:50,collab:10,ownership:34,accountability:55},
+      blurb:"Free, no signup. Password, expiry, aggregate analytics, and a six-tool MCP server that publishes from inside Claude. It even runs CDN-loaded Chart.js/D3. The frictionless pick for one-off links."},
+    {id:"stacktree", name:"Stacktree", url:"https://stacktr.ee", y:64,
+      s:{collection:10,artifact:55,privacy:95,collab:5,ownership:62,accountability:28},
+      blurb:"The privacy maximalist: client-side AES-GCM, key in the URL fragment, host sees only ciphertext. MCP-native for coding agents; a $999 one-time self-hosted build exists. No named viewer identity."},
+    {id:"peony", name:"Peony", url:"https://peony.ink", y:62,
+      s:{collection:58,artifact:60,privacy:78,collab:35,ownership:18,accountability:92},
+      blurb:"A data room that renders your artifact live inside an accountability layer: per-viewer watermarks, NDA gates, named who-viewed logs, instant revoke, bidirectional MCP. From ~$30/admin/mo. No encryption, no self-host."},
+    {id:"livesend", name:"LiveSend", url:"https://livesend.io", y:40,
+      s:{collection:20,artifact:48,privacy:42,collab:8,ownership:18,accountability:55},
+      blurb:"Permanent, professional links with open-tracking, aimed at consultants sending client reports. The link never expires; you get opens, read-time and country. The 'watermark' is a brand badge and the custom URL is a slug, not your domain."},
+    {id:"htmlshare", name:"HTML Share", url:"https://chromewebstore.google.com/detail/html-share/cclmbanndghfflnoecgomkdlegifnmga", y:52,
+      s:{collection:25,artifact:52,privacy:60,collab:66,ownership:15,accountability:66},
+      blurb:"A browser extension with access control + Google OAuth, version history, inline comments and view analytics. No collection, no self-host."},
+    {id:"publish", name:"Anthropic Publish", url:"https://support.claude.com/en/articles/9547008-publish-and-share-artifacts", y:58,
+      s:{collection:6,artifact:42,privacy:8,collab:6,ownership:40,accountability:8},
+      blurb:"Native to Claude, free on every plan, link stays current when you revise. But it's all-or-nothing public, may be indexed, and stays anonymous — no gating, no idea if it landed."},
+    {id:"diy", name:"Vercel / Netlify / Pages", url:"https://vercel.com/docs/deployment-protection", y:10,
+      s:{collection:6,artifact:30,privacy:20,collab:2,ownership:55,accountability:6},
+      blurb:"Not really competitors — the reason the category exists. Vercel's password protection is a $150/mo add-on, Netlify's is ~$19/mo, Pages and Gists are public-only."},
+    {id:"suitedash", name:"SuiteDash", url:"https://suitedash.com", y:18,
+      s:{collection:82,artifact:12,privacy:66,collab:70,ownership:15,accountability:46},
+      blurb:"A real per-client portal with a full business suite — CRM, billing, PM, e-sign — for $19/mo flat. But it's a file host: it won't render your HTML and isn't AI-native."},
+    {id:"copilot", name:"Copilot", url:"https://copilot.com", y:24,
+      s:{collection:80,artifact:14,privacy:56,collab:72,ownership:10,accountability:52},
+      blurb:"The design-led client portal: branded spaces, messaging, billing, contracts. Polished and workflow-deep — built for uploaded files, not rendered artifacts."},
+    {id:"clinked", name:"Clinked", url:"https://clinked.com", y:14,
+      s:{collection:84,artifact:12,privacy:80,collab:55,ownership:10,accountability:80},
+      blurb:"The compliance-grade portal — ISO 27001, the one that passes procurement at a bank. Heavy, secure, entirely file-based."}
+  ];
+
+  // capability groups
+  var groups = [
+    {g:"Sharing & access", caps:[
+      {key:"s_emails", label:"Share to specific people (email allowlist)"},
+      {key:"s_public", label:"Public link, no login, at zero seat cost"},
+      {key:"s_modes",  label:"Granular per-document sharing modes"}
+    ]},
+    {g:"The artifact experience", caps:[
+      {key:"a_html",   label:"Renders interactive HTML as-is"},
+      {key:"a_md",     label:"Renders Markdown as a styled doc"},
+      {key:"a_export", label:"Hands the file back — raw or single-page PDF"},
+      {key:"a_sandbox",label:"Sandboxed against hostile artifact JS"},
+      {key:"a_noacct", label:"Reader installs nothing, no account"}
+    ]},
+    {g:"Agent & workflow", caps:[
+      {key:"w_mcp",     label:"An agent can publish it (MCP)"},
+      {key:"w_readback",label:"An agent can read the whole collection back", u:true}
+    ]},
+    {g:"The collection", caps:[
+      {key:"c_collection",label:"One durable per-client collection"},
+      {key:"c_overwrite", label:"Overwrite protection (diff + confirm)"}
+    ]},
+    {g:"Own it & economics", caps:[
+      {key:"o_selfhost",label:"Free, self-hosted, on your own domain"},
+      {key:"o_oss",     label:"Open-source & auditable"},
+      {key:"o_export",  label:"Full export, no lock-in"}
+    ]},
+    {g:"Collaboration & accountability", caps:[
+      {key:"x_collab",label:"Live comments / collaboration"},
+      {key:"x_e2e",   label:"End-to-end encryption (host sees ciphertext)"},
+      {key:"x_audit", label:"Named who-viewed log / analytics"},
+      {key:"x_crm",   label:"CRM · billing · e-sign"}
+    ]}
+  ];
+
+  var prof = {
+    pv:{who:"Many artifacts for one client, made in chat",
+      verdict:"Free, self-hosted per-client portals that render HTML and Markdown, with an MCP server an agent can publish into and read back. No collaboration, no encryption, not a CRM — it keeps the collection, and handles the awkward formats, better than it does anything else.",
+      v:{s_emails:1,s_public:1,s_modes:1,a_html:1,a_md:1,a_export:1,a_sandbox:1,a_noacct:1,w_mcp:1,w_readback:1,c_collection:1,c_overwrite:1,o_selfhost:1,o_oss:1,o_export:1,x_collab:0,x_e2e:0,x_audit:.5,x_crm:0},
+      notes:{a_md:"shipping",a_export:"single-page PDF, shipping",w_mcp:"MCP in Claude Code today; chat surfaces via OAuth in progress",w_readback:"search_portal / read_document across the client's whole corpus",x_audit:"access-decision log; no per-view receipts yet",o_export:"human-readable full export"}},
+    sharehtml:{who:"Inline feedback, if you live in a terminal",
+      verdict:"The closest analog and genuinely good — same Cloudflare design, plus live comments, reactions and presence, and it renders Markdown and code. Its agent skill only works where there's a shell, and link-shared views still burn an Access seat.",
+      v:{s_emails:1,s_public:0,s_modes:.5,a_html:1,a_md:1,a_export:.5,a_sandbox:.5,a_noacct:1,w_mcp:0,w_readback:0,c_collection:0,c_overwrite:1,o_selfhost:1,o_oss:1,o_export:.5,x_collab:1,x_e2e:0,x_audit:0,x_crm:0},
+      notes:{s_public:"link-shared docs still burn an Access seat",a_export:"pull the raw file; no PDF",a_sandbox:"iframe attribute only, no CSP header",w_mcp:"CLI skill — terminal only",c_overwrite:"diff before overwrite",x_collab:"comments, reactions, presence"}},
+    sharehtmlcom:{who:"An agent rewriting one URL across a chat",
+      verdict:"Ships an MCP server with edit tokens — a model can iterate on the same URL across a conversation. That's write access; it can't read a collection back and isn't self-hosted.",
+      v:{s_emails:.5,s_public:1,s_modes:.5,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:1,w_mcp:1,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:0,x_e2e:0,x_audit:0,x_crm:0},
+      notes:{s_emails:"expiry + edit tokens, not a per-recipient allowlist",w_mcp:"MCP + REST, with agent edit tokens",c_overwrite:"edit tokens revise the same URL"}},
+    shareduo:{who:"A free, no-signup one-off link",
+      verdict:"Free, no account, password + expiry + aggregate analytics + a six-tool MCP server, and it runs CDN-loaded Chart.js/D3. Frictionless for single links — but a single link is all it is.",
+      v:{s_emails:.5,s_public:1,s_modes:.5,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:1,w_mcp:1,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:0,x_e2e:0,x_audit:.5,x_crm:0},
+      notes:{s_emails:"one shared password, not per-viewer",w_mcp:"publishes from inside Claude",a_html:"even runs CDN-loaded Chart.js/D3",x_audit:"aggregate open-counts, not named"}},
+    stacktree:{who:"The host must never see your plaintext",
+      verdict:"The privacy pick, and it beats everyone here on that axis: client-side AES-GCM, key in the URL fragment, server stores only ciphertext. MCP-native for coding agents; self-hostable for $999 one-time. No named viewer, no collection.",
+      v:{s_emails:.5,s_public:1,s_modes:.5,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:1,w_mcp:1,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:.5,o_oss:0,o_export:0,x_collab:0,x_e2e:1,x_audit:0,x_crm:0},
+      notes:{s_emails:"unguessable link is the credential, not a named allowlist",w_mcp:"installer for Claude Code, Cursor, Codex",o_selfhost:"$999 one-time self-hosted build",x_e2e:"host stores only ciphertext",c_overwrite:"replace content in place, same URL"}},
+    peony:{who:"A confidential doc going to named people",
+      verdict:"A data room that renders your artifact inside an accountability layer: per-viewer watermarks, NDA gate, named verified page analytics, instant revoke, bidirectional MCP. The most expensive to start, no encryption, no self-host — but nothing here matches it on control after the open.",
+      v:{s_emails:1,s_public:1,s_modes:1,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:.5,w_mcp:1,w_readback:.5,c_collection:1,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:.5,x_e2e:0,x_audit:1,x_crm:0},
+      notes:{a_noacct:"NDA gate / named viewers add a step",w_mcp:"bidirectional MCP, push from chat",w_readback:"MCP reads room contents, but it's a data room — not a searchable deliverable memory",c_collection:"per-deal rooms, granular per-file permissions",s_modes:"granular per-file permissions",x_audit:"named, verified, page-by-page"}},
+    livesend:{who:"Permanent tracked links for many client reports",
+      verdict:"Permanent, professional links with open-tracking, for consultants. The link never expires; you get opens, read-time and country. But the 'watermark' is just LiveSend's badge, the custom URL is a slug not your domain, and viewer identity is an unverified email.",
+      v:{s_emails:.5,s_public:1,s_modes:.5,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:1,w_mcp:0,w_readback:0,c_collection:.5,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:0,x_e2e:0,x_audit:.5,x_crm:0},
+      notes:{s_emails:"password on Pro; viewer email is unverified",c_collection:"permanent links under your slug, not a per-client space",o_selfhost:"own domain is on the roadmap; today it's a livesend.io slug",x_audit:"opens, read-time, country — identity unverified"}},
+    htmlshare:{who:"Versioning + analytics, no infrastructure",
+      verdict:"A lot shipped in a Chrome extension: access control with Google OAuth, version history, inline comments, view analytics. No self-host, no collection, tied to the browser.",
+      v:{s_emails:1,s_public:.5,s_modes:.5,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:.5,w_mcp:0,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:1,x_e2e:0,x_audit:1,x_crm:0},
+      notes:{s_emails:"access control via Google OAuth",a_noacct:"viewers sign in with Google",w_mcp:"browser extension, no agent API",c_overwrite:"version history",x_collab:"inline comments",x_audit:"view link analytics"}},
+    publish:{who:"The link that's already inside Claude",
+      verdict:"Zero setup, free on every plan, embeddable, link stays current when you revise. But all-or-nothing public, possibly indexed, and anonymous — no gating, no idea if it landed.",
+      v:{s_emails:0,s_public:1,s_modes:0,a_html:1,a_md:.5,a_export:.5,a_sandbox:.5,a_noacct:1,w_mcp:0,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:0,x_e2e:0,x_audit:0,x_crm:0},
+      notes:{s_emails:"all-or-nothing public",a_md:"renders formatted docs in-app",a_export:"copy the source",c_overwrite:"updating in place is unreliable; unpublishing is one-way",w_mcp:"a manual button, not an agent tool"}},
+    suitedash:{who:"Invoicing and a CRM, not just a host",
+      verdict:"A genuine per-client portal with a full business suite for $19/mo flat. But it's a file host — it won't render your interactive HTML, isn't AI-native, and the client has to make an account and learn a UI.",
+      v:{s_emails:1,s_public:0,s_modes:.5,a_html:0,a_md:0,a_export:.5,a_sandbox:0,a_noacct:0,w_mcp:0,w_readback:0,c_collection:1,c_overwrite:0,o_selfhost:0,o_oss:0,o_export:.5,x_collab:1,x_e2e:0,x_audit:.5,x_crm:1},
+      notes:{a_html:"upload a PDF — it won't render your HTML",a_noacct:"clients create accounts, learn a UI",c_collection:"real client spaces, but not AI-native",x_crm:"CRM, billing, PM, e-sign"}}
+  };
+  var compIds = ["pv","sharehtml","sharehtmlcom","shareduo","stacktree","peony","livesend","htmlshare","publish","suitedash"];
+  var toolById={}; tools.forEach(function(t){toolById[t.id]=t;});
+
+  function esc(s){return String(s).replace(/[&<>"]/g,function(m){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m];});}
+  function pretty(u){return u.replace(/^https?:\/\//,"").replace(/\/$/,"");}
+  function nm(id){return toolById[id].name;}
+
+  // HERO chips
+  var chipOrder=["Anthropic Publish","ShareDuo","Stacktree","Peony","LiveSend","share-html.com","HTML Share","jonesphillip/sharehtml","SuiteDash","Copilot","Clinked","PageVault"];
+  var chips=document.getElementById("chips");
+  chipOrder.forEach(function(n){var c=document.createElement("span");c.className="chip";c.textContent=n;chips.appendChild(c);});
+
+  // (Start-here cards are static HTML — no render needed.)
+
+  // COMPARE
+  var A="sharehtml",B="peony",diffOnly=false;
+  var setA=document.getElementById("setA"),setB=document.getElementById("setB");
+  compIds.forEach(function(id){
+    [["A",setA],["B",setB]].forEach(function(pair){
+      var b=document.createElement("button");b.className="selbtn";b.textContent=nm(id);b.dataset.id=id;b.dataset.side=pair[0];
+      b.addEventListener("click",function(){ if(pair[0]==="A")A=id; else B=id; renderCmp(); });
+      pair[1].appendChild(b);
+    });
+  });
+  var vpair=document.getElementById("vpair"),cmpbody=document.getElementById("cmpbody"),
+      hA=document.getElementById("hA"),hB=document.getElementById("hB"),cmpnote=document.getElementById("cmpnote");
+  function mark(v){return v===1?'<span class="m-yes">✓</span>':v===.5?'<span class="m-part">~</span>':'<span class="m-no">✕</span>';}
+  function vcard(id){var t=toolById[id],p=prof[id];
+    return '<div class="vcard"><div class="vn">'+esc(t.name)+'</div><div class="who">Best when — '+esc(p.who)+'</div><p>'+esc(p.verdict)+'</p><a href="'+t.url+'">'+pretty(t.url)+' →</a></div>';}
+  function renderCmp(){
+    Array.prototype.forEach.call(document.querySelectorAll('.selbtn[data-side="A"]'),function(b){b.classList.toggle("active",b.dataset.id===A);});
+    Array.prototype.forEach.call(document.querySelectorAll('.selbtn[data-side="B"]'),function(b){b.classList.toggle("active",b.dataset.id===B);});
+    vpair.innerHTML=vcard(A)+vcard(B);
+    hA.textContent=nm(A); hB.textContent=nm(B);
+    var pa=prof[A],pb=prof[B],aw=0,bw=0,html="";
+    groups.forEach(function(grp){
+      var rows="";
+      grp.caps.forEach(function(cap){
+        var va=pa.v[cap.key],vb=pb.v[cap.key],awin=va>vb,bwin=vb>va;
+        if(awin)aw++; if(bwin)bw++;
+        if(diffOnly && va===vb) return;
+        var note=""; if(pa.notes[cap.key])note+="A: "+pa.notes[cap.key]; if(pb.notes[cap.key])note+=(note?" · ":"")+"B: "+pb.notes[cap.key];
+        var lbl=cap.u?'<span class="u">'+esc(cap.label)+'</span>':esc(cap.label);
+        rows+='<tr><td class="cap">'+lbl+(note?'<small>'+esc(note)+'</small>':'')+'</td>'+
+              '<td class="mark'+(awin?' win':'')+'">'+mark(va)+'</td>'+
+              '<td class="mark'+(bwin?' win':'')+'">'+mark(vb)+'</td></tr>';
+      });
+      if(rows) html+='<tr class="grouprow"><td colspan="3">'+esc(grp.g)+'</td></tr>'+rows;
+    });
+    if(!html) html='<tr><td class="cap" colspan="3" style="color:var(--muted)">These two match on every capability shown.</td></tr>';
+    cmpbody.innerHTML=html;
+    cmpnote.textContent=nm(A)+" leads "+aw+" row"+(aw===1?"":"s")+", "+nm(B)+" leads "+bw+". The rest are ties.";
+  }
+  document.getElementById("diffonly").addEventListener("click",function(){
+    diffOnly=!diffOnly; this.setAttribute("aria-pressed",String(diffOnly));
+    this.textContent=diffOnly?"Show all capabilities":"Differences only"; renderCmp();
+  });
+
+  // MAP
+  var frame="collection";
+  var frameset=document.getElementById("frameset"),plot=document.getElementById("plot"),label=document.getElementById("ptlabel"),
+      xlow=document.getElementById("xlow"),xhigh=document.getElementById("xhigh"),
+      mapcap=document.getElementById("mapcap"),mapdetail=document.getElementById("mapdetail"),openlane=document.getElementById("openlane");
+  frames.forEach(function(f){var b=document.createElement("button");b.className="selbtn";b.textContent=f.label;b.dataset.key=f.key;
+    b.addEventListener("click",function(){frame=f.key;layout();}); frameset.appendChild(b);});
+  var pts=[];
+  tools.forEach(function(t){
+    var b=document.createElement("button");b.className="pt";b.dataset.id=t.id;b.style.top=(100-t.y)+"%";
+    b.setAttribute("aria-label",t.name+" — "+t.blurb);
+    function show(){label.textContent=t.name;label.style.left=t.s[frame]+"%";label.style.top=(100-t.y)+"%";label.style.opacity="1";}
+    function hide(){label.style.opacity="0";}
+    b.addEventListener("mouseenter",show);b.addEventListener("mouseleave",hide);b.addEventListener("focus",show);b.addEventListener("blur",hide);
+    b.addEventListener("click",function(){
+      pts.forEach(function(p){p.classList.remove("sel");}); b.classList.add("sel");
+      mapdetail.innerHTML='<b>'+esc(t.name)+'</b> — '+esc(t.blurb)+' &nbsp;<a href="'+t.url+'" style="font-size:12px">'+pretty(t.url)+' →</a>';
+    });
+    plot.appendChild(b);pts.push(b);
+  });
+  function layout(){
+    var f=null; frames.forEach(function(x){if(x.key===frame)f=x;});
+    Array.prototype.forEach.call(frameset.children,function(b){b.classList.toggle("active",b.dataset.key===frame);});
+    var maxv=-1,leadId=null; tools.forEach(function(t){if(t.s[frame]>maxv){maxv=t.s[frame];leadId=t.id;}});
+    pts.forEach(function(b){var t=toolById[b.dataset.id]; b.style.left=t.s[frame]+"%"; b.classList.toggle("leader",b.dataset.id===leadId);});
+    xlow.textContent=f.xlow+" →"; xhigh.textContent=f.xhigh;
+    mapcap.innerHTML='<div class="lead">'+esc(nm(leadId))+' leads on '+esc(f.label.toLowerCase())+'</div><p>'+esc(f.lead)+'</p>';
+    openlane.style.display = frame==="collection" ? "block" : "none";
+    label.style.opacity="0";
+  }
+
+  renderCmp(); layout();
+
+  // DIRECTORY
+  var links=document.getElementById("links");
+  tools.forEach(function(t){var a=document.createElement("a");a.className="lk";a.href=t.url;
+    a.innerHTML='<div class="n">'+esc(t.name)+'</div><div class="u">'+pretty(t.url)+'</div><div class="d">'+esc(t.blurb.split(".")[0])+'.</div>'; links.appendChild(a);});
+})();
+</script>
+</body>
+</html>

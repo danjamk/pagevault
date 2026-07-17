@@ -11,7 +11,7 @@ import { randomBytes } from "node:crypto";
 import { stdin, stdout } from "node:process";
 import {
   c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, isInteractive, cfApi, cfAccounts, cfErr, slug,
-  writeEnvLocalVar, fromEnv, acct, shortId, banner,
+  writeEnvLocalVar, fromEnv, acct, shortId, banner, chooseBearer,
 } from "./context.mjs";
 
 const CONFIG_OUT = "worker/wrangler.generated.jsonc";
@@ -120,24 +120,43 @@ if (url) {
   warn("Deployed, but couldn't read the URL from wrangler's output — check above.");
 }
 
-// --- 4. The bearer secret — generate and set it over the API ---------------
+// --- 4. The bearer secret — set it over the API ----------------------------
 //
-// PAGEVAULT_API_TOKEN is what the CLI and MCP server authenticate with (a different token
-// from the Cloudflare one). The token model lets us set it via the API, so there is no
-// `wrangler secret put` step to run by hand in a wrong-Node shell.
+// PAGEVAULT_API_TOKEN is what the CLI and MCP server authenticate with (a different token from
+// the Cloudflare one). The token model lets us set it via the API, so there is no `wrangler
+// secret put` step to run by hand in a wrong-Node shell. Which value to use is a policy — see
+// chooseBearer: reuse what the Worker has (never rotate a live bearer), else the provided value
+// (a GitHub Environment secret in CI), else mint one interactively. A CI deploy into a fresh
+// Worker with no provided bearer FAILS rather than minting a throwaway prod token on the runner.
 
 const existing = await cfApi(`/accounts/${target.id}/workers/scripts/pagevault/secrets`);
 const hasSecret = existing.ok && (existing.result ?? []).some((s) => s.name === "PAGEVAULT_API_TOKEN");
-
-console.log();
-if (hasSecret) {
-  ok("PAGEVAULT_API_TOKEN is already set.");
-} else {
-  const value = randomBytes(32).toString("hex");
-  const put = await cfApi(`/accounts/${target.id}/workers/scripts/pagevault/secrets`, {
+const setBearer = (value) =>
+  cfApi(`/accounts/${target.id}/workers/scripts/pagevault/secrets`, {
     method: "PUT",
     body: JSON.stringify({ name: "PAGEVAULT_API_TOKEN", text: value, type: "secret_text" }),
   });
+
+console.log();
+const bearer = chooseBearer({ hasSecret, provided: fromEnv("PAGEVAULT_API_TOKEN"), interactive: isInteractive() });
+
+if (bearer.action === "skip") {
+  ok("PAGEVAULT_API_TOKEN is already set — reused, not rotated.");
+} else if (bearer.action === "fail") {
+  die("No PAGEVAULT_API_TOKEN on the Worker, and none provided, in a non-interactive deploy.", [
+    "  This looks like a CI deploy into a fresh Worker. Minting a random bearer here would strand it",
+    "  on a throwaway runner — your CLI and MCP clients would never learn it. Provide the bearer instead:",
+    "    • set PAGEVAULT_API_TOKEN as a GitHub Environment secret, or",
+    "    • run `make deploy` once locally (it mints and saves one to .env.local).",
+  ]);
+} else if (bearer.action === "set") {
+  const put = await setBearer(bearer.value);
+  put.ok
+    ? ok("PAGEVAULT_API_TOKEN set from the environment — your existing CLI / MCP bearer, unchanged.")
+    : warn(`Couldn't set PAGEVAULT_API_TOKEN (${cfErr(put.errors)}).`);
+} else {
+  const value = randomBytes(32).toString("hex");
+  const put = await setBearer(value);
   if (put.ok) {
     // Save it locally too: the Worker now has this secret, but so must the CLI, the MCP
     // bearer, and `make verify` (which publishes the welcome doc). .env.local is gitignored.
