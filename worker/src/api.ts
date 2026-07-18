@@ -4,6 +4,7 @@ import { verifySession } from "./session.js";
 import {
   BadRequest,
   Conflict,
+  type DocPatch,
   Misconfigured,
   documentPath,
   parseEmails,
@@ -11,6 +12,7 @@ import {
   parseSummary,
   parseTags,
   parseTitle,
+  patchDocument,
   publishDocument,
   requireString,
   updatePortalMembers,
@@ -29,7 +31,6 @@ import {
   listDocs,
   listPortals,
   putMembers,
-  putMeta,
   putPortal,
 } from "./store.js";
 import { logBlocked } from "./viewer.js";
@@ -131,7 +132,7 @@ async function createDoc(request: Request, env: Env): Promise<Response> {
 
   const body = await readJson(request);
 
-  const { meta, created, portal } = await publishDocument(env, {
+  const { meta, created, portal, sync } = await publishDocument(env, {
     title: parseTitle(body["title"]),
     source: requireString(body["html"] ?? body["source"], "html"),
     portal: typeof body["portal"] === "string" ? body["portal"] : undefined,
@@ -144,7 +145,10 @@ async function createDoc(request: Request, env: Env): Promise<Response> {
     confirm: body["confirm"] === true,
   });
 
-  return json(publishResult(meta, portal, baseUrl(request, env)), created ? 201 : 200);
+  const result = publishResult(meta, portal, baseUrl(request, env));
+  // #27: tell the caller whether a per-document email grant was actually admitted to Access.
+  if (sync) result["sync"] = sync.status;
+  return json(result, created ? 201 : 200);
 }
 
 async function listDocsHandler(request: Request, env: Env): Promise<Response> {
@@ -173,24 +177,46 @@ async function deleteDocHandler(env: Env, id: string): Promise<Response> {
 }
 
 /**
- * Toggle a document's `ownerOnly` (draft) flag — the console's visibility control.
+ * The console's per-document controls: the `ownerOnly` (draft) toggle, public-link
+ * mint/revoke, and per-document email grants. A thin shell over `patchDocument`, which owns
+ * the single write and the Access-group sync — the same service the MCP tools reach for, so
+ * the sync cannot be present on one path and forgotten on another.
  *
- * `putMeta` writes both the meta blob and the key metadata the listing reads, so the
- * change is reflected everywhere in one write. Only `ownerOnly` is patchable here: title,
- * body, and grants go through publish (create-or-update) and the group sync respectively.
+ * Title and body are NOT patchable here — they go through publish (create-or-update).
  */
 async function patchDocHandler(request: Request, env: Env, id: string): Promise<Response> {
-  const meta = await getMeta(env, id);
-  if (!meta) return fail(404, "not_found", `No such document: ${id}`);
-
   const body = await readJson(request);
-  if (typeof body["ownerOnly"] !== "boolean") {
-    return fail(400, "invalid_field", `PATCH expects "ownerOnly": boolean`);
+
+  const patch: DocPatch = {};
+  let any = false;
+  if ("ownerOnly" in body) {
+    if (typeof body["ownerOnly"] !== "boolean") return fail(400, "invalid_field", `"ownerOnly" must be a boolean`);
+    patch.ownerOnly = body["ownerOnly"];
+    any = true;
+  }
+  if ("makePublic" in body) {
+    if (typeof body["makePublic"] !== "boolean") return fail(400, "invalid_field", `"makePublic" must be a boolean`);
+    patch.makePublic = body["makePublic"];
+    any = true;
+  }
+  if ("addEmails" in body) {
+    patch.addEmails = parseEmails(body["addEmails"], "addEmails") ?? [];
+    any = true;
+  }
+  if ("removeEmails" in body) {
+    patch.removeEmails = parseEmails(body["removeEmails"], "removeEmails") ?? [];
+    any = true;
+  }
+  if (!any) {
+    return fail(400, "invalid_field", `PATCH expects one of: ownerOnly, makePublic, addEmails, removeEmails`);
   }
 
-  const next: DocMeta = { ...meta, ownerOnly: body["ownerOnly"], updatedAt: new Date().toISOString() };
-  await putMeta(env, next);
-  return json(next);
+  const result = await patchDocument(env, id, patch);
+  if (!result) return fail(404, "not_found", `No such document: ${id}`);
+
+  // Surface the group-sync outcome so a grant that landed in KV but that Access still blocks
+  // is never silent (ADR-002). Absent when the patch granted no new email.
+  return json(result.sync ? { ...result.meta, sync: result.sync.status } : result.meta);
 }
 
 // ---------------------------------------------------------------------------

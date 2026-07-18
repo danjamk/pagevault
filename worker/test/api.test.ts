@@ -145,6 +145,87 @@ describe("PATCH /api/docs/{id} — the console visibility toggle (#5)", () => {
     const session = await mintSession(env, "owner@example.com");
     expect((await patch(id, { ownerOnly: true }, { Authorization: `Bearer ${session}` })).status).toBe(200);
   });
+
+  it("mints a public link with makePublic:true and records the pub: key", async () => {
+    const id = await createDoc();
+    const res = await patch(id, { makePublic: true });
+    expect(res.status).toBe(200);
+
+    const meta = (await res.json()) as { publicToken?: string };
+    expect(meta.publicToken).toMatch(/^[a-z2-9]{22}$/);
+    expect(await env.PAGEVAULT.get(`pub:${meta.publicToken}`)).toBe(id);
+  });
+
+  it("minting is idempotent — a second makePublic:true keeps the same token", async () => {
+    const id = await createDoc();
+    const first = (await (await patch(id, { makePublic: true })).json()) as { publicToken: string };
+    const second = (await (await patch(id, { makePublic: true })).json()) as { publicToken: string };
+    expect(second.publicToken).toBe(first.publicToken);
+  });
+
+  it("revoking with makePublic:false removes the link but keeps the document", async () => {
+    const id = await createDoc();
+    const minted = (await (await patch(id, { makePublic: true })).json()) as { publicToken: string };
+
+    const res = await patch(id, { makePublic: false });
+    expect(res.status).toBe(200);
+    expect(await res.json()).not.toHaveProperty("publicToken");
+
+    // The pub: key is gone, so the capability URL is dead...
+    expect(await env.PAGEVAULT.get(`pub:${minted.publicToken}`)).toBeNull();
+    // ...but the document itself survives — revoke is not delete.
+    const after = await SELF.fetch(`${HOST}/api/docs/${id}`, { headers: auth() });
+    expect(after.status).toBe(200);
+    expect((await after.json()) as Record<string, unknown>).toMatchObject({ id });
+  });
+
+  it("rejects a PATCH carrying neither ownerOnly nor makePublic", async () => {
+    const id = await createDoc();
+    expect((await patch(id, { nope: true })).status).toBe(400);
+  });
+
+  it("rejects a non-boolean makePublic with 400", async () => {
+    const id = await createDoc();
+    expect((await patch(id, { makePublic: "yes" })).status).toBe(400);
+  });
+
+  it("adds a per-document email grant, normalized, and reports the Access-group sync", async () => {
+    const id = await createDoc();
+    const res = await patch(id, { addEmails: ["CFO@Acme.com"] });
+    expect(res.status).toBe(200);
+
+    const meta = (await res.json()) as { extraEmails?: string[]; sync?: string };
+    expect(meta.extraEmails).toEqual(["cfo@acme.com"]);
+    // The test environment has no Access group configured, so the grant is recorded in KV
+    // but the person is not admitted — and the caller is told, never silently (ADR-002).
+    expect(meta.sync).toBe("not_configured");
+  });
+
+  it("removes a per-document grant and does NOT sync the removal (the seat is the reconciler's job)", async () => {
+    const id = await createDoc();
+    await patch(id, { addEmails: ["a@x.com", "b@x.com"] });
+
+    const res = await patch(id, { removeEmails: ["a@x.com"] });
+    const meta = (await res.json()) as Record<string, unknown>;
+    expect(meta["extraEmails"]).toEqual(["b@x.com"]);
+    expect(meta).not.toHaveProperty("sync"); // nothing was added, so nothing was synced
+  });
+
+  it("dropping the last grant clears extraEmails rather than leaving an empty array", async () => {
+    const id = await createDoc();
+    await patch(id, { addEmails: ["only@x.com"] });
+    const res = await patch(id, { removeEmails: ["only@x.com"] });
+    expect(await res.json()).not.toHaveProperty("extraEmails");
+  });
+
+  it("404s addEmails on a missing document", async () => {
+    expect((await patch("nosuchdoc", { addEmails: ["x@y.com"] })).status).toBe(404);
+  });
+
+  it("rejects a non-email in addEmails with 400", async () => {
+    const id = await createDoc();
+    expect((await patch(id, { addEmails: ["not-an-email"] })).status).toBe(400);
+  });
 });
 
 describe("PATCH/GET /api/portals/{slug} — member management (#5 console)", () => {
@@ -216,6 +297,22 @@ describe("POST /api/docs — the simple path, with no portal concept", () => {
 
     expect(body.portal).toBe("default");
     expect(body.extraEmails).toEqual(["cfo@acme.com"]); // normalized and deduped
+  });
+
+  it("🔴 #27 publishing with emails admits them to Access — or reports that it cannot", async () => {
+    // A grant that lands in KV while Access still blocks the person is the silent
+    // half-success ADR-002 forbids. The test env has no Access group, so the publish must
+    // report `not_configured`, not pretend the grant is live.
+    const res = await publish(aDoc({ emails: ["board@acme.com"] }));
+    const body = (await res.json()) as { extraEmails: string[]; sync?: string };
+
+    expect(body.extraEmails).toContain("board@acme.com");
+    expect(body.sync).toBe("not_configured");
+  });
+
+  it("publishing with no emails does not report a sync at all", async () => {
+    const body = (await (await publish(aDoc())).json()) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("sync");
   });
 
   it("`--public` mints a separate /p/ URL", async () => {
@@ -452,6 +549,38 @@ describe("GET /api/docs", () => {
 
     list.mockRestore();
     get.mockRestore();
+  });
+
+  it("surfaces sourceKind for markdown but omits it for html — the common case costs 0 bytes", async () => {
+    await publish(aDoc({ title: "Notes", portal: "default", sourceKind: "markdown" }));
+
+    const { docs } = (await (await SELF.fetch(`${HOST}/api/docs?portal=default`, { headers: auth() })).json()) as {
+      docs: Record<string, unknown>[];
+    };
+    const md = docs.find((d) => d["title"] === "Notes");
+    const html = docs.find((d) => d["title"] === "Alpha");
+
+    expect(md?.["sourceKind"]).toBe("markdown");
+    expect(html).not.toHaveProperty("sourceKind"); // omitted when html
+  });
+
+  it("surfaces a public link as a boolean flag, never the token itself", async () => {
+    const { id } = (await (await publish(aDoc({ title: "Shared", portal: "default" }))).json()) as { id: string };
+    await SELF.fetch(`${HOST}/api/docs/${id}`, {
+      method: "PATCH",
+      headers: { ...auth(), "Content-Type": "application/json" },
+      body: JSON.stringify({ makePublic: true }),
+    });
+
+    const { docs } = (await (await SELF.fetch(`${HOST}/api/docs?portal=default`, { headers: auth() })).json()) as {
+      docs: Record<string, unknown>[];
+    };
+    const shared = docs.find((d) => d["id"] === id);
+    const plain = docs.find((d) => d["title"] === "Alpha");
+
+    expect(shared?.["public"]).toBe(true);
+    expect(shared).not.toHaveProperty("publicToken"); // the 22-char token stays off the listing
+    expect(plain).not.toHaveProperty("public"); // omitted when there is no public link
   });
 });
 

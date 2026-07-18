@@ -6,6 +6,7 @@ import {
   type DocSummary,
   type Portal,
   type SourceKind,
+  deletePublicToken,
   getDoc,
   getMembers,
   getMeta,
@@ -19,6 +20,7 @@ import {
   normalizeEmail,
   putDoc,
   putMembers,
+  putMeta,
   putPortal,
   putPublicToken,
 } from "./store.js";
@@ -125,6 +127,13 @@ export interface PublishResult {
    * seats — for a page that is deliberately public.
    */
   portal: Portal;
+  /**
+   * Present when this publish granted new `extraEmails`: the outcome of admitting them to
+   * the Access group. A grant that lands in KV while Access still blocks the person is the
+   * silent half-success ADR-002 forbids, so callers surface this. Absent when no email was
+   * newly granted. See #27.
+   */
+  sync?: GroupSyncResult;
 }
 
 export async function publishDocument(env: Env, input: PublishInput): Promise<PublishResult> {
@@ -183,7 +192,94 @@ export async function publishDocument(env: Env, input: PublishInput): Promise<Pu
     await putPublicToken(env, meta.publicToken, meta.id);
   }
 
-  return { meta, created: existing === null, portal };
+  // #27: a per-document email grant is useless until Access will admit the person — the
+  // grant lands in KV here, but Cloudflare Access stops them at the door until they are in
+  // the viewer group. Admit the newly-granted addresses, the same way member-add does.
+  // Removal is not synced (the seat is the reconciler's job, ADR-002); a publish can only
+  // add extraEmails, never subtract, so there is nothing to unsync.
+  const priorEmails = existing?.extraEmails ?? [];
+  const addedEmails = (meta.extraEmails ?? []).filter((email) => !priorEmails.includes(email));
+  const result: PublishResult = { meta, created: existing === null, portal };
+  if (addedEmails.length > 0) result.sync = await syncGroupMembers(env, addedEmails);
+  return result;
+}
+
+export interface DocPatch {
+  /** The draft toggle. `true` hides the document from everyone but the owner. */
+  ownerOnly?: boolean | undefined;
+  /** `true` mints a public capability link (if absent); `false` revokes it. */
+  makePublic?: boolean | undefined;
+  /** Per-document email grants to add / remove (extraEmails). */
+  addEmails?: string[] | undefined;
+  removeEmails?: string[] | undefined;
+}
+
+export interface DocPatchResult {
+  meta: DocMeta;
+  /** Present when the patch admitted newly-granted emails to the Access group. */
+  sync?: GroupSyncResult;
+}
+
+/**
+ * Apply the console's per-document controls in one write: the draft toggle, public-link
+ * mint/revoke, and per-document email grants. The one service path `/api` PATCH calls, so
+ * the group sync (below) cannot be present on one mutation path and forgotten on another.
+ *
+ * Returns `null` when the document does not exist, so the caller answers 404 rather than
+ * this throwing a BadRequest that would surface as a 400.
+ *
+ * Group sync mirrors publish and member-add: newly granted emails are admitted to the
+ * viewer group; a removed grant narrows `canView()` immediately but the seat is NOT freed
+ * here — the same address may still be granted by another document or a portal team, so
+ * reclaiming the seat is the reconciler's job. ADR-002.
+ */
+export async function patchDocument(env: Env, id: string, patch: DocPatch): Promise<DocPatchResult | null> {
+  const meta = await getMeta(env, id);
+  if (!meta) return null;
+
+  const next: DocMeta = { ...meta };
+
+  if (patch.ownerOnly !== undefined) next.ownerOnly = patch.ownerOnly;
+
+  // Public-link mint/revoke — resolve the token state on the object BEFORE any KV write, so
+  // the budget check sees the final shape and a would-be-oversized write leaves no dangling
+  // pub: key. Mint mirrors mint_public_link; revoke removes only the link, never the doc.
+  let mintedToken: string | null = null;
+  let revokedToken: string | null = null;
+  if (patch.makePublic === true && !next.publicToken) {
+    mintedToken = mintPublicToken();
+    next.publicToken = mintedToken;
+  } else if (patch.makePublic === false && next.publicToken) {
+    revokedToken = next.publicToken;
+    delete next.publicToken;
+  }
+
+  // Per-document email grants. Additive add (synced), immediate remove (not synced).
+  const current = meta.extraEmails ?? [];
+  const addNorm = (patch.addEmails ?? []).map(normalizeEmail).filter(Boolean);
+  const removeSet = new Set((patch.removeEmails ?? []).map(normalizeEmail).filter(Boolean));
+  const added = addNorm.filter((email) => !current.includes(email) && !removeSet.has(email));
+  if (addNorm.length > 0 || removeSet.size > 0) {
+    const nextEmails = [...new Set([...current, ...addNorm])].filter((email) => !removeSet.has(email));
+    if (nextEmails.length > MAX_EMAILS) {
+      throw new BadRequest("invalid_field", `A document can be shared with at most ${MAX_EMAILS} people`);
+    }
+    if (nextEmails.length > 0) next.extraEmails = nextEmails;
+    else delete next.extraEmails;
+  }
+
+  next.updatedAt = new Date().toISOString();
+  if (!metadataFits(next)) {
+    throw new BadRequest("metadata_too_large", "Title, summary and tags are too long to index");
+  }
+
+  if (mintedToken) await putPublicToken(env, mintedToken, next.id);
+  if (revokedToken) await deletePublicToken(env, revokedToken);
+  await putMeta(env, next);
+
+  const result: DocPatchResult = { meta: next };
+  if (added.length > 0) result.sync = await syncGroupMembers(env, added);
+  return result;
 }
 
 /**
