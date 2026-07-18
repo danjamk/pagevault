@@ -1,5 +1,6 @@
 import { type GroupSyncResult, syncGroupMembers } from "./access-group.js";
 import type { Env } from "./env.js";
+import { renderMarkdown } from "./markdown.js";
 import {
   DEFAULT_PORTAL,
   type DocMeta,
@@ -11,6 +12,7 @@ import {
   getMembers,
   getMeta,
   getPortal,
+  getRawSource,
   isValidSlug,
   listDocs,
   listPortals,
@@ -155,12 +157,14 @@ export async function publishDocument(env: Env, input: PublishInput): Promise<Pu
   const existing = await findByTitle(env, portal.slug, title);
   if (existing && input.confirm !== true) throw new Conflict(existing, bytes);
 
+  const sourceKind: SourceKind = input.sourceKind ?? "html";
+
   const now = new Date().toISOString();
   const meta: DocMeta = {
     id: existing?.id ?? mintId(),
     portal: portal.slug,
     title,
-    sourceKind: input.sourceKind ?? "html",
+    sourceKind,
     ownerOnly: input.ownerOnly ?? existing?.ownerOnly ?? false,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
@@ -187,7 +191,12 @@ export async function publishDocument(env: Env, input: PublishInput): Promise<Pu
     throw new BadRequest("metadata_too_large", "Title, summary and tags are too long to index");
   }
 
-  await putDoc(env, meta, source);
+  // Publish-time markdown→HTML (#46). The render path never loads `sourceKind`, so the
+  // body stored under `doc:` must already be presentable HTML. The original `.md` rides
+  // along to `raw:` so the raw download and `read_document` still read back the source
+  // the author wrote. HTML documents are stored verbatim, with no `raw:` companion.
+  const storedBody = sourceKind === "markdown" ? renderMarkdown(source) : source;
+  await putDoc(env, meta, storedBody, sourceKind === "markdown" ? source : undefined);
   if (meta.publicToken && !existing?.publicToken) {
     await putPublicToken(env, meta.publicToken, meta.id);
   }
@@ -385,7 +394,11 @@ export async function readDocument(env: Env, id: string): Promise<ReadResult | n
   const meta = await getMeta(env, id);
   if (!meta) return null;
 
-  const source = await getDoc(env, id);
+  // The collection reads back as what the author wrote. For markdown that is the original
+  // `.md`, not the HTML we rendered for the browser — markdown is what an LLM six months
+  // later actually wants. `?? getDoc` covers HTML docs and any pre-#46 markdown.
+  const source =
+    meta.sourceKind === "markdown" ? ((await getRawSource(env, id)) ?? (await getDoc(env, id))) : await getDoc(env, id);
   if (source === null) return null;
 
   const truncated = source.length > MAX_READ_BYTES;
@@ -426,7 +439,12 @@ export async function searchPortal(
     if (doc.tags?.some((tag) => tag.toLowerCase().includes(q))) matched.push("tag");
 
     if (matched.length === 0) {
-      const source = await getDoc(env, doc.id);
+      // Search the authored source for markdown, not the rendered HTML — a query for
+      // "summary" should match prose, not stumble over generated tag soup.
+      const source =
+        doc.sourceKind === "markdown"
+          ? ((await getRawSource(env, doc.id)) ?? (await getDoc(env, doc.id)))
+          : await getDoc(env, doc.id);
       if (source?.toLowerCase().includes(q)) matched.push("body");
     }
 
