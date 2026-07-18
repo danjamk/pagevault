@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-07-17
+
+Single-page PDF export in the viewer.
+
 ### Added
 - **Single-page PDF export** ([#50](https://github.com/danjamk/pagevault/issues/50)) — a **PDF**
   control in the viewer chrome renders a document to one continuous-page PDF, sized to content, so
