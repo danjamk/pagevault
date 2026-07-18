@@ -68,9 +68,12 @@ worker/          the Worker — the whole product
 cli/             `pagevault` — thin HTTP client of /api  (Layer 1)
 mcp/             thin stdio bin that proxies to /mcp, for Claude Desktop
 docs/
+  README.md            the docs map — start here
   architecture.md      the design
   adr/                 decision records
-  implementation/      build plans
+  design/              UX + onboarding design notes
+  setup/               run-it-yourself: prerequisites, backup/restore
+  engineering/         how it's built and shipped: build plans, versioning, prod CI
 ```
 
 **The MCP server is remote, not stdio** — it lives in the Worker. A stdio server

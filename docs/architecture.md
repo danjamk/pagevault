@@ -99,7 +99,8 @@ simplification.
 portal:{slug}     → JSON Portal        [+ KV key metadata]
 members:{slug}    → JSON string[]      (normalized, lowercase)
 idx:{slug}:{id}   → ""                 (existence = membership; no RMW race)
-doc:{id}          → string (the source bytes)
+doc:{id}          → string (the served bytes: HTML, or markdown rendered to HTML)
+raw:{id}          → string (markdown only: the original .md, for download + read-back)
 meta:{id}         → JSON DocMeta       [+ KV key metadata]
 pub:{token}       → string (doc id)
 ```
@@ -110,7 +111,7 @@ portal. Members and the index get their own namespaces instead. There is a test 
 
 ```ts
 type PortalKind = "private" | "restricted" | "public";
-type SourceKind = "html" | "markdown";   // markdown renders in a later layer
+type SourceKind = "html" | "markdown";   // markdown is rendered to HTML at publish time; raw kept in raw:{id}
 
 interface Portal {
   slug: string;          // ^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$, reserved words rejected
