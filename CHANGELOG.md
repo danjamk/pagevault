@@ -7,6 +7,27 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-07-18
+
+Markdown documents render.
+
+### Added
+- **Markdown rendering** ([#46](https://github.com/danjamk/pagevault/issues/46)) — a document
+  published as markdown now renders to styled HTML instead of showing its literal source.
+  Conversion happens once at publish (`markdown-it`), so the render path stays a pure byte-server
+  with no parser on the hot path and no extra read. Coverage matches a good editor preview: GFM
+  tables, task lists, footnotes, emoji, and math (KaTeX, rendered server-side); mermaid diagrams
+  and syntax highlighting draw client-side, loaded **only** when a diagram or code fence is
+  present — every asset from a CDN the artifact CSP already allows, so the sandbox and CSP are
+  unchanged (ADR-007). The original `.md` is retained under a new `raw:{id}` key: the raw download
+  serves it, `read_document` returns it (markdown is what an LLM reading back actually wants), and
+  body search greps it. This completes the markdown behavior [#49](https://github.com/danjamk/pagevault/issues/49)
+  and [#50](https://github.com/danjamk/pagevault/issues/50) deferred. Known limit: a markdown PDF
+  degrades mermaid/math because the #50 renderer blocks all network by design — the interactive
+  view is full fidelity.
+- An **Artemis program overview** example (`examples/artemis-program-overview.md`) exercising the
+  full markdown feature set in one self-contained document.
+
 ## [0.3.2] — 2026-07-17
 
 Single-page PDF export in the viewer.
