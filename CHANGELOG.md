@@ -65,7 +65,7 @@ A readable console, the `pagevault` CLI, and push-button production deploys.
   `scripts/` (no forked deploy logic). Maintainer tooling: the environment is simply whichever
   Cloudflare token is active — dev in a clone's `.env.local`, prod only in GitHub Environment
   secrets — so the prod credential is never on a developer's machine. A forker can delete the
-  workflow and nothing breaks. See [docs/deploy-prod.md](docs/deploy-prod.md).
+  workflow and nothing breaks. See [docs/engineering/deploy-prod.md](docs/engineering/deploy-prod.md).
 - **`make health`** — assert the live `/health` reports the exact `<version>+<sha>` of your
   checkout; the post-deploy gate that fails a CI deploy on a rollout that didn't take.
 

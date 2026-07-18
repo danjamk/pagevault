@@ -1,9 +1,13 @@
-# Shipping production through CI
+# How I ship my production (an example, not the deploy story)
 
-> **Forking PageVault? You can ignore this whole page.** `make setup && make deploy` deploys to
-> whichever Cloudflare account your `.env.local` token points at — that's the entire deployment
-> story. This page and `.github/workflows/deploy-prod.yml` are maintainer tooling for running a
-> *separate* production account behind CI. Delete the workflow file in a fork and nothing breaks.
+> **This page is how *I* run PageVault's own production.** It is one operator's rig, written down
+> so it's reproducible — not something you need to copy. `make setup && make deploy` already deploys
+> to whichever Cloudflare account your `.env.local` token points at; that's the entire deployment
+> story for a fork.
+>
+> What this page adds is a *separate* production account shipped through CI, so the prod credential
+> never lives on my laptop. `.github/workflows/deploy-prod.yml` is that machinery. Delete it in a
+> fork and nothing breaks. Read on if you want a pattern for the same split; otherwise skip it.
 
 ## The model: environment is whichever token is active
 
