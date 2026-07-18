@@ -1,7 +1,7 @@
 import { mintCapability, verifyCapability } from "./capability.js";
 import type { Env } from "./env.js";
 import type { DocMeta } from "./store.js";
-import { getDoc } from "./store.js";
+import { getDoc, getMeta } from "./store.js";
 
 /**
  * The iframe sandbox.
@@ -73,6 +73,27 @@ export async function handleRender(request: Request, env: Env, id: string): Prom
   const source = await getDoc(env, id);
   if (source === null) return new Response("Not found", { status: 404 });
 
+  // Raw download: the same capability guard, but the bytes come back as a file, not a render.
+  //
+  // 🔴 ADR-007. Serving artifact HTML from our origin with `text/html` and no attachment
+  // disposition renders hostile markup in our document context — the exact thing the sandbox
+  // exists to prevent. `Content-Disposition: attachment` forces a download; `application/
+  // octet-stream` + `nosniff` means that even if a disposition were ever dropped, the browser
+  // still will not execute it as HTML here. Three independent reasons it cannot render inline.
+  if (new URL(request.url).searchParams.get("download") === "1") {
+    const meta = await getMeta(env, id);
+    return new Response(source, {
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": contentDisposition(downloadFilename(meta, id)),
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "X-Robots-Tag": "noindex, nofollow",
+        "Cache-Control": "private, no-store",
+      },
+    });
+  }
+
   return new Response(source, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -86,6 +107,30 @@ export async function handleRender(request: Request, env: Env, id: string): Prom
   });
 }
 
+/**
+ * A filename for the raw download: the title, made filesystem-safe, with an extension that
+ * tells the truth about the bytes (`sourceKind`). Same extension-honesty concern as #35.
+ */
+function downloadFilename(meta: DocMeta | null, id: string): string {
+  const ext = meta?.sourceKind === "markdown" ? "md" : "html";
+  const base = (meta?.title ?? id)
+    // Collapse anything that breaks a filename or the header to a single space.
+    .replace(/[\x00-\x1f\x7f/\\:*?"<>|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  return `${base || "document"}.${ext}`;
+}
+
+/**
+ * A `Content-Disposition` value that survives a Unicode title. The quoted `filename=` is an
+ * ASCII fallback for old clients; `filename*=UTF-8''…` (RFC 5987) carries the real name.
+ */
+function contentDisposition(filename: string): string {
+  const ascii = filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
 export interface ShellOptions {
   /** The verified viewer, or null for an unauthenticated public view. */
   email: string | null;
@@ -94,6 +139,14 @@ export interface ShellOptions {
   backLabel?: string;
   /** `/p/` and `/pub/` must never be indexed. An unguessable URL is not a private one. */
   noindex: boolean;
+  /**
+   * Show the share (copy-URL) control. True ONLY where the current URL is self-authorizing —
+   * `/p/{token}` and `/pub/{slug}`. On a `/v/` document the URL opens for no one outside the
+   * portal, so a share affordance there hands out a link that dead-ends at the Access wall.
+   * Deliberately NOT derived from `noindex`: the two overlap today but mean different things,
+   * and coupling them invites a future bug (#49).
+   */
+  shareable?: boolean;
 }
 
 /**
@@ -117,9 +170,34 @@ export async function renderShell(
   // to degrade the page that holds the capability token.
   const nonce = crypto.randomUUID();
   const src = `/render/${encodeURIComponent(meta.id)}?cap=${encodeURIComponent(cap)}`;
+  // The download reuses the same capability guard — no second auth path (ADR-007 / #49).
+  const downloadHref = `${src}&download=1`;
 
   const back = opts.backHref
     ? `<a class="back" href="${esc(opts.backHref)}">&larr; ${esc(opts.backLabel ?? "Back")}</a>`
+    : "";
+
+  const shareBtn = opts.shareable ? `<button class="ctl" id="share" type="button">Share</button>` : "";
+  // The share control only copies the current URL — it never mints or widens anything; that is
+  // an owner action, and it is why the button appears only where the URL already self-authorizes.
+  const shareScript = opts.shareable
+    ? `<script nonce="${nonce}">
+  (function () {
+    var b = document.getElementById("share");
+    if (!b) return;
+    b.addEventListener("click", function () {
+      var url = location.href;
+      if (navigator.share) { navigator.share({ title: document.title, url: url }).catch(function () {}); return; }
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(function () {
+          var t = b.textContent; b.textContent = "Copied"; setTimeout(function () { b.textContent = t; }, 1200);
+        }, function () { prompt("Copy this link:", url); });
+        return;
+      }
+      prompt("Copy this link:", url);
+    });
+  })();
+</script>`
     : "";
 
   const html = `<!doctype html>
@@ -143,7 +221,10 @@ export async function renderShell(
   h1 { font-size: 1rem; font-weight: 600; margin: 0; }
   .back { color: #34507a; text-decoration: none; font-size: .875rem; }
   .back:hover { text-decoration: underline; }
-  .meta { margin-left: auto; color: #7d6b52; font-size: .8125rem; }
+  .controls { margin-left: auto; display: flex; align-items: center; gap: .6rem; }
+  .meta { color: #7d6b52; font-size: .8125rem; }
+  .ctl { font: inherit; font-size: .8125rem; color: #34507a; background: #fff; border: 1px solid #d8cdb0; border-radius: 5px; padding: .15rem .55rem; text-decoration: none; cursor: pointer; }
+  .ctl:hover { background: #fbf6ec; }
   iframe { flex: 1 1 auto; width: 100%; border: 0; background: #fff; }
 </style>
 </head>
@@ -151,13 +232,18 @@ export async function renderShell(
 <header>
   ${back}
   <h1>${esc(meta.title)}</h1>
-  <span class="meta">${esc(new Date(meta.updatedAt).toISOString().slice(0, 10))}</span>
+  <div class="controls">
+    <span class="meta">${esc(new Date(meta.updatedAt).toISOString().slice(0, 10))}</span>
+    <a class="ctl" href="${esc(downloadHref)}" download>Download</a>
+    ${shareBtn}
+  </div>
 </header>
 <iframe
   src="${esc(src)}"
   sandbox="${IFRAME_SANDBOX}"
   referrerpolicy="no-referrer"
   title="${esc(meta.title)}"></iframe>
+${shareScript}
 </body>
 </html>`;
 

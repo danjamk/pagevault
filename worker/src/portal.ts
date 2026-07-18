@@ -147,6 +147,10 @@ async function portalDocument(
     // costly mistake runs one way only. When the marketing site is actually built, this
     // becomes a per-portal flag rather than an assumption.
     noindex: true,
+    // Share only on /pub/ — a public portal's URL opens for anyone. A /v/ document served
+    // by this same handler is Access-gated, so its URL dead-ends for anyone not already in
+    // the portal; no share affordance there. Keyed off kind, not noindex (they differ).
+    shareable: portal.kind === "public",
   });
 }
 
