@@ -7,7 +7,21 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-07-17
+
+A readable console, the `pagevault` CLI, and push-button production deploys.
+
 ### Added
+- **A console you can read at a glance** ([#37](https://github.com/danjamk/pagevault/issues/37)) —
+  every document row now leads with a *reach* icon that names how far it can travel: only you,
+  the portal team, anyone with the link, or public. Expanding a row opens one sharing panel —
+  mint and revoke a public link, add and remove per-document email grants (worded so they can't
+  be mistaken for portal members), toggle draft, delete. A left-hand portal nav jumps between
+  portals; **Copy link** now hands out the most-open working URL rather than a `/v` route that
+  walks a recipient into a login wall; a **Sign out** control ends the Access session; and an
+  aperture wordmark sits over the title. A public-link flag and `sourceKind` now ride the listing,
+  so a markdown document — or a forgotten public link on a private-portal document — is visible
+  without opening each one.
 - **The `pagevault` CLI** ([#7](https://github.com/danjamk/pagevault/issues/7)) — a standalone,
   zero-dependency npm package (versioned independently, first cut `0.1.0`) that publishes from the
   terminal: `pagevault publish report.html` → a URL. A thin HTTP client of `/api` that works against
@@ -30,6 +44,14 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
   deploy into a fresh Worker, rather than generating a random prod bearer stranded on the runner.
 - **CI runs the `scripts/` `node --test` suites** (schema migration, KV backup, bearer policy) —
   `pnpm test` is vitest only, so these had been guarding nothing on GitHub.
+
+### Fixed
+- **A per-document email grant now actually reaches the person** ([#27](https://github.com/danjamk/pagevault/issues/27)) —
+  publishing or sharing a document to specific emails admits them to the `pagevault-viewers`
+  Access group, so Cloudflare Access lets them through the door. Previously the grant landed in
+  KV while Access still blocked them — a silent half-success. Removing a grant narrows access
+  immediately but leaves the seat for the reconciler (the address may be granted elsewhere; see
+  ADR-002), and every publish/patch now reports the group-sync outcome instead of swallowing it.
 
 ## [0.2.0] — 2026-07-17
 

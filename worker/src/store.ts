@@ -57,6 +57,17 @@ export interface DocSummary {
   title: string;
   summary?: string;
   ownerOnly: boolean;
+  /**
+   * True when the document carries a public capability link. The token itself stays off
+   * the listing — a per-document read surfaces it — but *whether* one exists must be
+   * visible at a glance: a forgotten public link on a private-portal document is the
+   * costliest kind of invisible, and expand-to-discover does not fix invisible. A single
+   * bool is bounded, so it rides `metadataFits()` the same as `sourceKind`, unlike the
+   * unbounded `extraEmails` allowlist which stays off the key metadata entirely.
+   */
+  public?: boolean;
+  /** Omitted when `"html"` (the common case), so an HTML document costs 0 bytes here. */
+  sourceKind?: SourceKind;
   tags?: string[];
   createdAt: string;
   updatedAt: string;
@@ -227,6 +238,11 @@ function toDocKeyMetadata(meta: DocMeta): DocKeyMetadata {
   };
   if (meta.summary) km.summary = meta.summary;
   if (meta.tags?.length) km.tags = meta.tags;
+  // Conditional inclusion keeps the common case free: an HTML document with no public link
+  // adds zero bytes. Both fields are bounded, so `metadataFits()` still guards the write and
+  // ADR-009's reserved budget for a future `folder` is untouched in the common case.
+  if (meta.sourceKind !== "html") km.sourceKind = meta.sourceKind;
+  if (meta.publicToken) km.public = true;
   return km;
 }
 

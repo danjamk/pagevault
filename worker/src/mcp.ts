@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createMcpHandler } from "agents/mcp";
 import { z } from "zod";
-import { type GroupSyncResult, syncGroupMembers } from "./access-group.js";
+import type { GroupSyncResult } from "./access-group.js";
 import { isAuthorized } from "./auth.js";
 import {
   BadRequest,
@@ -122,7 +122,7 @@ function buildServer(env: Env, origin: string): McpServer {
     },
     async (args) => {
       try {
-        const { meta, created, portal } = await publishDocument(env, {
+        const { meta, created, portal, sync } = await publishDocument(env, {
           title: args.title,
           source: args.html,
           portal: args.portal,
@@ -133,11 +133,11 @@ function buildServer(env: Env, origin: string): McpServer {
           confirm: args.confirm,
         });
 
-        // Admit any newly granted emails to the viewer group, or Access blocks them at the
-        // door before canView() ever runs (ADR-002 hot path). KV already holds the grant;
-        // this is the second, derived source of truth.
-        const syncNote =
-          args.emails && args.emails.length > 0 ? groupSyncNote(await syncGroupMembers(env, args.emails)) : [];
+        // publishDocument admits any newly granted emails to the viewer group itself (#27) —
+        // Access blocks them at the door before canView() ever runs otherwise (ADR-002 hot
+        // path). We only report what it did; a re-publish that granted nothing new syncs
+        // nothing and says nothing.
+        const syncNote = sync ? groupSyncNote(sync) : [];
 
         const base = baseUrl(env, origin);
         return text(
