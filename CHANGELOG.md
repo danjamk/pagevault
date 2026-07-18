@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-07-17
+
+Reader controls land in the viewer chrome.
+
 ### Added
 - **Download and share from the viewer** ([#49](https://github.com/danjamk/pagevault/issues/49)) —
   the trusted shell now carries a **Download** control on every document: the original source,
