@@ -125,7 +125,7 @@ async function handlePublicToken(env: Env, token: string): Promise<Response> {
 
   // A /p/ capability link is self-authorizing — anyone with the URL can open it — so the
   // share control belongs here.
-  return renderShell(env, meta, { email: null, noindex: true, shareable: true });
+  return renderShell(env, meta, { email: null, noindex: true, shareable: true, pdfEnabled: !!env.BROWSER });
 }
 
 const notFound = () => new Response("Not found", { status: 404 });

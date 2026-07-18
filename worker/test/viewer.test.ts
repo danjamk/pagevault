@@ -2,7 +2,7 @@ import { SELF, env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { mintCapability, originAllowed, resetCapabilityKeyCache, verifyCapability } from "../src/capability.js";
 import { type DocMeta, putDoc, putPublicToken } from "../src/store.js";
-import { IFRAME_SANDBOX, docCsp, renderShell } from "../src/viewer.js";
+import { IFRAME_SANDBOX, docCsp, handleRender, renderShell } from "../src/viewer.js";
 
 const HOST = "https://share.example.com";
 const HTML = "<!doctype html><h1>Q3</h1><script>console.log(1)</script>";
@@ -203,6 +203,47 @@ describe("viewer chrome — download + share (#49)", () => {
     const body = await secure.text();
     expect(body).not.toContain('id="share"');
     expect(body).toContain(">Download<");
+  });
+});
+
+describe("/render?pdf=1 — single-page PDF export (#50)", () => {
+  it("🔴 reuses the capability guard — a forged cap 404s before the browser is ever touched", async () => {
+    const meta = await publishPublic();
+    expect((await SELF.fetch(`${HOST}/render/${meta.id}?cap=notarealtoken&pdf=1`)).status).toBe(404);
+  });
+
+  it("501s when the Browser binding is absent — a deployment without Browser Run degrades off", async () => {
+    // The test pool provides a stub BROWSER, so this path is exercised by a direct call with
+    // the binding dropped — the same shape a fork that never enabled Browser Run produces.
+    const meta = await publishPublic();
+    const cap = await mintCapability(env, meta.id, null);
+    const req = new Request(`${HOST}/render/${meta.id}?cap=${cap}&pdf=1`);
+
+    // Omit the binding entirely (not set it to undefined) — the shape a fork without Browser
+    // Run produces. exactOptionalPropertyTypes forbids the explicit-undefined shortcut.
+    const noBrowser = { ...env };
+    delete (noBrowser as Partial<typeof env>).BROWSER;
+
+    const res = await handleRender(req, noBrowser, meta.id);
+    expect(res.status).toBe(501);
+    expect(((await res.json()) as { error: string }).error).toMatch(/not enabled/i);
+  });
+});
+
+describe("viewer chrome — PDF control (#50)", () => {
+  it("shows the PDF button and grants connect-src 'self' only when PDF is enabled", async () => {
+    const res = await renderShell(env, doc(), { email: null, noindex: true, pdfEnabled: true });
+    const body = await res.text();
+    expect(body).toContain('id="pdf"');
+    expect(res.headers.get("Content-Security-Policy")).toContain("connect-src 'self'");
+  });
+
+  it("🔴 hides the PDF button and keeps the tight CSP when PDF is disabled", async () => {
+    const res = await renderShell(env, doc(), { email: null, noindex: true, pdfEnabled: false });
+    const body = await res.text();
+    expect(body).not.toContain('id="pdf"');
+    // No fetch means no reason to widen the shell's CSP.
+    expect(res.headers.get("Content-Security-Policy")).not.toContain("connect-src");
   });
 });
 

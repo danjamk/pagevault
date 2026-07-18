@@ -7,6 +7,22 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-07-17
+
+Single-page PDF export in the viewer.
+
+### Added
+- **Single-page PDF export** ([#50](https://github.com/danjamk/pagevault/issues/50)) — a **PDF**
+  control in the viewer chrome renders a document to one continuous-page PDF, sized to content, so
+  a long infographic is never paginated mid-chart. It runs on Cloudflare Browser Run
+  (`@cloudflare/puppeteer`), reusing the same capability guard as the raw download — no document
+  reaches the renderer unauthorized — and **blocks all outbound network during the render**, so a
+  hostile artifact cannot phone home from the real headless browser (prime directive #4). Optional
+  by construction: a deployment without the Browser binding hides the button and the endpoint
+  answers `501`, so a fork that never wants PDF simply leaves it out. HTML today; markdown follows
+  [#46](https://github.com/danjamk/pagevault/issues/46). First cut renders on demand — caching and
+  session reuse are follow-ons.
+
 ## [0.3.1] — 2026-07-17
 
 Reader controls land in the viewer chrome.

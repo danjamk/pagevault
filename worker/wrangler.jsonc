@@ -24,6 +24,13 @@
     }
   ],
 
+  // Browser Run (Puppeteer) — enables single-page PDF export (#50). Optional: a fork that
+  // does not want PDF can delete this binding and disable Browser Run, and the PDF button
+  // and endpoint degrade off. Requires Browser Run enabled on the account.
+  "browser": {
+    "binding": "BROWSER"
+  },
+
   "vars": {
     // The code this Worker was built from: <version>+<shortsha>. Baked at deploy from
     // package.json + git; reported by /health, the MCP server, and the console. See ADR-010.
