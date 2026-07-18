@@ -105,3 +105,100 @@ describe("🔴 /admin — session token + strict CSP (ADR-004)", () => {
     expect(api.status).toBe(200);
   });
 });
+
+describe("create-portal control (#43)", () => {
+  it("renders the New portal button and a dialog with each kind explained at the point of choice", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain('id="new-portal"');
+    expect(body).toContain('id="dlg-portal"');
+    // All three kinds are selectable...
+    expect(body).toContain('value="private"');
+    expect(body).toContain('value="restricted"');
+    expect(body).toContain('value="public"');
+    // ...and the load-bearing distinction is stated inline: restricted is the only kind whose
+    // member list canView() actually reads. Picking the wrong kind is a confidentiality decision.
+    expect(body).toMatch(/only kind whose members list actually grants access/i);
+    // It posts to the existing endpoint — no new server surface.
+    expect(body).toContain("/api/portals");
+  });
+
+  it("🔴 keeps behavior in the nonced script — no inline event handlers", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).not.toMatch(/on(click|submit|change|input|load)=/i);
+  });
+
+  it("a portal created through the console session token lands and lists", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    const token = /const T = "([^"]+)"/.exec(body)?.[1];
+    const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+
+    const created = await SELF.fetch(`${HOST}/api/portals`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ slug: "acme-corp", name: "Acme Corp", kind: "restricted" }),
+    });
+    expect(created.status).toBe(201);
+    expect(await created.json()).toMatchObject({ slug: "acme-corp", kind: "restricted" });
+
+    const { portals } = (await (await SELF.fetch(`${HOST}/api/portals`, { headers: auth })).json()) as {
+      portals: Array<{ slug: string }>;
+    };
+    expect(portals.some((p) => p.slug === "acme-corp")).toBe(true);
+  });
+});
+
+describe("browser upload control (#6)", () => {
+  it("renders the New document button and an upload dialog with file/portal/emails/tags", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain('id="new-doc"');
+    expect(body).toContain('id="dlg-upload"');
+    expect(body).toContain('type="file"');
+    expect(body).toContain('id="up-portal"');
+    expect(body).toContain('id="up-emails"');
+    expect(body).toContain('id="up-tags"');
+    // Accepts markdown as well as HTML, and detects the kind from the extension (#46).
+    expect(body).toMatch(/accept="[^"]*\.md/);
+    expect(body).toContain("uploadKind");
+  });
+
+  it("🔴 carries both warnings in the UI, not just the docs", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    // A public link is a capability URL, not privacy (static markup).
+    expect(body).toMatch(/capability URL, not privacy/i);
+    // Relative src/href will 404 for the recipient (scanner + message in the script).
+    expect(body).toContain("relativeRefs");
+    expect(body).toContain("will 404 for the recipient");
+  });
+
+  it("publishes an uploaded document through the console session token", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    const token = /const T = "([^"]+)"/.exec(body)?.[1];
+    const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    // The dialog's portal select is populated from live portals, so publishing targets one that
+    // exists — create it first (as the console would, via #43).
+    await SELF.fetch(`${HOST}/api/portals`, { method: "POST", headers: auth, body: JSON.stringify({ slug: "clientx", kind: "private" }) });
+    const res = await SELF.fetch(`${HOST}/api/docs`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ title: "Uploaded Report", html: "<!doctype html><h1>hi</h1>", portal: "clientx", sourceKind: "html" }),
+    });
+    expect(res.status).toBe(201);
+    expect(await res.json()).toMatchObject({ portal: "clientx", url: expect.stringContaining("/") });
+  });
+
+  it("an uploaded markdown file publishes as markdown, not html (#46)", async () => {
+    const page = await (await getAdmin(await adminJwt(OWNER))).text();
+    const token = /const T = "([^"]+)"/.exec(page)?.[1];
+    const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+    await SELF.fetch(`${HOST}/api/portals`, { method: "POST", headers: auth, body: JSON.stringify({ slug: "mdclient", kind: "private" }) });
+    const res = await SELF.fetch(`${HOST}/api/docs`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ title: "MD Report", html: "# Heading", portal: "mdclient", sourceKind: "markdown" }),
+    });
+    expect(res.status).toBe(201);
+    const { id } = (await res.json()) as { id: string };
+    const meta = (await (await SELF.fetch(`${HOST}/api/docs/${id}`, { headers: auth })).json()) as { sourceKind: string };
+    expect(meta.sourceKind).toBe("markdown");
+  });
+});

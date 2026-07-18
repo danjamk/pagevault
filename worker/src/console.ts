@@ -88,7 +88,7 @@ function page(session: string, nonce: string, owner: string, version: string, or
   *,*::before,*::after { box-sizing:border-box; }
   body { margin:0; font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; color:var(--ink); background:var(--paper); }
   .icon { width:1em; height:1em; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; flex:none; }
-  header { display:flex; align-items:center; gap:1rem; padding:.7rem 1.25rem; border-bottom:1px solid var(--line); background:var(--card); }
+  header { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem 1rem; padding:.7rem 1.25rem; border-bottom:1px solid var(--line); background:var(--card); }
   .brand { display:flex; align-items:center; gap:.5rem; }
   .brand h1 { font-size:1rem; margin:0; color:var(--blue); letter-spacing:.01em; }
   .mark { width:1.4rem; height:1.4rem; color:var(--blue); fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
@@ -180,6 +180,42 @@ function page(session: string, nonce: string, owner: string, version: string, or
   .empty { color:var(--muted); padding:.55rem 1rem; font-size:.85rem; }
   .err { color:var(--danger); }
   footer { max-width:64rem; margin:0 auto; padding:.25rem 1.25rem 1.5rem; color:var(--muted); font-size:.72rem; }
+
+  /* Create-portal / upload dialogs (#43, #6). Native <dialog>: modal, Esc-to-close, focus-trapped. */
+  dialog { border:1px solid var(--line); border-radius:10px; padding:0; background:var(--card); color:var(--ink); max-width:30rem; width:calc(100% - 2rem); box-shadow:0 12px 44px rgba(30,22,16,.2); }
+  dialog::backdrop { background:rgba(30,22,16,.38); }
+  .dlg-head { display:flex; align-items:center; gap:.5rem; padding:.8rem 1rem; border-bottom:1px solid var(--line); font-weight:600; font-size:.95rem; }
+  .dlg-head .icon { color:var(--blue); }
+  .dlg-body { padding:1rem; display:flex; flex-direction:column; gap:.8rem; }
+  .field { display:flex; flex-direction:column; gap:.25rem; }
+  .field > label { font-size:.8rem; color:var(--muted); }
+  .field input[type=text], .field input[type=email] { padding:.42rem .55rem; border:1px solid var(--line); border-radius:5px; font:inherit; font-size:.9rem; background:var(--paper); color:var(--ink); }
+  .field .hint { font-size:.72rem; color:var(--muted); }
+  .kinds { display:flex; flex-direction:column; gap:.4rem; }
+  .kindopt { display:flex; gap:.55rem; align-items:flex-start; border:1px solid var(--line); border-radius:6px; padding:.5rem .6rem; cursor:pointer; }
+  .kindopt:hover { background:var(--paper); }
+  .kindopt input { margin:.15rem 0 0; flex:none; }
+  .kindopt .kb { display:flex; flex-direction:column; gap:.12rem; }
+  .kindopt .kt { font-weight:600; font-size:.84rem; display:flex; align-items:center; gap:.35rem; }
+  .kindopt .kt.private .icon { color:var(--closed); } .kindopt .kt.restricted .icon { color:var(--gated); } .kindopt .kt.public .icon { color:var(--open); }
+  .kindopt .kd { font-size:.75rem; color:var(--muted); line-height:1.4; }
+  .kindopt:has(input:checked) { border-color:var(--blue); background:var(--gated-bg); }
+  .dlg-foot { display:flex; justify-content:flex-end; gap:.5rem; padding:.8rem 1rem; border-top:1px solid var(--line); }
+  .dlg-err { color:var(--danger); font-size:.8rem; }
+  .dlg-err[hidden] { display:none; }
+  /* Upload dialog (#6) */
+  .dropzone { display:flex; align-items:center; justify-content:center; text-align:center; gap:.5rem; border:1.5px dashed var(--line); border-radius:8px; padding:1.1rem 1rem; color:var(--muted); font-size:.85rem; cursor:pointer; background:var(--paper); }
+  .dropzone.drag { border-color:var(--blue); background:var(--gated-bg); color:var(--ink); }
+  .dropzone.has-file { border-style:solid; color:var(--ink); }
+  .field select { padding:.42rem .55rem; border:1px solid var(--line); border-radius:5px; font:inherit; font-size:.9rem; background:var(--paper); color:var(--ink); }
+  .checkrow { display:flex; align-items:flex-start; gap:.5rem; font-size:.85rem; cursor:pointer; }
+  .checkrow input { margin:.15rem 0 0; flex:none; }
+  .donerow { display:flex; flex-direction:column; gap:.55rem; }
+  .donerow .lnk { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; }
+  .donerow code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78rem; word-break:break-all; background:var(--paper); border:1px solid var(--line); border-radius:4px; padding:.15rem .4rem; }
+  .done-ok { display:flex; align-items:center; gap:.4rem; color:var(--gated); font-weight:600; font-size:.9rem; }
+  .done-ok .icon { color:var(--gated); }
+  [hidden] { display:none !important; }
 </style>
 </head>
 <body>
@@ -195,10 +231,13 @@ function page(session: string, nonce: string, owner: string, version: string, or
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
   <symbol id="i-aperture" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m14.31 8 5.74 9.94"/><path d="M9.69 8h11.48"/><path d="m7.38 12 5.74-9.94"/><path d="M9.69 16 3.95 6.06"/><path d="M14.31 16H2.83"/><path d="m16.62 12-5.74 9.94"/></symbol>
   <symbol id="i-signout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
 </svg>
 <header>
   <span class="brand"><svg class="mark" aria-hidden="true"><use href="#i-aperture"/></svg><h1>PageVault console</h1></span>
   <span class="user">
+    <button class="btn" id="new-doc"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>New document</button>
+    <button class="btn" id="new-portal">${"＋"} New portal</button>
     <span class="who">${esc(owner)}</span>
     <a class="signout" href="${logoutUrl}" title="End your Cloudflare Access session"><svg class="icon" aria-hidden="true"><use href="#i-signout"/></svg>Sign out</a>
   </span>
@@ -216,6 +255,95 @@ function page(session: string, nonce: string, owner: string, version: string, or
     <div id="app"><p class="empty">Loading…</p></div>
   </main>
 </div>
+<dialog id="dlg-portal" aria-labelledby="dlg-portal-title">
+  <form id="form-portal" method="dialog">
+    <div class="dlg-head" id="dlg-portal-title"><svg class="icon" aria-hidden="true"><use href="#i-users"/></svg>New portal</div>
+    <div class="dlg-body">
+      <div class="field">
+        <label for="np-name">Name</label>
+        <input type="text" id="np-name" placeholder="Acme Corp" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="np-slug">Slug</label>
+        <input type="text" id="np-slug" placeholder="acme-corp" autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false">
+        <span class="hint">The URL path — lowercase letters, digits and hyphens, 2&ndash;40 chars.</span>
+      </div>
+      <div class="field">
+        <label>Who can reach it</label>
+        <div class="kinds">
+          <label class="kindopt">
+            <input type="radio" name="np-kind" value="private" checked>
+            <span class="kb"><span class="kt private"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>Private</span>
+            <span class="kd">Only you. Documents inside are yours alone, unless one widens itself.</span></span>
+          </label>
+          <label class="kindopt">
+            <input type="radio" name="np-kind" value="restricted">
+            <span class="kb"><span class="kt restricted"><svg class="icon" aria-hidden="true"><use href="#i-users"/></svg>Restricted &mdash; a team</span>
+            <span class="kd">Everyone on the member list sees every document in the portal. The only kind whose members list actually grants access &mdash; login required.</span></span>
+          </label>
+          <label class="kindopt">
+            <input type="radio" name="np-kind" value="public">
+            <span class="kb"><span class="kt public"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg>Public</span>
+            <span class="kd">No login and no Access seat. Listed and browsable &mdash; anyone with the link can read everything in it.</span></span>
+          </label>
+        </div>
+      </div>
+      <div class="field">
+        <label for="np-desc">Description <span class="hint">(optional)</span></label>
+        <input type="text" id="np-desc" placeholder="One line, for your own reference" autocomplete="off">
+      </div>
+      <div class="dlg-err" id="np-err" role="alert" hidden></div>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn" id="np-cancel">Cancel</button>
+      <button type="submit" class="btn" id="np-create">Create portal</button>
+    </div>
+  </form>
+</dialog>
+<dialog id="dlg-upload" aria-labelledby="dlg-upload-title">
+  <form id="form-upload" method="dialog">
+    <div class="dlg-head" id="dlg-upload-title"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>New document</div>
+    <div class="dlg-body" id="up-body">
+      <label class="dropzone" id="up-drop">
+        <input type="file" id="up-file" accept=".html,.htm,.md,.markdown,text/html,text/markdown" hidden>
+        <span id="up-filelabel">Drop an <code>.html</code> or <code>.md</code> file here, or click to choose</span>
+      </label>
+      <div class="warnline" id="up-relwarn" role="alert" hidden></div>
+      <div class="field">
+        <label for="up-title">Title</label>
+        <input type="text" id="up-title" placeholder="Q3 Review" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="up-portal">Portal</label>
+        <select id="up-portal"></select>
+      </div>
+      <div class="field">
+        <label>Visibility</label>
+        <label class="checkrow"><input type="checkbox" id="up-public"><span>Also mint a public link &mdash; anyone with the URL, no login</span></label>
+        <div class="warnline" id="up-pubwarn" hidden><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>A public link is a <strong>capability URL, not privacy</strong> &mdash; anyone it is forwarded to can open it, with no login.</div>
+      </div>
+      <div class="field">
+        <label for="up-emails">Share with</label>
+        <input type="text" id="up-emails" placeholder="a@x.com, b@y.com" autocapitalize="none" autocomplete="off" spellcheck="false">
+        <span class="hint">Emails, comma or space separated. Added to this document only.</span>
+      </div>
+      <div class="field">
+        <label for="up-tags">Tags <span class="hint">(optional)</span></label>
+        <input type="text" id="up-tags" placeholder="q3, infra" autocapitalize="none" autocomplete="off">
+      </div>
+      <div class="dlg-err" id="up-err" role="alert" hidden></div>
+    </div>
+    <div class="dlg-body" id="up-done" hidden></div>
+    <div class="dlg-foot" id="up-foot">
+      <button type="button" class="btn" id="up-cancel">Cancel</button>
+      <button type="submit" class="btn" id="up-publish">Publish</button>
+    </div>
+    <div class="dlg-foot" id="up-donefoot" hidden>
+      <button type="button" class="btn" id="up-again">Publish another</button>
+      <button type="button" class="btn" id="up-close">Done</button>
+    </div>
+  </form>
+</dialog>
 <footer>PageVault ${esc(version)}</footer>
 <script nonce="${nonce}">
   const T = ${JSON.stringify(session)};
@@ -517,6 +645,175 @@ function page(session: string, nonce: string, owner: string, version: string, or
     if (ev.target.closest('a[data-role="open"]')) return;
     const row = ev.target.closest(".doc");
     if (row) toggle(row.dataset.id);
+  });
+
+  // New-portal dialog (#43). The console's writes all go through the same session-bearer api()
+  // helper; this is one more POST, and the server owns slug validation — we just surface it.
+  const dlgPortal = document.getElementById("dlg-portal");
+  const npErr = document.getElementById("np-err");
+  function showNpErr(msg) { npErr.textContent = msg; npErr.hidden = false; }
+  document.getElementById("new-portal").addEventListener("click", () => {
+    document.getElementById("form-portal").reset();
+    npErr.hidden = true; npErr.textContent = "";
+    dlgPortal.showModal();
+    document.getElementById("np-name").focus();
+  });
+  document.getElementById("np-cancel").addEventListener("click", () => dlgPortal.close());
+  document.getElementById("form-portal").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    npErr.hidden = true;
+    const slug = document.getElementById("np-slug").value.trim();
+    const name = document.getElementById("np-name").value.trim();
+    const description = document.getElementById("np-desc").value.trim();
+    const picked = document.querySelector('input[name="np-kind"]:checked');
+    const kind = picked ? picked.value : "private";
+    if (!slug) { showNpErr("A slug is required — it becomes the portal's URL path."); return; }
+    const body = { slug, kind };
+    if (name) body.name = name;
+    if (description) body.description = description;
+    const btn = document.getElementById("np-create");
+    btn.disabled = true;
+    try {
+      await api("/api/portals", { method: "POST", body: JSON.stringify(body) });
+      dlgPortal.close();
+      await load();
+    } catch (e) {
+      // Surfaces the server's own message: invalid_slug (the reserved/format rule) or portal_exists.
+      showNpErr(e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // Upload / publish dialog (#6). The file is read in the browser and published through the
+  // same session-bearer api(); the two warnings the issue calls for live in the UI, not the docs.
+  const dlgUpload = document.getElementById("dlg-upload");
+  const upErr = document.getElementById("up-err");
+  const upDrop = document.getElementById("up-drop");
+  const upFile = document.getElementById("up-file");
+  const upFileLabel = document.getElementById("up-filelabel");
+  const upTitle = document.getElementById("up-title");
+  const upPortalSel = document.getElementById("up-portal");
+  const upPublic = document.getElementById("up-public");
+  const upPubWarn = document.getElementById("up-pubwarn");
+  const upRelWarn = document.getElementById("up-relwarn");
+  let uploadHtml = null;
+  let uploadKind = "html";
+  const showUpErr = (msg) => { upErr.textContent = msg; upErr.hidden = false; };
+  const parseList = (s) => (s || "").split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+
+  // Cheap relative-reference scan: a reference that is not absolute http(s), data:, blob:, a
+  // #anchor, or a mail/tel/js scheme will 404 for the recipient — we host one file, no assets.
+  // HTML carries them as src/href; markdown as ](path) in image/link syntax.
+  function relativeRefs(text, kind) {
+    const re = kind === "markdown" ? /\\]\\(([^)\\s]+)/g : /(?:src|href)\\s*=\\s*["']([^"']+)["']/gi;
+    const found = []; let m;
+    while ((m = re.exec(text)) && found.length < 3) {
+      const v = m[1].trim();
+      if (v && !/^(https?:|data:|blob:|mailto:|tel:|javascript:|#)/i.test(v)) found.push(v);
+    }
+    return found;
+  }
+
+  async function takeFile(file) {
+    if (!file) return;
+    uploadHtml = await file.text();
+    const ext = (file.name.match(/\\.([^.]+)$/) || ["", ""])[1].toLowerCase();
+    uploadKind = ext === "md" || ext === "markdown" ? "markdown" : "html";
+    upDrop.classList.add("has-file");
+    upFileLabel.textContent = file.name + " · " + Math.max(1, Math.round(file.size / 1024)) + " KB · " + uploadKind;
+    if (!upTitle.value.trim()) upTitle.value = file.name.replace(/\\.[^.]+$/, "");
+    const rel = relativeRefs(uploadHtml, uploadKind);
+    if (rel.length) {
+      upRelWarn.innerHTML = ico("alert") + "Relative references (e.g. <strong>" + esc(rel[0]) +
+        "</strong>) will 404 for the recipient — PageVault hosts one HTML file, no separate assets. Embed them as data: URIs or use absolute https URLs.";
+      upRelWarn.hidden = false;
+    } else {
+      upRelWarn.hidden = true;
+    }
+  }
+
+  upFile.addEventListener("change", () => takeFile(upFile.files[0]));
+  upDrop.addEventListener("dragover", (e) => { e.preventDefault(); upDrop.classList.add("drag"); });
+  upDrop.addEventListener("dragleave", () => upDrop.classList.remove("drag"));
+  upDrop.addEventListener("drop", (e) => { e.preventDefault(); upDrop.classList.remove("drag"); takeFile(e.dataTransfer.files[0]); });
+  upPublic.addEventListener("change", () => { upPubWarn.hidden = !upPublic.checked; });
+  dlgUpload.addEventListener("click", (e) => { const c = e.target.closest('[data-act="copy"]'); if (c) { e.preventDefault(); copyBtn(c); } });
+
+  function openUpload() {
+    document.getElementById("form-upload").reset();
+    uploadHtml = null; uploadKind = "html";
+    upErr.hidden = true; upRelWarn.hidden = true; upPubWarn.hidden = true;
+    upDrop.classList.remove("has-file", "drag");
+    upFileLabel.innerHTML = 'Drop an <code>.html</code> or <code>.md</code> file here, or click to choose';
+    const slugs = Object.keys(PORTALS);
+    // Populate from live portals so the user can only pick one that exists. With none yet, an
+    // empty value omits the portal on publish — the server then auto-creates the default (ADR-005).
+    upPortalSel.innerHTML = slugs.length
+      ? slugs.map((s) => '<option value="' + esc(s) + '">' + esc(PORTALS[s].name) + ' (' + esc(PORTALS[s].kind) + ')</option>').join("")
+      : '<option value="">default (created on first publish)</option>';
+    if (PORTALS["default"]) upPortalSel.value = "default";
+    document.getElementById("up-body").hidden = false;
+    document.getElementById("up-done").hidden = true;
+    document.getElementById("up-foot").hidden = false;
+    document.getElementById("up-donefoot").hidden = true;
+    dlgUpload.showModal();
+  }
+  document.getElementById("new-doc").addEventListener("click", openUpload);
+  document.getElementById("up-cancel").addEventListener("click", () => dlgUpload.close());
+  document.getElementById("up-close").addEventListener("click", () => dlgUpload.close());
+  document.getElementById("up-again").addEventListener("click", openUpload);
+
+  function showUploadDone(res) {
+    const link = res.publicUrl || res.url;
+    const done = document.getElementById("up-done");
+    done.innerHTML =
+      '<div class="donerow"><div class="done-ok">' + ico("globe") + 'Published to ' + esc(res.portal) + '</div>' +
+      '<div class="lnk"><code>' + esc(link) + '</code>' +
+      '<button type="button" class="btn" data-act="copy" data-url="' + esc(link) + '">' + ico("copy") + 'Copy link</button>' +
+      '<a class="btn" href="' + esc(link) + '" target="_blank" rel="noopener">Open &#8599;</a></div></div>';
+    document.getElementById("up-body").hidden = true;
+    done.hidden = false;
+    document.getElementById("up-foot").hidden = true;
+    document.getElementById("up-donefoot").hidden = false;
+  }
+
+  document.getElementById("form-upload").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    upErr.hidden = true;
+    if (!uploadHtml) { showUpErr("Choose an .html file first."); return; }
+    const title = upTitle.value.trim();
+    if (!title) { showUpErr("A title is required."); return; }
+    const body = { title, html: uploadHtml, portal: upPortalSel.value, sourceKind: uploadKind };
+    if (upPublic.checked) body.public = true;
+    const emails = parseList(document.getElementById("up-emails").value);
+    if (emails.length) body.emails = emails;
+    const tags = parseList(document.getElementById("up-tags").value);
+    if (tags.length) body.tags = tags;
+
+    const btn = document.getElementById("up-publish");
+    btn.disabled = true;
+    const publish = (overwrite) => api("/api/docs", { method: "POST", body: JSON.stringify(overwrite ? Object.assign({}, body, { confirm: true }) : body) });
+    try {
+      let res;
+      try {
+        res = await publish(false);
+      } catch (e) {
+        // A same-title doc in the portal replaces in place — but only on explicit confirm.
+        if (/already exists in portal/i.test(e.message)) {
+          if (!confirm(e.message + ". Publishing replaces it in place, keeping the same URL. Replace it?")) { btn.disabled = false; return; }
+          res = await publish(true);
+        } else {
+          throw e;
+        }
+      }
+      showUploadDone(res);
+      load(); // refresh the list behind the modal
+    } catch (e) {
+      showUpErr(e.message);
+    } finally {
+      btn.disabled = false;
+    }
   });
 
   load();
