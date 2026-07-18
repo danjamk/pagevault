@@ -178,6 +178,18 @@ describe("/render?download=1 — raw file download (#49)", () => {
     expect(cd).not.toContain(".html");
   });
 
+  it("🔴 serves the original .md source, not the rendered HTML body (#46)", async () => {
+    // A markdown doc stores rendered HTML at doc: and the original at raw:. The download
+    // must hand back the original, or the bytes contradict the .md filename.
+    const meta = doc({ id: "mdrawdoc123456", sourceKind: "markdown" });
+    const RENDERED = "<!doctype html><h1>Report</h1>";
+    const ORIGINAL = "# Report\n\nBody text.";
+    await putDoc(env, meta, RENDERED, ORIGINAL);
+    const cap = await mintCapability(env, meta.id, null);
+    const res = await SELF.fetch(`${HOST}/render/${meta.id}?cap=${cap}&download=1`);
+    expect(new TextDecoder().decode(await res.arrayBuffer())).toBe(ORIGINAL);
+  });
+
   it("🔴 obeys the same capability guard — a forged cap 404s", async () => {
     const meta = await publishPublic();
     expect((await SELF.fetch(`${HOST}/render/${meta.id}?cap=notarealtoken&download=1`)).status).toBe(404);
