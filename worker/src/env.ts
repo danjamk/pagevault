@@ -41,6 +41,14 @@ export interface Env {
   /** Optional. Overrides the artifact CSP. Default is the sandbox — see ADR-007. */
   DOC_CSP?: string;
 
+  /**
+   * The Browser Run (Puppeteer) binding — optional. Present enables single-page PDF export
+   * (#50); absent means this deployment opted out, and both the PDF button and the endpoint
+   * degrade off cleanly. Enabling Browser Run on the account is a one-time provisioning step,
+   * so a fork that never wants PDF simply leaves the binding out and nothing breaks.
+   */
+  BROWSER?: Fetcher;
+
   /** Secrets. */
   PAGEVAULT_API_TOKEN: string;
   /** Signs capability and console session tokens. See ADR-007. */

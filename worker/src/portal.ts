@@ -151,6 +151,7 @@ async function portalDocument(
     // by this same handler is Access-gated, so its URL dead-ends for anyone not already in
     // the portal; no share affordance there. Keyed off kind, not noindex (they differ).
     shareable: portal.kind === "public",
+    pdfEnabled: !!env.BROWSER,
   });
 }
 

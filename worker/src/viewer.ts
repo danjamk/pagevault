@@ -1,5 +1,6 @@
 import { mintCapability, verifyCapability } from "./capability.js";
 import type { Env } from "./env.js";
+import { renderPdf } from "./pdf.js";
 import type { DocMeta } from "./store.js";
 import { getDoc, getMeta } from "./store.js";
 
@@ -80,18 +81,52 @@ export async function handleRender(request: Request, env: Env, id: string): Prom
   // exists to prevent. `Content-Disposition: attachment` forces a download; `application/
   // octet-stream` + `nosniff` means that even if a disposition were ever dropped, the browser
   // still will not execute it as HTML here. Three independent reasons it cannot render inline.
-  if (new URL(request.url).searchParams.get("download") === "1") {
+  const params = new URL(request.url).searchParams;
+
+  if (params.get("download") === "1") {
     const meta = await getMeta(env, id);
     return new Response(source, {
       headers: {
         "Content-Type": "application/octet-stream",
-        "Content-Disposition": contentDisposition(downloadFilename(meta, id)),
+        "Content-Disposition": contentDisposition(rawFilename(meta, id)),
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "no-referrer",
         "X-Robots-Tag": "noindex, nofollow",
         "Cache-Control": "private, no-store",
       },
     });
+  }
+
+  // Single-page PDF (#50). The capability guard above has already run, so no document reaches
+  // the renderer without authorization. The browser binding is optional: a deployment that did
+  // not enable Browser Run answers 501, and the shell hides the button, so nothing half-works.
+  if (params.get("pdf") === "1") {
+    if (!env.BROWSER) {
+      return pdfError(501, "PDF export is not enabled on this deployment.");
+    }
+    try {
+      const meta = await getMeta(env, id);
+      const pdf = await renderPdf(env.BROWSER, source);
+      return new Response(pdf, {
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": contentDisposition(`${filenameBase(meta, id)}.pdf`),
+          "X-Content-Type-Options": "nosniff",
+          "Referrer-Policy": "no-referrer",
+          "X-Robots-Tag": "noindex, nofollow",
+          "Cache-Control": "private, no-store",
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logBlocked("pdf_render_failed", request, { doc: id, error: message });
+      // Free tier is 10 minutes of browser time per day; a burst returns 429. Surface that as
+      // its own status so the button can say "try again later" rather than a generic failure.
+      const rateLimited = /\b429\b|rate.?limit|too many|quota|exceeded/i.test(message);
+      return rateLimited
+        ? pdfError(429, "Daily PDF limit reached. Try again later.")
+        : pdfError(502, "Could not generate the PDF for this document.");
+    }
   }
 
   return new Response(source, {
@@ -107,19 +142,23 @@ export async function handleRender(request: Request, env: Env, id: string): Prom
   });
 }
 
-/**
- * A filename for the raw download: the title, made filesystem-safe, with an extension that
- * tells the truth about the bytes (`sourceKind`). Same extension-honesty concern as #35.
- */
-function downloadFilename(meta: DocMeta | null, id: string): string {
-  const ext = meta?.sourceKind === "markdown" ? "md" : "html";
+/** The title, made filesystem-safe — no extension. Shared by the raw download and the PDF. */
+function filenameBase(meta: DocMeta | null, id: string): string {
   const base = (meta?.title ?? id)
     // Collapse anything that breaks a filename or the header to a single space.
     .replace(/[\x00-\x1f\x7f/\\:*?"<>|]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 120);
-  return `${base || "document"}.${ext}`;
+  return base || "document";
+}
+
+/**
+ * A filename for the raw download: the title with an extension that tells the truth about the
+ * bytes (`sourceKind`). Same extension-honesty concern as #35.
+ */
+function rawFilename(meta: DocMeta | null, id: string): string {
+  return `${filenameBase(meta, id)}.${meta?.sourceKind === "markdown" ? "md" : "html"}`;
 }
 
 /**
@@ -129,6 +168,14 @@ function downloadFilename(meta: DocMeta | null, id: string): string {
 function contentDisposition(filename: string): string {
   const ascii = filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+/** A JSON error the PDF button's fetch can read and turn into a message. */
+function pdfError(status: number, error: string): Response {
+  return new Response(JSON.stringify({ error }), {
+    status,
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "private, no-store" },
+  });
 }
 
 export interface ShellOptions {
@@ -147,6 +194,12 @@ export interface ShellOptions {
    * and coupling them invites a future bug (#49).
    */
   shareable?: boolean;
+  /**
+   * Show the PDF export control. Set from `!!env.BROWSER` at the caller: a deployment without
+   * the Browser Run binding hides the button, matching the endpoint's 501 (#50). The button's
+   * fetch is why the shell gets `connect-src 'self'` — the one page that talks to our origin.
+   */
+  pdfEnabled?: boolean;
 }
 
 /**
@@ -170,8 +223,10 @@ export async function renderShell(
   // to degrade the page that holds the capability token.
   const nonce = crypto.randomUUID();
   const src = `/render/${encodeURIComponent(meta.id)}?cap=${encodeURIComponent(cap)}`;
-  // The download reuses the same capability guard — no second auth path (ADR-007 / #49).
+  // The download and PDF both reuse the same capability guard — no second auth path (ADR-007).
   const downloadHref = `${src}&download=1`;
+  const pdfHref = `${src}&pdf=1`;
+  const pdfName = `${filenameBase(meta, meta.id)}.pdf`;
 
   const back = opts.backHref
     ? `<a class="back" href="${esc(opts.backHref)}">&larr; ${esc(opts.backLabel ?? "Back")}</a>`
@@ -195,6 +250,42 @@ export async function renderShell(
         return;
       }
       prompt("Copy this link:", url);
+    });
+  })();
+</script>`
+    : "";
+
+  const pdfBtn = opts.pdfEnabled ? `<button class="ctl" id="pdf" type="button">PDF</button>` : "";
+  // The button fetches the PDF (one render — never a plain link that would re-render on retry),
+  // shows a generating state for the cold-launch latency, and turns a 429/failure into a
+  // readable message rather than downloading an error blob. This fetch is why the shell's CSP
+  // carries connect-src 'self' when PDF is enabled (#50).
+  const pdfScript = opts.pdfEnabled
+    ? `<script nonce="${nonce}">
+  (function () {
+    var b = document.getElementById("pdf");
+    if (!b) return;
+    var url = ${JSON.stringify(pdfHref)}, name = ${JSON.stringify(pdfName)}, label = b.textContent;
+    b.addEventListener("click", function () {
+      if (b.disabled) return;
+      b.disabled = true; b.textContent = "Generating…";
+      fetch(url).then(function (res) {
+        if (!res.ok) {
+          return res.json().catch(function () { return {}; }).then(function (j) {
+            throw new Error((j && j.error) || "Could not generate the PDF.");
+          });
+        }
+        return res.blob();
+      }).then(function (blob) {
+        var href = URL.createObjectURL(blob), a = document.createElement("a");
+        a.href = href; a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(href); }, 5000);
+      }).catch(function (e) {
+        alert(e && e.message ? e.message : "Could not generate the PDF.");
+      }).finally(function () {
+        b.disabled = false; b.textContent = label;
+      });
     });
   })();
 </script>`
@@ -235,6 +326,7 @@ export async function renderShell(
   <div class="controls">
     <span class="meta">${esc(new Date(meta.updatedAt).toISOString().slice(0, 10))}</span>
     <a class="ctl" href="${esc(downloadHref)}" download>Download</a>
+    ${pdfBtn}
     ${shareBtn}
   </div>
 </header>
@@ -244,6 +336,7 @@ export async function renderShell(
   referrerpolicy="no-referrer"
   title="${esc(meta.title)}"></iframe>
 ${shareScript}
+${pdfScript}
 </body>
 </html>`;
 
@@ -254,6 +347,10 @@ ${shareScript}
       `style-src 'nonce-${nonce}'`,
       `script-src 'nonce-${nonce}'`,
       "frame-src 'self'",
+      // Only the PDF button needs to reach our origin (to fetch the render). Added just for it,
+      // and only to our own origin — the artifact is in the iframe (opaque origin) and cannot
+      // use this. See #50.
+      ...(opts.pdfEnabled ? ["connect-src 'self'"] : []),
       "form-action 'none'",
       "frame-ancestors 'none'",
       "base-uri 'none'",
