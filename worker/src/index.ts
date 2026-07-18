@@ -123,7 +123,9 @@ async function handlePublicToken(env: Env, token: string): Promise<Response> {
   // A draft must not be readable just because a link was minted before it was marked.
   if (meta.ownerOnly) return notFound();
 
-  return renderShell(env, meta, { email: null, noindex: true });
+  // A /p/ capability link is self-authorizing — anyone with the URL can open it — so the
+  // share control belongs here.
+  return renderShell(env, meta, { email: null, noindex: true, shareable: true });
 }
 
 const notFound = () => new Response("Not found", { status: 404 });

@@ -7,6 +7,17 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **Download and share from the viewer** ([#49](https://github.com/danjamk/pagevault/issues/49)) —
+  the trusted shell now carries a **Download** control on every document: the original source,
+  served through the same capability guard as an attachment (`Content-Disposition: attachment`,
+  `application/octet-stream`, `nosniff`) so a hostile artifact is never rendered inline in our
+  origin — ADR-007, three ways. The filename honors `sourceKind` (`.html` / `.md`). A **Share**
+  control copies the current URL (or uses `navigator.share()`), shown **only** on self-authorizing
+  `/p/` and `/pub/` links where the URL actually opens for whoever receives it — never on an
+  Access-gated `/v/` document, where it would hand out a dead end. Share only ever copies; minting
+  and widening stay owner actions.
+
 ## [0.3.0] — 2026-07-17
 
 A readable console, the `pagevault` CLI, and push-button production deploys.

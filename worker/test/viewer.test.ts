@@ -2,7 +2,7 @@ import { SELF, env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { mintCapability, originAllowed, resetCapabilityKeyCache, verifyCapability } from "../src/capability.js";
 import { type DocMeta, putDoc, putPublicToken } from "../src/store.js";
-import { IFRAME_SANDBOX, docCsp } from "../src/viewer.js";
+import { IFRAME_SANDBOX, docCsp, renderShell } from "../src/viewer.js";
 
 const HOST = "https://share.example.com";
 const HTML = "<!doctype html><h1>Q3</h1><script>console.log(1)</script>";
@@ -144,6 +144,65 @@ describe("/render — artifact bytes", () => {
     const meta = await publishPublic();
     const res = await SELF.fetch(`${HOST}/render/${meta.id}?cap=notarealtoken`);
     expect(res.status).toBe(404);
+  });
+});
+
+describe("/render?download=1 — raw file download (#49)", () => {
+  it("🔴 returns the raw source as an attachment, never inline HTML (ADR-007)", async () => {
+    const meta = await publishPublic();
+    const cap = await mintCapability(env, meta.id, null);
+    const res = await SELF.fetch(`${HOST}/render/${meta.id}?cap=${cap}&download=1`);
+
+    expect(res.status).toBe(200);
+    // Read as bytes, not text — the whole point is that this is not served as a text document.
+    expect(new TextDecoder().decode(await res.arrayBuffer())).toBe(HTML);
+    // Three independent reasons the hostile artifact cannot render in our origin:
+    expect(res.headers.get("Content-Disposition")).toMatch(/^attachment;/);
+    expect(res.headers.get("Content-Type")).toBe("application/octet-stream");
+    expect(res.headers.get("Content-Type")).not.toContain("text/html");
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  });
+
+  it("names the file from the title with an html extension", async () => {
+    const meta = await publishPublic({ title: "Q3 Review" });
+    const cap = await mintCapability(env, meta.id, null);
+    const cd = (await SELF.fetch(`${HOST}/render/${meta.id}?cap=${cap}&download=1`)).headers.get("Content-Disposition");
+    expect(cd).toContain('filename="Q3 Review.html"');
+  });
+
+  it("honors sourceKind — a markdown document downloads as .md", async () => {
+    const meta = await publishPublic({ sourceKind: "markdown" });
+    const cap = await mintCapability(env, meta.id, null);
+    const cd = (await SELF.fetch(`${HOST}/render/${meta.id}?cap=${cap}&download=1`)).headers.get("Content-Disposition");
+    expect(cd).toContain(".md");
+    expect(cd).not.toContain(".html");
+  });
+
+  it("🔴 obeys the same capability guard — a forged cap 404s", async () => {
+    const meta = await publishPublic();
+    expect((await SELF.fetch(`${HOST}/render/${meta.id}?cap=notarealtoken&download=1`)).status).toBe(404);
+  });
+});
+
+describe("viewer chrome — download + share (#49)", () => {
+  it("every shell offers a download control pointing at the guarded raw route", async () => {
+    const body = await (await SELF.fetch(`${HOST}/p/${(await publishPublic()).publicToken}`)).text();
+    expect(body).toMatch(/href="\/render\/[^"]*download=1"/);
+    expect(body).toContain(">Download<");
+  });
+
+  it("a /p/ capability link is self-authorizing, so the share control is present", async () => {
+    const body = await (await SELF.fetch(`${HOST}/p/${(await publishPublic()).publicToken}`)).text();
+    expect(body).toContain('id="share"');
+  });
+
+  it("🔴 an Access-gated (non-shareable) shell hides share but keeps download", async () => {
+    // A /v/ URL only opens for people already in the portal, so a share affordance there
+    // would hand out a link that dead-ends at the Access wall. Download stays.
+    const secure = await renderShell(env, doc(), { email: "cto@realplus.com", noindex: true, shareable: false });
+    const body = await secure.text();
+    expect(body).not.toContain('id="share"');
+    expect(body).toContain(">Download<");
   });
 });
 
