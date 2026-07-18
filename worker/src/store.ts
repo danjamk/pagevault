@@ -2,7 +2,11 @@ import type { Env } from "./env.js";
 
 export type PortalKind = "private" | "restricted" | "public";
 
-/** `markdown` is stored but not rendered yet — the renderer is a later layer. */
+/**
+ * How a document's source was authored. `markdown` is rendered to HTML at publish time
+ * (#46); the original `.md` is retained under `raw:` for the raw download and read-back.
+ * `html` is stored and served verbatim.
+ */
 export type SourceKind = "html" | "markdown";
 
 export interface Portal {
@@ -87,6 +91,11 @@ const portalKey = (slug: string) => `portal:${slug}`;
 const membersKey = (slug: string) => `members:${slug}`;
 const indexKey = (slug: string, id: string) => `idx:${slug}:${id}`;
 const docKey = (id: string) => `doc:${id}`;
+// The original, pre-render source. Written only for documents whose stored body differs
+// from what the author submitted — i.e. markdown, where `doc:` holds rendered HTML. This
+// is what keeps #49's raw download and `read_document` honest: they read back the `.md`
+// the author wrote, not the HTML we generated from it.
+const rawKey = (id: string) => `raw:${id}`;
 const metaKey = (id: string) => `meta:${id}`;
 const pubKey = (token: string) => `pub:${token}`;
 
@@ -265,8 +274,13 @@ export const metadataFits = (meta: DocMeta): boolean =>
  * document that is simply not published, rather than an index entry pointing at
  * nothing.
  */
-export async function putDoc(env: Env, meta: DocMeta, source: string): Promise<void> {
+export async function putDoc(env: Env, meta: DocMeta, source: string, raw?: string): Promise<void> {
   await env.PAGEVAULT.put(docKey(meta.id), source);
+  // Publish-time conversion (markdown): `source` is rendered HTML, `raw` is the original.
+  // Both land before meta/index, so nothing is "published" until the pair is in place;
+  // and the read-back paths fall back `raw ?? doc`, so even a torn write degrades to
+  // serving the body rather than 404ing.
+  if (raw !== undefined) await env.PAGEVAULT.put(rawKey(meta.id), raw);
   await putMeta(env, meta);
   await env.PAGEVAULT.put(indexKey(meta.portal, meta.id), "");
 }
@@ -279,6 +293,14 @@ export async function putMeta(env: Env, meta: DocMeta): Promise<void> {
 
 export const getDoc = (env: Env, id: string): Promise<string | null> =>
   env.PAGEVAULT.get(docKey(id));
+
+/**
+ * The original pre-render source, or null if the document was never converted (HTML docs,
+ * or a markdown doc stored before this feature). Callers that want the authored source —
+ * raw download, `read_document`, body search — read `getRawSource(id) ?? getDoc(id)`.
+ */
+export const getRawSource = (env: Env, id: string): Promise<string | null> =>
+  env.PAGEVAULT.get(rawKey(id));
 
 export const getMeta = (env: Env, id: string): Promise<DocMeta | null> =>
   env.PAGEVAULT.get<DocMeta>(metaKey(id), "json");
@@ -356,4 +378,6 @@ export async function deleteDoc(env: Env, meta: DocMeta): Promise<void> {
   await env.PAGEVAULT.delete(indexKey(meta.portal, meta.id));
   await env.PAGEVAULT.delete(metaKey(meta.id));
   await env.PAGEVAULT.delete(docKey(meta.id));
+  // No-op for HTML docs (KV delete is idempotent); clears the original for markdown.
+  await env.PAGEVAULT.delete(rawKey(meta.id));
 }

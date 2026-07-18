@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PageVault — What it is</title>
+<meta name="description" content="Self-hosted, single-file HTML publishing with per-document access control, on Cloudflare's free tier. The link is not the unit. The client is.">
+<style>
+  :root{
+    --ink:#0E1522; --ink2:#141D2E; --ink3:#1C2740;
+    --line:#26324d; --line2:#33436a;
+    --brass:#C8A253; --brass-hi:#E7C67E; --brass-dim:#6f5c33;
+    --teal:#57BEB9;
+    --paper:#ECE7DB; --muted:#8B93A4; --faint:#5c6577;
+    --mono: ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --sans: system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --maxw:1080px;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{margin:0; background:var(--ink); color:var(--paper); font-family:var(--sans); line-height:1.6; font-size:17px; letter-spacing:.005em;
+    background-image:radial-gradient(1100px 560px at 82% -10%, rgba(200,162,83,.10), transparent 60%), radial-gradient(900px 520px at 4% 3%, rgba(87,190,185,.05), transparent 55%);}
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 22px}
+  section{padding:62px 0; border-top:1px solid var(--line)}
+  section:first-of-type{border-top:0}
+  h1,h2,h3{line-height:1.13; margin:0}
+  a{color:var(--brass-hi); text-decoration:none; border-bottom:1px solid rgba(231,198,126,.3)}
+  a:hover{border-bottom-color:var(--brass-hi)}
+  .eyebrow{font-family:var(--mono); font-size:12.5px; letter-spacing:.28em; text-transform:uppercase; color:var(--brass); margin:0 0 18px}
+  .lede{color:var(--muted); font-size:19px; max-width:62ch}
+  .kicker{font-family:var(--mono); font-size:12px; letter-spacing:.2em; text-transform:uppercase; color:var(--faint)}
+  h2.big{font-size:clamp(25px,4.4vw,36px); font-weight:800; letter-spacing:-.017em; max-width:20ch}
+  h2.big em{font-style:normal; color:var(--brass-hi)}
+  .intro{color:var(--muted); max-width:66ch; margin-top:16px}
+
+  /* HERO */
+  .hero{padding-top:76px}
+  .hero h1{font-size:clamp(36px,6.4vw,64px); font-weight:800; letter-spacing:-.025em; max-width:15ch}
+  .hero h1 em{font-style:normal; color:var(--brass-hi)}
+  .hero .lede{margin-top:24px}
+  .oneliners{margin-top:30px; display:flex; flex-direction:column; gap:9px; border-left:2px solid var(--brass-dim); padding-left:18px}
+  .oneliners span{font-family:var(--mono); font-size:13px; color:var(--muted); letter-spacing:.01em}
+  .oneliners span b{color:var(--paper); font-weight:400}
+
+  /* PILLARS */
+  .pillars{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:26px}
+  .pillar{border:1px solid var(--line); border-radius:14px; background:var(--ink2); padding:22px 24px}
+  .pillar .pk{font-family:var(--mono); font-size:11.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--brass); margin-bottom:12px}
+  .pillar h3{font-size:21px; font-weight:800; letter-spacing:-.01em; max-width:20ch}
+  .pillar p{margin:11px 0 0; color:var(--muted); font-size:15px}
+
+  /* FEATURE CARDS */
+  .fgrid{margin-top:26px; display:grid; grid-template-columns:repeat(auto-fit,minmax(258px,1fr)); gap:14px}
+  .fcard{border:1px solid var(--line); border-radius:11px; background:var(--ink2); padding:17px 18px}
+  .fcard .fl{font-family:var(--mono); font-size:13px; color:var(--brass-hi); letter-spacing:.01em; margin-bottom:8px}
+  .fcard .fb{color:var(--muted); font-size:14.5px}
+  .fcard.hi{border-color:var(--brass-dim); background:rgba(200,162,83,.06)}
+
+  /* SIMULATOR */
+  .sim{margin-top:24px; border:1px solid var(--line); border-radius:14px; background:var(--ink2); overflow:hidden}
+  .seg{display:flex; flex-wrap:wrap; gap:0; border-bottom:1px solid var(--line)}
+  .seg button{flex:1; min-width:120px; font-family:var(--mono); font-size:13px; color:var(--muted); background:transparent; border:0; border-right:1px solid var(--line); padding:14px 12px; cursor:pointer; transition:.14s}
+  .seg button:last-child{border-right:0}
+  .seg button:hover{color:var(--paper); background:var(--ink3)}
+  .seg button.active{color:var(--ink); background:var(--brass)}
+  .seg button:focus-visible{outline:2px solid var(--brass-hi); outline-offset:-2px}
+  .simbody{padding:20px 22px}
+  .urlbar{display:flex; align-items:center; gap:10px; font-family:var(--mono); font-size:13.5px; background:var(--ink); border:1px solid var(--line2); border-radius:9px; padding:11px 14px; color:var(--paper); overflow-x:auto; white-space:nowrap}
+  .urlbar .lock{color:var(--brass)}
+  .simrows{margin-top:18px; display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px}
+  .simrow .rk{font-family:var(--mono); font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--faint); margin-bottom:5px}
+  .simrow .rv{color:var(--paper); font-size:14.5px}
+  .simnote{margin-top:16px; font-size:14px; color:var(--muted); border-top:1px solid var(--line); padding-top:14px}
+  .simnote b{color:var(--brass-hi); font-weight:600}
+
+  /* PORTAL DEMO */
+  .portal{margin-top:24px; border:1px solid var(--line); border-radius:14px; background:var(--ink2); overflow:hidden}
+  .phead{display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding:16px 20px; border-bottom:1px solid var(--line); flex-wrap:wrap}
+  .phead .pn{font-family:var(--mono); font-weight:700; font-size:15px; color:var(--paper)}
+  .phead .pc{font-family:var(--mono); font-size:12px; color:var(--faint)}
+  .pdocs{display:flex; flex-wrap:wrap; gap:8px; padding:16px 20px 6px}
+  .pdoc{font-family:var(--mono); font-size:12.5px; color:var(--muted); border:1px solid var(--line); background:var(--ink); border-radius:7px; padding:7px 11px; transition:.18s}
+  .pdoc .dt{color:var(--faint); font-size:11px; margin-left:7px}
+  .pdoc.hit{color:var(--ink); background:var(--brass); border-color:var(--brass)}
+  .pdoc.hit .dt{color:rgba(14,21,34,.7)}
+  .pask{padding:6px 20px 14px}
+  .pask .kicker{margin-bottom:10px}
+  .qbtns{display:flex; flex-wrap:wrap; gap:8px}
+  .qbtn{font-family:var(--sans); font-size:13.5px; color:var(--paper); background:var(--ink); border:1px solid var(--line2); border-radius:999px; padding:8px 14px; cursor:pointer; transition:.14s}
+  .qbtn:hover{border-color:var(--brass-dim); color:var(--brass-hi)}
+  .qbtn.active{background:rgba(200,162,83,.12); border-color:var(--brass-dim); color:var(--brass-hi)}
+  .console{margin:4px 20px 20px; background:var(--ink); border:1px solid var(--line2); border-radius:10px; padding:16px 18px; font-family:var(--mono); font-size:13px}
+  .console .call{color:var(--teal)}
+  .console .ret{color:var(--faint); margin-top:8px}
+  .console .doc{color:var(--brass-hi); font-weight:700}
+  .console .snip{color:var(--paper); margin-top:10px; font-family:var(--sans); font-size:14.5px; line-height:1.55; border-left:2px solid var(--brass-dim); padding-left:13px}
+  .demo-label{font-family:var(--mono); font-size:11.5px; color:var(--faint); margin-top:12px}
+
+  /* COST */
+  .cost{margin-top:24px; display:grid; gap:12px; max-width:640px}
+  .costrow{display:grid; grid-template-columns:150px 1fr auto; align-items:center; gap:14px}
+  .costrow .cl{font-family:var(--mono); font-size:13px; color:var(--muted)}
+  .costrow.me .cl{color:var(--brass-hi)}
+  .bar{height:16px; border-radius:5px; background:var(--ink3)}
+  .bar span{display:block; height:100%; border-radius:5px; background:linear-gradient(90deg,var(--line2),var(--muted))}
+  .costrow.me .bar span{background:linear-gradient(90deg,var(--brass-dim),var(--brass))}
+  .costrow .cp{font-family:var(--mono); font-size:13px; color:var(--faint); white-space:nowrap}
+  .costrow.me .cp{color:var(--brass-hi)}
+
+  .ladder{margin-top:26px; display:flex; flex-wrap:wrap; align-items:center; gap:10px}
+  .rung{font-family:var(--mono); font-size:13px; color:var(--paper); border:1px solid var(--line2); background:var(--ink2); border-radius:9px; padding:10px 14px}
+  .rung b{color:var(--brass-hi); font-weight:400}
+  .arrow{color:var(--faint); font-family:var(--mono)}
+
+  /* FOOTER */
+  footer{border-top:1px solid var(--line); padding:50px 0 74px}
+  .dogfood{border:1px solid var(--brass-dim); background:rgba(200,162,83,.06); border-radius:14px; padding:24px 26px}
+  .dogfood .k{font-family:var(--mono); font-size:11.5px; letter-spacing:.2em; text-transform:uppercase; color:var(--brass); margin-bottom:10px}
+  .dogfood p{margin:0; color:var(--paper); font-size:16px; max-width:70ch}
+  .dogfood p+p{margin-top:9px; color:var(--muted); font-size:14.5px}
+  .fine{font-family:var(--mono); font-size:12px; color:var(--faint); margin-top:24px}
+
+  @media (max-width:680px){
+    body{font-size:16px} section{padding:50px 0}
+    .pillars{grid-template-columns:1fr}
+    .costrow{grid-template-columns:110px 1fr auto; gap:10px}
+    .seg button{min-width:33%}
+  }
+  @media (prefers-reduced-motion:reduce){ *{transition:none!important; animation:none!important} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HERO -->
+  <section class="hero">
+    <p class="eyebrow">PageVault · What it is</p>
+    <h1>The link is not the unit. <em>The client is.</em></h1>
+    <p class="lede">Self-hosted, single-file HTML publishing with per-document access control, on Cloudflare's free tier. Publish a report you made in a chat and get back a URL — open to anyone you send it to, or locked to specific people. Whoever opens it installs nothing.</p>
+    <div class="oneliners">
+      <span><b>Cloudflare Access asks who you are. The Worker asks whether you may see this.</b></span>
+      <span><b>Publishing and remembering become the same act.</b></span>
+      <span><b>The Worker is the whole product — small enough to read in one sitting.</b></span>
+    </div>
+  </section>
+
+  <!-- TWO REASONS -->
+  <section>
+    <p class="eyebrow">Two reasons to care</p>
+    <h2 class="big">Adopt it for either half. Most people arrive for the first.</h2>
+    <div class="pillars">
+      <div class="pillar">
+        <div class="pk">The simple half</div>
+        <h3>A genuinely nice way to put a file behind a URL.</h3>
+        <p>Publish the formats that are miserable to share anywhere else — live, interactive HTML and rendered Markdown — behind a small, real access model, straight from the chat where you made them. No "client" concept required.</p>
+      </div>
+      <div class="pillar">
+        <div class="pk">The differentiator</div>
+        <h3>One durable portal per client, that reads back as memory.</h3>
+        <p>Every artifact you make for someone lands in one place they bookmark once. Six months later an agent can search it — "what did we decide about the migration?" — and get the document back. Nothing else does this.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- AXIS A: PUBLISH & SHARE -->
+  <section>
+    <p class="eyebrow">Publish &amp; share</p>
+    <h2 class="big">Get a link. Choose exactly who can open it.</h2>
+    <p class="intro">Three sharing modes cover real needs without a permissions matrix — right-sized for one operator, not enterprise-shaped. Pick one and see what your recipient actually gets.</p>
+
+    <div class="sim">
+      <div class="seg" id="seg">
+        <button data-mode="public" class="active">Public link</button>
+        <button data-mode="restricted">Email-gated</button>
+        <button data-mode="private">Private / draft</button>
+      </div>
+      <div class="simbody">
+        <div class="urlbar"><span class="lock" id="simlock">🔓</span><span id="simurl">—</span></div>
+        <div class="simrows">
+          <div class="simrow"><div class="rk">Who can open it</div><div class="rv" id="simwho">—</div></div>
+          <div class="simrow"><div class="rk">What they do</div><div class="rv" id="simlogin">—</div></div>
+          <div class="simrow"><div class="rk">Cloudflare seat cost</div><div class="rv" id="simseats">—</div></div>
+        </div>
+        <div class="simnote" id="simnote">—</div>
+      </div>
+    </div>
+
+    <div class="fgrid">
+      <div class="fcard"><div class="fl">Finally, HTML &amp; Markdown</div><div class="fb">The formats that suck to share elsewhere — Drive won't render HTML, Markdown shows up as raw text. PageVault serves them as proper, styled, live documents.</div></div>
+      <div class="fcard"><div class="fl">Readers register nowhere</div><div class="fb">The person opening your document installs nothing, creates no account, signs into no third-party app. They click a link and read.</div></div>
+      <div class="fcard"><div class="fl">Download raw or as PDF</div><div class="fb">Hand back the original file, or a single continuous-page PDF — a long infographic exports as one page, no pagination slicing a chart in half.</div></div>
+      <div class="fcard"><div class="fl">Publish from the chat</div><div class="fb">A remote MCP server means you publish from the surface where you made the thing — no separate upload step, no file shuffling.</div></div>
+      <div class="fcard"><div class="fl">Friction-free deploy</div><div class="fb">Up in minutes on a free Cloudflare account: a Deploy-to-Cloudflare button or idempotent CLI provisioning — with a matching teardown, so you can test it because you can undo it.</div></div>
+      <div class="fcard"><div class="fl">No lock-in, ever</div><div class="fb">A human-readable folder tree of every portal and document. Your work is never trapped in the tool — export the whole system and read it with your eyes.</div></div>
+    </div>
+  </section>
+
+  <!-- AXIS B: THE CLIENT CONCEPT -->
+  <section>
+    <p class="eyebrow">The client concept</p>
+    <h2 class="big">The link is not the unit. <em>The client is.</em></h2>
+    <p class="intro">Add someone to a client's team once and they can open everything you've sent that client — one change, not fourteen edits across fourteen emails. And the collection doesn't just sit there. It answers questions.</p>
+
+    <div class="portal">
+      <div class="phead"><span class="pn">Northwind Labs</span><span class="pc">6 documents · 3 people · one URL they bookmark once</span></div>
+      <div class="pdocs" id="pdocs"></div>
+      <div class="pask">
+        <p class="kicker">Ask the portal something — an agent runs it over MCP</p>
+        <div class="qbtns" id="qbtns"></div>
+      </div>
+      <div class="console" id="console"></div>
+    </div>
+    <p class="demo-label">Illustrative. In practice this is <code>search_portal</code> and <code>read_document</code> — the same MCP tools that publish into the portal can read the whole corpus back.</p>
+
+    <div class="fgrid">
+      <div class="fcard hi"><div class="fl">★ The collection reads back</div><div class="fb">Your published work doubles as a searchable memory. Six months in, "what did we decide about the V2 migration?" is answerable from the portal. Publishing and remembering are the same act.</div></div>
+      <div class="fcard hi"><div class="fl">★ One portal per client</div><div class="fb">Not one link per document. Add someone to a client's team once and they can open everything — no more digging through Gmail for the January doc.</div></div>
+      <div class="fcard"><div class="fl">Zero onboarding for them</div><div class="fb">The client needs no account, no app, no registration. Onboarding their whole team is a few emails on your side and nothing on theirs.</div></div>
+      <div class="fcard"><div class="fl">Cross-client isolation is absolute</div><div class="fb">Being in one client's portal grants nothing in another's. The failure that would end a consulting business is designed out, not patched.</div></div>
+      <div class="fcard"><div class="fl">Public or private collections</div><div class="fb">A portal can be a private client vault, an email-gated team space, or a fully public showcase — same model, one axis of difference.</div></div>
+      <div class="fcard"><div class="fl">Draft in place, safely</div><div class="fb">Stage a document inside a client's portal the client cannot see — even if a link was already minted. Republishing shows a diff and asks before it clobbers a deliverable.</div></div>
+    </div>
+  </section>
+
+  <!-- UNDER THE HOOD -->
+  <section>
+    <p class="eyebrow">Under the hood</p>
+    <h2 class="big">The Worker is the whole product.</h2>
+    <p class="intro">One Cloudflare Worker, MIT-licensed, small enough to read in a sitting. That auditability <em>is</em> the value: the security isn't a black box you're asked to trust — it's code you can read, fork, and own.</p>
+    <div class="fgrid">
+      <div class="fcard"><div class="fl">One authorization function</div><div class="fb">Access answers "who are you?"; the Worker answers "may you see this?" in one pure, testable function that verifies the signed token itself — never trusting a header or a cookie.</div></div>
+      <div class="fcard"><div class="fl">Double sandbox, enforced by a test</div><div class="fb">LLM-generated JS runs sealed — it can't read your cookies, touch the page, or phone home. Isolation is set on both the served bytes and the iframe, and the build fails if the one dangerous flag ever appears in the repo.</div></div>
+      <div class="fcard"><div class="fl">Two path-scoped Access apps</div><div class="fb">The owner console and the client-facing routes can't be reached with each other's tokens. A privilege boundary, not a config detail.</div></div>
+      <div class="fcard"><div class="fl">The API token never hits the browser</div><div class="fb">Two independent defenses on every state-changing endpoint. A stolen cookie buys an attacker nothing.</div></div>
+      <div class="fcard"><div class="fl">Public ≠ unsandboxed</div><div class="fb">A public artifact is more exposed, not less — same sandbox, plus noindex so it stays out of search.</div></div>
+      <div class="fcard"><div class="fl">Seat guardrail</div><div class="fb">An alert before the 50-seat wall, because Cloudflare won't warn you — otherwise the first sign is a client emailing that your report won't open.</div></div>
+    </div>
+  </section>
+
+  <!-- ECONOMICS -->
+  <section>
+    <p class="eyebrow">Economics</p>
+    <h2 class="big">$0, plus a domain you already own.</h2>
+    <p class="intro">One Worker, no server, no database, no invoice — against $19–$479/mo for a client-portal SaaS. And you only climb the deploy ladder as far as you actually need.</p>
+    <div class="cost">
+      <div class="costrow me"><div class="cl">PageVault</div><div class="bar"><span style="width:2%"></span></div><div class="cp">$0 / free tier</div></div>
+      <div class="costrow"><div class="cl">SuiteDash</div><div class="bar"><span style="width:8%"></span></div><div class="cp">$19 / mo</div></div>
+      <div class="costrow"><div class="cl">Copilot</div><div class="bar"><span style="width:16%"></span></div><div class="cp">$39 / mo</div></div>
+      <div class="costrow"><div class="cl">Data-room / enterprise portal</div><div class="bar"><span style="width:100%"></span></div><div class="cp">up to $479 / mo</div></div>
+    </div>
+    <div class="ladder">
+      <span class="rung">Public links, <b>no card</b></span>
+      <span class="arrow">→</span>
+      <span class="rung">Your own <b>domain</b></span>
+      <span class="arrow">→</span>
+      <span class="rung">Gated <b>client portals</b></span>
+    </div>
+    <p class="intro" style="margin-top:16px">Documents carry across every rung untouched, and the early rungs undo cleanly. Public and capability-link readers cost zero Cloudflare seats — gate the people who come back, link the people who read once.</p>
+  </section>
+
+  <!-- DELIBERATELY ISN'T -->
+  <section>
+    <p class="eyebrow">The honest part</p>
+    <h2 class="big">What it deliberately isn't.</h2>
+    <p class="intro">The whole competitive claim is "we are not an all-in-one." Every feature past that line would weaken it. So here is what PageVault refuses to be — stated as plainly as everything else.</p>
+    <div class="fgrid">
+      <div class="fcard"><div class="fl">Not a client-portal SaaS</div><div class="fb">No invoicing, contracts, e-sign, CRM, or tasks. If you need the business suite, SuiteDash or Copilot is the right tool and it isn't close.</div></div>
+      <div class="fcard"><div class="fl">Not multi-tenant</div><div class="fb">One operator, one owner per portal. A team that needs shared ownership forks it.</div></div>
+      <div class="fcard"><div class="fl">No comments or live presence</div><div class="fb">That's jonesphillip/sharehtml's lane, credited for three ideas PageVault borrows. If the doc is a conversation, use that.</div></div>
+      <div class="fcard"><div class="fl">No client upload</div><div class="fb">That would demand virus scanning, quotas, and double the permission model. Out of scope on purpose.</div></div>
+      <div class="fcard"><div class="fl">A small class of docs breaks</div><div class="fb">Anything relying on localStorage, IndexedDB, or same-origin fetch won't run in the sandbox. The trade: a few documents break so that no document can steal a session.</div></div>
+      <div class="fcard"><div class="fl">The portal bet is unproven</div><div class="fb">It pays off across many engagements with one client. Below ~10, a folder of links may be simpler — and we'll say so rather than pretend otherwise.</div></div>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <div class="wrap">
+    <div class="dogfood">
+      <div class="k">You're looking at the product</div>
+      <p>This page is a single self-contained HTML file — inline styles, inline script, no build step, no external assets, no tracking — served through PageVault, into the same sandbox every document gets. It's the feature list demonstrating itself.</p>
+      <p>Written in a conversation, not a terminal, and handed over as a link.</p>
+    </div>
+    <p class="fine">PageVault · MIT-licensed · self-hosted on Cloudflare's free tier · <a href="https://github.com/danjamk/pagevault">github.com/danjamk/pagevault</a></p>
+  </div>
+</footer>
+
+<script>
+(function(){
+  "use strict";
+  function esc(s){return String(s).replace(/[&<>"]/g,function(m){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m];});}
+
+  /* ---- sharing simulator ---- */
+  var modes = {
+    public:{lock:"🔗", url:"share.northwind.dev/p/7f3k9q2mZx1a",
+      who:"Anyone who has the link",
+      login:"They click and read — no login, install nothing",
+      seats:"0 seats — nobody authenticates",
+      note:"Unguessable, so it's a <b>capability link</b>, not privacy. Served noindex, and still fully sandboxed."},
+    restricted:{lock:"🔒", url:"share.northwind.dev/d/rp92xk",
+      who:"Only the emails you name",
+      login:"One-time code to their inbox — no account to create",
+      seats:"A seat only for people who keep coming back",
+      note:"Add a client's CFO to a single report <b>without inventing a portal</b> for two people — grants are additive, never silently subtractive."},
+    private:{lock:"🔒", url:"share.northwind.dev/d/rp92xk",
+      who:"Only you, the owner",
+      login:"—",
+      seats:"0",
+      note:"Stage a document inside a client's portal they <b>can't see yet</b> — even if a link was already minted. Draft in place, safely."}
+  };
+  var seg=document.getElementById("seg");
+  var elUrl=document.getElementById("simurl"),elLock=document.getElementById("simlock"),
+      elWho=document.getElementById("simwho"),elLogin=document.getElementById("simlogin"),
+      elSeats=document.getElementById("simseats"),elNote=document.getElementById("simnote");
+  function setMode(k){
+    var m=modes[k];
+    Array.prototype.forEach.call(seg.children,function(b){b.classList.toggle("active",b.dataset.mode===k);});
+    elLock.textContent=m.lock; elUrl.textContent=m.url;
+    elWho.textContent=m.who; elLogin.textContent=m.login; elSeats.textContent=m.seats;
+    elNote.innerHTML=m.note;
+  }
+  Array.prototype.forEach.call(seg.children,function(b){ b.addEventListener("click",function(){setMode(b.dataset.mode);}); });
+  setMode("public");
+
+  /* ---- portal read-back demo ---- */
+  var docs=[
+    {id:"q3", name:"Q3 Strategy Review", dt:"Sep 2025"},
+    {id:"v2", name:"V2 Migration Plan", dt:"Nov 2025"},
+    {id:"cost", name:"Infra Cost Model", dt:"Dec 2025"},
+    {id:"sec", name:"Security Audit", dt:"Jan 2026"},
+    {id:"onb", name:"Team Onboarding", dt:"Feb 2026"},
+    {id:"road", name:"2026 Roadmap", dt:"Mar 2026"}
+  ];
+  var queries=[
+    {q:"What did we decide about the V2 migration?", hit:"v2", term:"V2 migration",
+      snip:"Decided on a phased cutover: stand up a read-replica first, dual-write for two weeks, then flip. Rollback window held at 30 days."},
+    {q:"What were the Q3 priorities?", hit:"q3", term:"Q3 priorities",
+      snip:"Three bets: cut infra spend 20%, ship the portal MVP, and land two lighthouse clients before year-end."},
+    {q:"How much are we spending on infrastructure?", hit:"cost", term:"infrastructure spend",
+      snip:"Baseline ~$4.1k/mo. The Cloudflare move drops recurring hosting to near zero, leaving compute as the main remaining line."}
+  ];
+  var pdocs=document.getElementById("pdocs"), qbtns=document.getElementById("qbtns"), con=document.getElementById("console");
+  docs.forEach(function(d){ var s=document.createElement("span"); s.className="pdoc"; s.dataset.id=d.id;
+    s.innerHTML=esc(d.name)+'<span class="dt">'+esc(d.dt)+'</span>'; pdocs.appendChild(s); });
+  function runQuery(i){
+    var qy=queries[i];
+    Array.prototype.forEach.call(qbtns.children,function(b,idx){b.classList.toggle("active",idx===i);});
+    Array.prototype.forEach.call(pdocs.children,function(s){s.classList.toggle("hit",s.dataset.id===qy.hit);});
+    var hit=docs.filter(function(d){return d.id===qy.hit;})[0];
+    con.innerHTML=
+      '<div class="call">→ search_portal("Northwind Labs", "'+esc(qy.term)+'")</div>'+
+      '<div class="ret">← 1 match &nbsp;·&nbsp; read_document("'+esc(hit.id)+'")</div>'+
+      '<div class="ret" style="margin-top:10px">← <span class="doc">'+esc(hit.name)+'</span> &nbsp;('+esc(hit.dt)+')</div>'+
+      '<div class="snip">'+esc(qy.snip)+'</div>';
+  }
+  queries.forEach(function(qy,i){ var b=document.createElement("button"); b.className="qbtn"; b.textContent=qy.q;
+    b.addEventListener("click",function(){runQuery(i);}); qbtns.appendChild(b); });
+  runQuery(0);
+})();
+</script>
+</body>
+</html>

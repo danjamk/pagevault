@@ -2,7 +2,7 @@ import { mintCapability, verifyCapability } from "./capability.js";
 import type { Env } from "./env.js";
 import { renderPdf } from "./pdf.js";
 import type { DocMeta } from "./store.js";
-import { getDoc, getMeta } from "./store.js";
+import { getDoc, getMeta, getRawSource } from "./store.js";
 
 /**
  * The iframe sandbox.
@@ -85,7 +85,11 @@ export async function handleRender(request: Request, env: Env, id: string): Prom
 
   if (params.get("download") === "1") {
     const meta = await getMeta(env, id);
-    return new Response(source, {
+    // A markdown doc stores rendered HTML at `doc:` but downloads as the original `.md`
+    // (#46) — else the bytes would contradict the `.md` filename `rawFilename` produces.
+    // `?? source` covers HTML docs and any pre-#46 markdown that has no `raw:` companion.
+    const bytes = meta?.sourceKind === "markdown" ? ((await getRawSource(env, id)) ?? source) : source;
+    return new Response(bytes, {
       headers: {
         "Content-Type": "application/octet-stream",
         "Content-Disposition": contentDisposition(rawFilename(meta, id)),
