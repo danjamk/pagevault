@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-07-17
+
+A readable console, the `pagevault` CLI, and push-button production deploys.
+
 ### Added
 - **A console you can read at a glance** ([#37](https://github.com/danjamk/pagevault/issues/37)) —
   every document row now leads with a *reach* icon that names how far it can travel: only you,
