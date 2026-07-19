@@ -7,6 +7,22 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-07-19
+
+Walk away with everything: a browsable, human-readable export of a whole deployment.
+
+### Added
+- **`pagevault export` / `make export`** — walk away with everything. Writes a browsable folder
+  (or a zip): an `index.html` that links it all, an `ACCESS.md` that spells out who can see what,
+  and one folder per portal with each document as a standalone file — HTML as `.html`, markdown as
+  its original `.md`. `make export` auto-targets the deployment this clone deployed (URL from
+  `.pagevault.json`, bearer from `.env.local`) and zips by default, so `make deploy && make export`
+  is the whole ceremony; `PORTAL=`, `DRAFTS=1`, `NOZIP=1`, `OUT=` tune it. The `pagevault export`
+  CLI does the same against any deployment you hold a token for. It's intentionally lossy — no ids,
+  no `/p/` tokens — and **not** a restore format (that's `make backup`). Owner-only drafts are
+  excluded unless you ask. A new owner-scoped `GET /api/docs/{id}/raw` returns document bytes
+  (#35).
+
 ## [0.6.0] — 2026-07-19
 
 The owner console adopts the Claude Design system — a new brand, a dark theme, and a

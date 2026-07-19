@@ -24,9 +24,11 @@ import {
   type PortalKind,
   deleteDoc,
   deletePortal,
+  getDoc,
   getMembers,
   getMeta,
   getPortal,
+  getRawSource,
   isValidSlug,
   listDocs,
   listPortals,
@@ -86,6 +88,12 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       if (request.method === "POST") return await createDoc(request, env);
       if (request.method === "GET") return await listDocsHandler(request, env);
       return fail(405, "method_not_allowed", `${request.method} not allowed on /api/docs`);
+    }
+
+    const rawDoc = /^\/docs\/([^/]+)\/raw$/.exec(rest);
+    if (rawDoc?.[1]) {
+      if (request.method === "GET") return await getDocRawHandler(env, rawDoc[1]);
+      return fail(405, "method_not_allowed", `${request.method} not allowed on ${pathname}`);
     }
 
     const doc = /^\/docs\/([^/]+)$/.exec(rest);
@@ -166,6 +174,28 @@ async function getDocHandler(env: Env, id: string): Promise<Response> {
   const meta = await getMeta(env, id);
   if (!meta) return fail(404, "not_found", `No such document: ${id}`);
   return json(meta);
+}
+
+/**
+ * The document body, as bytes — what `pagevault export` (#35) writes to a file. Returns the
+ * ORIGINAL source: the `.md` for a markdown document, the stored HTML for an html one
+ * (`getRawSource ?? getDoc`), so the extension the CLI picks from `sourceKind` round-trips
+ * honestly. Owner-scoped like every `/api` route; `canView` is not consulted because the
+ * bearer already IS the owner, who sees everything. No KV write, but never cached — the body
+ * is the private artifact.
+ */
+async function getDocRawHandler(env: Env, id: string): Promise<Response> {
+  const meta = await getMeta(env, id);
+  if (!meta) return fail(404, "not_found", `No such document: ${id}`);
+
+  const body = (await getRawSource(env, id)) ?? (await getDoc(env, id));
+  if (body === null) return fail(404, "not_found", `No stored body for document: ${id}`);
+
+  const contentType = meta.sourceKind === "markdown" ? "text/markdown" : "text/html";
+  return new Response(body, {
+    status: 200,
+    headers: { "Content-Type": `${contentType}; charset=utf-8`, "Cache-Control": "private, no-store" },
+  });
 }
 
 async function deleteDocHandler(env: Env, id: string): Promise<Response> {

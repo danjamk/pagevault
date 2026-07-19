@@ -625,3 +625,49 @@ describe("GET /api/docs/{id}", () => {
     expect(await env.PAGEVAULT.get(`idx:default:${id}`)).toBeNull();
   });
 });
+
+describe("GET /api/docs/{id}/raw — the export body (#35)", () => {
+  async function newDoc(over: Record<string, unknown> = {}) {
+    const res = await publish(aDoc(over));
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  it("returns the stored HTML bytes for an html document", async () => {
+    const id = await newDoc({ html: "<!doctype html><h1>Q3</h1>" });
+    const res = await SELF.fetch(`${HOST}/api/docs/${id}/raw`, { headers: auth() });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toContain("text/html");
+    expect(await res.text()).toBe("<!doctype html><h1>Q3</h1>");
+  });
+
+  it("returns the ORIGINAL markdown source, not the rendered HTML", async () => {
+    // The whole point of extension-follows-sourceKind: a `.md` export must be the markdown the
+    // author wrote, so it round-trips. getRawSource(id) beats getDoc(id) (the rendered HTML).
+    const id = await newDoc({ title: "Notes", html: "# Heading\n\ntext", sourceKind: "markdown" });
+    const res = await SELF.fetch(`${HOST}/api/docs/${id}/raw`, { headers: auth() });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toContain("text/markdown");
+    const body = await res.text();
+    expect(body).toBe("# Heading\n\ntext");
+    expect(body).not.toContain("<h1"); // definitely not the rendered form
+  });
+
+  it("404s on an unknown id", async () => {
+    const res = await SELF.fetch(`${HOST}/api/docs/doesnotexist/raw`, { headers: auth() });
+    expect(res.status).toBe(404);
+  });
+
+  it("🔴 401s without a bearer token — the body is not a new open door", async () => {
+    const id = await newDoc();
+    const res = await SELF.fetch(`${HOST}/api/docs/${id}/raw`);
+    expect(res.status).toBe(401);
+  });
+
+  it("405s on a write method", async () => {
+    const id = await newDoc();
+    const res = await SELF.fetch(`${HOST}/api/docs/${id}/raw`, { method: "POST", headers: auth() });
+    expect(res.status).toBe(405);
+  });
+});

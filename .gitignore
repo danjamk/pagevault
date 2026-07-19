@@ -31,3 +31,6 @@ worker/wrangler.generated.jsonc
 
 # KV backups (`make backup`). Contains your documents and portal data — keep it out of git.
 pagevault-backup-*.json
+
+# Exports (`make export` / `pagevault export`). Your documents — keep them out of git.
+pagevault-export-*

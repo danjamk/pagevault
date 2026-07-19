@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install setup dev demo status test test-security check-sandbox check login logout preflight provision deploy verify health logs destroy backup restore
+.PHONY: help install setup dev demo status test test-security check-sandbox check login logout preflight provision deploy verify health logs destroy backup restore export
 
 # Written by `make provision`. Gitignored — it holds your email, team name, AUD tags and
 # KV id, and this is a public repo.
@@ -98,9 +98,16 @@ logs: ## Tail the deployed Worker
 destroy: ## Tear the deployment down — Worker, DNS, Access apps, group, and KV data
 	@$(NVM) && node scripts/destroy.mjs
 
-##@ Data (KV)
+##@ Data
 backup: ## Snapshot the KV namespace to a JSON file (OUT=path, KV=id optional)
 	@$(NVM) && node scripts/kv-backup.mjs $(if $(OUT),--out $(OUT),) $(if $(KV),--kv $(KV),)
 
 restore: ## Restore a backup into the KV namespace (make restore FILE=backup.json [KV=id] [FORCE=1])
 	@$(NVM) && node scripts/kv-restore.mjs --in "$(FILE)" $(if $(KV),--kv $(KV),) $(if $(FORCE),--force,)
+
+export: ## Walk away with everything: a zipped, browsable dump of your deployment (PORTAL=slug DRAFTS=1 NOZIP=1 OUT=dir)
+# Auto-targets THIS clone's deployment — URL from .pagevault.json, bearer from .env.local — so
+# `make deploy && make export` is the whole ceremony, no login. Zips by default; NOZIP=1 keeps
+# the folder. (For someone else's deployment, use the `pagevault export` CLI instead.)
+	@$(NVM) && node scripts/export.mjs $(if $(OUT),--out $(OUT),) \
+		$(if $(PORTAL),--portal $(PORTAL),) $(if $(DRAFTS),--include-drafts,) $(if $(NOZIP),--no-zip,)

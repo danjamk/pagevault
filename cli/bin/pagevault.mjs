@@ -12,6 +12,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { api, requireConfig, waitReadable, CONFIG_PATH, PvError } from "../lib/client.mjs";
 import { parseArgs, splitList, deriveTitle, truncate, table } from "../lib/format.mjs";
+import { buildExport } from "../lib/export.mjs";
 
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
@@ -38,6 +39,8 @@ async function main() {
       return share(positional, flags);
     case "rm":
       return remove(positional, flags);
+    case "export":
+      return exportTree(positional, flags);
     case "login":
       return login(flags);
     default:
@@ -139,6 +142,25 @@ async function remove(pos, flags) {
   note(`Deleted ${id}.`);
 }
 
+async function exportTree(pos, flags) {
+  const cfg = requireConfig();
+  const outDir = pos[0] || `./pagevault-export-${new Date().toISOString().slice(0, 10)}`;
+
+  const summary = await buildExport(
+    cfg,
+    {
+      outDir,
+      portal: typeof flags.portal === "string" ? flags.portal : undefined,
+      zip: flags.zip === true,
+      includeDrafts: flags["include-drafts"] === true,
+    },
+    note, // progress → stderr
+  );
+
+  // The one thing a script wants → stdout: the artifact path (the .zip if we made one).
+  out(summary.zipPath || summary.outDir);
+}
+
 async function login(flags) {
   const url = typeof flags.url === "string" ? flags.url.replace(/\/+$/, "") : "";
   const token = typeof flags.token === "string" ? flags.token : "";
@@ -171,9 +193,11 @@ Usage:
   pagevault list [--portal s] [--tag t] [--json]
   pagevault share <portal> <email> [email …]
   pagevault rm <id> [--yes]
+  pagevault export [dir] [--portal s] [--include-drafts] [--zip]
 
 Config: PAGEVAULT_URL / PAGEVAULT_API_TOKEN, or ~/.pagevault/config.json (via login).
-On success, publish prints only the URL to stdout:  pagevault publish report.html | pbcopy`);
+On success, publish prints only the URL to stdout:  pagevault publish report.html | pbcopy
+Export writes a browsable folder (index.html + one folder per portal); its path is printed to stdout.`);
 }
 
 main().catch((err) => {
