@@ -202,3 +202,29 @@ describe("browser upload control (#6)", () => {
     expect(meta.sourceKind).toBe("markdown");
   });
 });
+
+describe("link-first sharing + public-by-default (#65 / ADR-011)", () => {
+  // The panel is built client-side on expand, so these assert the embedded script's copy/logic.
+  it("the panel leads with a share link, a contextual reach selector, and the honesty note", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain("Share link"); // the always-present hero link
+    expect(body).toContain("Anyone with the link"); // default reach
+    expect(body).toContain("A link is a key"); // forwardable-link honesty note
+    expect(body).toContain("opens for no one yet"); // explicit draft dormancy
+  });
+
+  it("drops the old generate-a-link framing", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).not.toContain("Make public");
+    expect(body).not.toContain("Public link</span>"); // the old "Public link: None" row
+  });
+
+  it("🔴 upload defaults to public — a keep-internal opt-out, not an opt-in", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain('id="up-internal"');
+    expect(body).not.toContain('id="up-public"');
+    // Public is the default: body.public is set UNLESS internal is checked.
+    expect(body).toContain("upInternal.checked");
+    expect(body).toContain("Publish &amp; copy link");
+  });
+});

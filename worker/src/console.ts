@@ -215,6 +215,31 @@ function page(session: string, nonce: string, owner: string, version: string, or
   .donerow code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78rem; word-break:break-all; background:var(--paper); border:1px solid var(--line); border-radius:4px; padding:.15rem .4rem; }
   .done-ok { display:flex; align-items:center; gap:.4rem; color:var(--gated); font-weight:600; font-size:.9rem; }
   .done-ok .icon { color:var(--gated); }
+  /* Link-first sharing panel (#65 / ADR-011) */
+  button.btn.primary, a.btn.primary { background:var(--blue); color:#fff; border-color:var(--blue); }
+  button.btn.primary:hover, a.btn.primary:hover { filter:brightness(1.08); background:var(--blue); }
+  .sharebar { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; background:var(--card); border:1px solid var(--line); border-radius:7px; padding:.5rem .6rem; }
+  .sharebar .lb { display:inline-flex; align-items:center; gap:.35rem; color:var(--muted); font-size:.68rem; text-transform:uppercase; letter-spacing:.05em; flex:none; }
+  .sharebar code { flex:1 1 12rem; min-width:0; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78rem; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:none; border:0; padding:0; }
+  .sharebar.dim code { color:var(--muted); text-decoration:line-through; }
+  .reason { display:flex; align-items:flex-start; gap:.45rem; font-size:.82rem; margin:.6rem 0 .1rem; }
+  .reason .icon { margin-top:.15rem; }
+  .reason.open .icon { color:var(--open); } .reason.gated .icon { color:var(--gated); } .reason.closed .icon { color:var(--closed); }
+  .reason .sub { color:var(--muted); }
+  .reachsel { display:flex; gap:.4rem; margin:.6rem 0 .1rem; flex-wrap:wrap; }
+  .ropt { display:flex; align-items:center; gap:.4rem; border:1px solid var(--line); border-radius:7px; padding:.35rem .6rem; cursor:pointer; background:var(--card); font:inherit; font-size:.8rem; color:var(--ink); }
+  .ropt:hover { background:var(--paper); }
+  .ropt .icon { color:var(--muted); }
+  .ropt[aria-pressed="true"] { border-color:var(--blue); background:var(--gated-bg); font-weight:600; }
+  .ropt[aria-pressed="true"] .icon { color:var(--blue); }
+  .ropt[data-reach="open"][aria-pressed="true"] { border-color:var(--open); background:var(--open-bg); }
+  .ropt[data-reach="open"][aria-pressed="true"] .icon { color:var(--open); }
+  .keynote { display:flex; align-items:flex-start; gap:.4rem; font-size:.75rem; color:var(--muted); background:var(--open-bg); border:1px solid #e6cabf; border-radius:6px; padding:.4rem .55rem; margin:.5rem 0 .1rem; }
+  .keynote .icon { color:var(--open); margin-top:.1rem; }
+  .draftbar { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; background:var(--closed-bg); border:1px solid #d8c9a6; border-radius:7px; padding:.5rem .6rem; font-size:.82rem; margin-bottom:.5rem; }
+  .draftbar .icon { color:var(--closed); flex:none; }
+  .subrow { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin-top:.75rem; padding-top:.7rem; border-top:1px solid #efe7d4; }
+  .subrow .lb { color:var(--muted); font-size:.78rem; display:inline-flex; align-items:center; gap:.35rem; }
   [hidden] { display:none !important; }
 </style>
 </head>
@@ -318,9 +343,9 @@ function page(session: string, nonce: string, owner: string, version: string, or
         <select id="up-portal"></select>
       </div>
       <div class="field">
-        <label>Visibility</label>
-        <label class="checkrow"><input type="checkbox" id="up-public"><span>Also mint a public link &mdash; anyone with the URL, no login</span></label>
-        <div class="warnline" id="up-pubwarn" hidden><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>A public link is a <strong>capability URL, not privacy</strong> &mdash; anyone it is forwarded to can open it, with no login.</div>
+        <label>Who can open it</label>
+        <label class="checkrow"><input type="checkbox" id="up-internal"><span>Keep it internal &mdash; only who the portal already allows, no public link</span></label>
+        <div class="warnline" id="up-pubwarn"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>By default anyone with the link can open it, no login &mdash; a <strong>capability URL, not privacy</strong>. Check the box to keep it to the portal.</div>
       </div>
       <div class="field">
         <label for="up-emails">Share with</label>
@@ -336,7 +361,7 @@ function page(session: string, nonce: string, owner: string, version: string, or
     <div class="dlg-body" id="up-done" hidden></div>
     <div class="dlg-foot" id="up-foot">
       <button type="button" class="btn" id="up-cancel">Cancel</button>
-      <button type="submit" class="btn" id="up-publish">Publish</button>
+      <button type="submit" class="btn primary" id="up-publish">Publish &amp; copy link</button>
     </div>
     <div class="dlg-foot" id="up-donefoot" hidden>
       <button type="button" class="btn" id="up-again">Publish another</button>
@@ -419,54 +444,84 @@ function page(session: string, nonce: string, owner: string, version: string, or
   // The sharing panel, built from a full-meta read (publicToken + extraEmails, absent from the
   // listing). The notice arg renders a one-line banner — used to surface a group-sync that did
   // not fully succeed after a grant.
+  // The sharing panel (ADR-011). The link is always the hero; reach is one contextual choice
+  // that defaults to the most open. Every action reuses the existing session-bearer mutations.
   function detailHtml(m, portal, notice) {
     const kind = portal.kind;
-    const href = viewPath(kind, portal.slug, m.id);
+    const isPublicPortal = kind === "public";
+    const hasPub = !!m.publicToken;
+    const draft = !!m.ownerOnly;
+    const link = shareUrl(m, portal);
     const parts = [];
     if (notice) parts.push('<div class="warnline">' + ico("alert") + esc(notice) + '</div>');
 
+    // A draft opens for no one — say so and lead with Publish, instead of a live-looking Copy.
+    if (draft) {
+      parts.push(
+        '<div class="draftbar">' + ico("alert") +
+        '<span><strong>Draft</strong> — opens for no one yet, even people you have shared it with. Publish to make the link live.</span>' +
+        '<span class="grow"></span>' +
+        '<button class="btn primary" data-act="toggle" data-id="' + esc(m.id) + '" data-owneronly="1">Publish</button></div>'
+      );
+    }
+
+    // Always a link, never a "None" state. Dimmed while a draft.
     parts.push(
-      '<div class="drow"><span class="dlabel">' + ico(kind === "public" ? "globe" : "lock") + 'This document</span>' +
-      '<a class="btn" data-role="open" href="' + esc(href) + '" target="_blank" rel="noopener">Open &#8599;</a>' +
-      '<button class="btn" data-act="copy" data-url="' + esc(shareUrl(m, portal)) + '">' + ico("copy") + 'Copy link</button>' +
-      '<button class="btn" data-act="toggle" data-id="' + esc(m.id) + '" data-owneronly="' + (m.ownerOnly ? "1" : "0") + '">' + (m.ownerOnly ? "Publish" : "Make draft") + '</button></div>'
+      '<div class="sharebar' + (draft ? ' dim' : '') + '"><span class="lb">' + ico("link") + 'Share link</span>' +
+      '<code>' + esc(link) + '</code>' +
+      '<button class="btn" data-act="copy" data-url="' + esc(link) + '">' + ico("copy") + 'Copy</button>' +
+      '<a class="btn" data-role="open" href="' + esc(link) + '" target="_blank" rel="noopener">Open &#8599;</a></div>'
     );
 
-    if (kind !== "public") {
-      if (m.publicToken) {
-        const purl = location.origin + "/p/" + m.publicToken;
+    if (isPublicPortal) {
+      parts.push('<div class="reason open">' + ico("globe") + '<span><b>Anyone with this link can open it.</b> <span class="sub">This portal is public — everything in it is readable by anyone with the link, so per-person sharing does not apply.</span></span></div>');
+    } else {
+      // Plain-language reach, reflecting current state.
+      const nExtra = (m.extraEmails || []).length;
+      let rTier, rIcon, rTitle, rSub;
+      if (draft) { rTier = "closed"; rIcon = "lock"; rTitle = "Only you — this is a draft"; rSub = "Publish above to let the link open for anyone else."; }
+      else if (hasPub) { rTier = "open"; rIcon = "globe"; rTitle = "Anyone with this link can open it"; rSub = "No login, no account — the simplest way to hand someone a report."; }
+      else if (kind === "restricted") { rTier = "gated"; rIcon = "users"; rTitle = "Your team can open it, after signing in"; rSub = "Portal members only — the link is not forwardable to outsiders."; }
+      else if (nExtra) { rTier = "gated"; rIcon = "users"; rTitle = "You and " + nExtra + " specific " + (nExtra === 1 ? "person" : "people") + " can open it"; rSub = "They sign in first. Add or remove people below, or open it to anyone with the link."; }
+      else { rTier = "closed"; rIcon = "lock"; rTitle = "Only you can open it"; rSub = "Nothing is shared yet — choose a wider reach, or add a person below."; }
+      parts.push('<div class="reason ' + rTier + '">' + ico(rIcon) + '<span><b>' + esc(rTitle) + '</b> <span class="sub">' + esc(rSub) + '</span></span></div>');
+
+      // Reach is one choice: Anyone-with-link (default) vs portal-governed. The second option's
+      // meaning comes from the portal — team for restricted, you for private. Moot for a draft.
+      if (!draft) {
+        const otherLabel = kind === "restricted" ? "My team" : "Only me";
+        const otherIcon = kind === "restricted" ? "users" : "lock";
         parts.push(
-          '<div class="drow"><span class="dlabel">' + ico("link") + 'Public link</span>' +
-          '<code>' + esc(purl) + '</code>' +
-          '<button class="btn" data-act="copy" data-url="' + esc(purl) + '">' + ico("copy") + 'Copy</button>' +
-          '<button class="btn danger" data-act="revoke" data-id="' + esc(m.id) + '">Revoke</button></div>'
+          '<div class="reachsel" role="group" aria-label="Who can open this">' +
+          '<button class="ropt" data-reach="open"' + (hasPub ? ' aria-pressed="true"' : ' data-act="mint" data-id="' + esc(m.id) + '"') + '>' + ico("globe") + 'Anyone with the link</button>' +
+          '<button class="ropt" data-reach="other"' + (hasPub ? ' data-act="revoke" data-id="' + esc(m.id) + '"' : ' aria-pressed="true"') + '>' + ico(otherIcon) + esc(otherLabel) + '</button>' +
+          '</div>'
         );
-      } else {
-        parts.push(
-          '<div class="drow"><span class="dlabel">' + ico("link") + 'Public link</span>' +
-          '<span class="dhint" style="margin:0">None.</span>' +
-          '<button class="btn open" data-act="mint" data-id="' + esc(m.id) + '">' + ico("globe") + 'Make public</button></div>'
-        );
+        // The forwardable-link trade — shown whenever the public link is live, never hidden.
+        if (hasPub) {
+          parts.push('<div class="keynote">' + ico("alert") + '<span>A link is a key: anyone it is forwarded to can open it too. Fine for most work; worth knowing for the sensitive stuff.</span></div>');
+        }
       }
 
-      parts.push('<hr>');
-      parts.push('<div class="dlabel" style="min-width:0">' + ico("mail") + 'Also shared with</div>');
-      parts.push('<div class="dhint">Specific people, added to this document only. Additive — it never removes anyone the portal already lets in.</div>');
+      // Named individuals — portal-level access for specific people, additive.
+      parts.push('<div class="subrow"><span class="lb">' + ico("mail") + 'Also give specific people access</span></div>');
+      parts.push('<div class="dhint">Added to this document only. Additive — it never removes anyone the portal already lets in.</div>');
       const emails = m.extraEmails || [];
       parts.push(emails.length
         ? '<ul class="chips">' + emails.map((e) =>
             '<li class="chip">' + esc(e) + '<button class="x" data-act="unshare" data-id="' + esc(m.id) + '" data-email="' + esc(e) + '" title="remove">' + ico("x") + '</button></li>'
           ).join("") + '</ul>'
-        : '<div class="dhint">No extra people yet.</div>');
+        : '<div class="dhint">No one specific yet.</div>');
       parts.push(
         '<div class="addrow"><input type="email" placeholder="email to add" data-email-for="' + esc(m.id) + '">' +
         '<button class="btn" data-act="share" data-id="' + esc(m.id) + '">Add</button></div>'
       );
-    } else {
-      parts.push('<div class="dhint">This portal is public — everything in it is readable by anyone with the link, so per-person sharing does not apply.</div>');
     }
 
-    parts.push('<div class="foot"><span class="grow"></span><button class="btn danger" data-act="delete" data-id="' + esc(m.id) + '" data-title="' + esc(m.title) + '">Delete document</button></div>');
+    // "Make draft" sits quietly by Delete when not already a draft (Publish lives in the draftbar).
+    parts.push('<div class="foot"><span class="grow"></span>' +
+      (draft ? '' : '<button class="btn" data-act="toggle" data-id="' + esc(m.id) + '" data-owneronly="0">Make draft</button>') +
+      '<button class="btn danger" data-act="delete" data-id="' + esc(m.id) + '" data-title="' + esc(m.title) + '">Delete document</button></div>');
     return parts.join("");
   }
 
@@ -593,11 +648,12 @@ function page(session: string, nonce: string, owner: string, version: string, or
         if (a === "expand") { await toggle(id); return; }
         if (a === "copy") { copyBtn(actEl); return; }
         if (a === "mint") {
-          if (!confirm("Make public? This mints an unguessable link anyone can open — no login, no Access seat.")) return;
+          // Widening to the default reach — no confirm; it is the expected action (ADR-011).
           replaceItem(id, await patch(id, { makePublic: true })); return;
         }
         if (a === "revoke") {
-          if (!confirm("Revoke the public link? Anyone holding it loses access. The document itself stays.")) return;
+          // Narrowing removes access someone may already hold — this one still asks.
+          if (!confirm("Only your team / you from now on? Anyone currently holding the public link loses access. The document itself stays.")) return;
           replaceItem(id, await patch(id, { makePublic: false })); return;
         }
         if (a === "toggle") {
@@ -694,7 +750,7 @@ function page(session: string, nonce: string, owner: string, version: string, or
   const upFileLabel = document.getElementById("up-filelabel");
   const upTitle = document.getElementById("up-title");
   const upPortalSel = document.getElementById("up-portal");
-  const upPublic = document.getElementById("up-public");
+  const upInternal = document.getElementById("up-internal");
   const upPubWarn = document.getElementById("up-pubwarn");
   const upRelWarn = document.getElementById("up-relwarn");
   let uploadHtml = null;
@@ -737,13 +793,14 @@ function page(session: string, nonce: string, owner: string, version: string, or
   upDrop.addEventListener("dragover", (e) => { e.preventDefault(); upDrop.classList.add("drag"); });
   upDrop.addEventListener("dragleave", () => upDrop.classList.remove("drag"));
   upDrop.addEventListener("drop", (e) => { e.preventDefault(); upDrop.classList.remove("drag"); takeFile(e.dataTransfer.files[0]); });
-  upPublic.addEventListener("change", () => { upPubWarn.hidden = !upPublic.checked; });
+  // Public is the default (ADR-011); the forwardable-link note shows until you opt into internal.
+  upInternal.addEventListener("change", () => { upPubWarn.hidden = upInternal.checked; });
   dlgUpload.addEventListener("click", (e) => { const c = e.target.closest('[data-act="copy"]'); if (c) { e.preventDefault(); copyBtn(c); } });
 
   function openUpload() {
     document.getElementById("form-upload").reset();
     uploadHtml = null; uploadKind = "html";
-    upErr.hidden = true; upRelWarn.hidden = true; upPubWarn.hidden = true;
+    upErr.hidden = true; upRelWarn.hidden = true; upPubWarn.hidden = false;
     upDrop.classList.remove("has-file", "drag");
     upFileLabel.innerHTML = 'Drop an <code>.html</code> or <code>.md</code> file here, or click to choose';
     const slugs = Object.keys(PORTALS);
@@ -766,11 +823,15 @@ function page(session: string, nonce: string, owner: string, version: string, or
 
   function showUploadDone(res) {
     const link = res.publicUrl || res.url;
+    // Best-effort auto-copy — clipboard access can lapse after the publish round-trip, so the
+    // primary Copy button below is the guaranteed path.
+    try { navigator.clipboard && navigator.clipboard.writeText(link); } catch (e) {}
     const done = document.getElementById("up-done");
+    const wide = !res.ownerOnly && !!res.publicUrl;
     done.innerHTML =
-      '<div class="donerow"><div class="done-ok">' + ico("globe") + 'Published to ' + esc(res.portal) + '</div>' +
+      '<div class="donerow"><div class="done-ok">' + ico(wide ? "globe" : "lock") + 'Published to ' + esc(res.portal) + (wide ? ' — anyone with the link can open it' : '') + '</div>' +
       '<div class="lnk"><code>' + esc(link) + '</code>' +
-      '<button type="button" class="btn" data-act="copy" data-url="' + esc(link) + '">' + ico("copy") + 'Copy link</button>' +
+      '<button type="button" class="btn primary" data-act="copy" data-url="' + esc(link) + '">' + ico("copy") + 'Copy link</button>' +
       '<a class="btn" href="' + esc(link) + '" target="_blank" rel="noopener">Open &#8599;</a></div></div>';
     document.getElementById("up-body").hidden = true;
     done.hidden = false;
@@ -785,7 +846,8 @@ function page(session: string, nonce: string, owner: string, version: string, or
     const title = upTitle.value.trim();
     if (!title) { showUpErr("A title is required."); return; }
     const body = { title, html: uploadHtml, portal: upPortalSel.value, sourceKind: uploadKind };
-    if (upPublic.checked) body.public = true;
+    // Public by default (ADR-011) — a shareable link just happens; "keep internal" opts out.
+    if (!upInternal.checked) body.public = true;
     const emails = parseList(document.getElementById("up-emails").value);
     if (emails.length) body.emails = emails;
     const tags = parseList(document.getElementById("up-tags").value);
