@@ -7,6 +7,35 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-07-19
+
+The owner console gets author-side controls and a link-first sharing model.
+
+### Added
+- **Create portals from the console** ([#43](https://github.com/danjamk/pagevault/issues/43)) —
+  a "New portal" dialog (name, slug, kind, description) posts to the existing `POST /api/portals`.
+  Each kind's meaning is stated at the point of choice — Restricted spelled out as the only kind
+  whose member list actually grants access — because picking wrong is a confidentiality decision,
+  not a preference. Slug validation is surfaced from the server, not reimplemented. Reuses the
+  console's short-lived session token, so no new server or auth surface.
+- **Browser upload** ([#6](https://github.com/danjamk/pagevault/issues/6)) — drag-drop or pick an
+  `.html` or `.md` file and publish from a device with no terminal. The kind is detected from the
+  extension, so markdown renders instead of showing as raw source. Two warnings live in the UI, not
+  just the docs: relative references will 404 for the recipient (single file, no companion assets),
+  and a public link is a capability URL, not privacy.
+- **Link-first sharing, public by default** ([#65](https://github.com/danjamk/pagevault/issues/65),
+  [ADR-011](docs/adr/ADR-011-public-by-default-console.md)) — the sharing panel now leads with the
+  share link, always present and copyable, and reach is one contextual choice that defaults to
+  "anyone with the link" (the portal-governed option — your team, or only you — is one click away).
+  A draft says plainly that it opens for no one, rather than handing you a live-looking copy on a
+  dead link. The browser upload defaults to public too; "keep internal" is the opt-out. `canView()`,
+  the capability-token model, and the CLI/MCP defaults are unchanged — this is a console default and
+  presentation decision.
+
+### Changed
+- Minting a public link from the console no longer asks for confirmation — it is the expected default
+  now. Revoking (which removes access someone may already hold) still confirms.
+
 ## [0.4.0] — 2026-07-18
 
 Markdown documents render.
