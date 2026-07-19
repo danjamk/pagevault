@@ -510,6 +510,27 @@ ${ICON_DEFS}
     </div>
   </form>
 </dialog>
+<dialog id="dlg-edit" aria-labelledby="dlg-edit-title">
+  <form id="form-edit" method="dialog">
+    <div class="dlg-head" id="dlg-edit-title"><svg class="icon" aria-hidden="true"><use href="#i-edit"/></svg>Portal settings</div>
+    <div class="dlg-body">
+      <div class="field">
+        <label for="ep-name">Name</label>
+        <input type="text" id="ep-name" placeholder="Acme Corp" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="ep-desc">Description <span class="hint">(optional)</span></label>
+        <input type="text" id="ep-desc" placeholder="One line, for your own reference" autocomplete="off">
+      </div>
+      <p class="hint">The slug and access kind aren&rsquo;t editable here &mdash; the slug is the portal&rsquo;s URL, and changing who can reach a portal is a separate, deliberate step.</p>
+      <div class="dlg-err" id="ep-err" role="alert" hidden></div>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn" id="ep-cancel">Cancel</button>
+      <button type="submit" class="btn primary" id="ep-save">Save</button>
+    </div>
+  </form>
+</dialog>
 <dialog id="dlg-upload" aria-labelledby="dlg-upload-title">
   <form id="form-upload" method="dialog">
     <div class="dlg-head" id="dlg-upload-title"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>New document</div>
@@ -803,11 +824,12 @@ ${ICON_DEFS}
           : "Your team can browse this portal after signing in. Not forwardable to outsiders.") +
         '">' + ico("link") + 'Copy portal link</button>'
       : '';
+    const editBtn = '<button class="btn sm" data-act="edit-portal" data-portal="' + esc(p.slug) + '" title="Edit name and description">' + ico("edit") + 'Edit</button>';
     const head =
       '<div class="phead"><div class="phead-top"><div class="min0">' +
         '<div class="titrow"><h1>' + esc(p.name) + '</h1><span class="slug mono">/' + esc(p.slug) + '</span></div>' +
         (p.description ? '<p>' + esc(p.description) + '</p>' : '') +
-      '</div><div class="base"><span class="lb">Base access</span>' + badge(r) + shareBtn + '</div></div>' +
+      '</div><div class="base"><span class="lb">Base access</span>' + badge(r) + shareBtn + editBtn + '</div></div>' +
       memberEditor(p) + '</div>';
 
     let list;
@@ -965,6 +987,7 @@ ${ICON_DEFS}
           if (PORTALS[actEl.dataset.portal]) PORTALS[actEl.dataset.portal].members = res.members || [];
           renderMain(); return;
         }
+        if (a === "edit-portal") { openEdit(actEl.dataset.portal); return; }
       } catch (e) {
         alert("Failed: " + e.message);
       }
@@ -1009,6 +1032,48 @@ ${ICON_DEFS}
       await load();
     } catch (e) {
       showNpErr(e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ── Edit-portal dialog (#70): name + description only ─────────────────────────
+  // Deliberately not kind — changing a portal's access floor (restricted→public exposes every
+  // document) is a confidentiality decision, not a settings tweak. The slug is the URL and stays.
+  const dlgEdit = document.getElementById("dlg-edit");
+  const epErr = document.getElementById("ep-err");
+  let editSlug = null;
+  function showEpErr(msg) { epErr.textContent = msg; epErr.hidden = false; }
+  function openEdit(slug) {
+    const p = PORTALS[slug];
+    if (!p) return;
+    editSlug = slug;
+    epErr.hidden = true; epErr.textContent = "";
+    document.getElementById("ep-name").value = p.name || "";
+    document.getElementById("ep-desc").value = p.description || "";
+    dlgEdit.showModal();
+    document.getElementById("ep-name").focus();
+  }
+  document.getElementById("ep-cancel").addEventListener("click", () => dlgEdit.close());
+  document.getElementById("form-edit").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    epErr.hidden = true;
+    if (!editSlug) return;
+    const name = document.getElementById("ep-name").value.trim();
+    const description = document.getElementById("ep-desc").value.trim();
+    if (!name) { showEpErr("A name is required."); return; }
+    const btn = document.getElementById("ep-save");
+    btn.disabled = true;
+    try {
+      // Always send description so clearing it actually clears it (the API deletes an empty one).
+      const res = await api("/api/portals/" + encodeURIComponent(editSlug), { method: "PATCH", body: JSON.stringify({ name, description }) });
+      const cur = PORTALS[editSlug];
+      if (cur) { cur.name = res.name; cur.description = res.description; }
+      dlgEdit.close();
+      renderNav();  // the sidebar shows the name
+      renderMain();
+    } catch (e) {
+      showEpErr(e.message);
     } finally {
       btn.disabled = false;
     }
@@ -1199,4 +1264,5 @@ const ICON_DEFS = `<svg class="sprite" aria-hidden="true"><defs>
   <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
   <symbol id="i-signout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
 </defs></svg>`;

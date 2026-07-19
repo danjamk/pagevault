@@ -189,45 +189,63 @@ function renderPortalPage(portal: Portal, docs: DocSummary[], isOwner: boolean):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(portal.name)}</title>
 <style>
+  /* The neutral white/cool-grey + signal-blue system (#67). Tokens keep light/dark honest;
+     no webfont, no logo — a portal is still the client's work, not our product, above the fold. */
+  :root {
+    color-scheme: light dark;
+    --paper: #f5f6f8; --surface: #ffffff; --ink: #1a1d21; --muted: #5b6470;
+    --accent: #2f6fed; --border: #e3e6ea; --hover: #eef1f5;
+    --chip-bg: rgba(47,111,237,.10); --chip-fg: #2f6fed;
+    --draft-bg: rgba(91,100,112,.12); --draft-fg: #5b6470;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #16181c; --surface: #20242a; --ink: #e6e8eb; --muted: #9aa3ad;
+      --accent: #5b8cf5; --border: #2a2e35; --hover: #1e2228;
+      --chip-bg: rgba(91,140,245,.16); --chip-fg: #8fb0f7;
+      --draft-bg: rgba(154,163,173,.16); --draft-fg: #9aa3ad;
+    }
+  }
   *, *::before, *::after { box-sizing: border-box; }
   body {
     margin: 0; padding: 2.5rem 1.25rem 4rem;
     font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    color: #1e1610; background: #fbf6ec;
+    color: var(--ink); background: var(--paper);
   }
   .wrap { max-width: 44rem; margin: 0 auto; }
   h1 { font-size: 1.75rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
-  .desc { color: #4a3a28; margin: 0 0 2rem; }
+  .desc { color: var(--muted); margin: 0 0 2rem; }
   .filter {
     width: 100%; padding: .6rem .75rem; margin-bottom: 2rem;
-    border: 1px solid #d8cdb0; border-radius: 4px; background: #fff;
-    font: inherit; font-size: .9375rem;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--surface);
+    color: var(--ink); font: inherit; font-size: .9375rem;
   }
+  .filter:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
   h2 {
     font-size: .75rem; text-transform: uppercase; letter-spacing: .08em;
-    color: #7d6b52; font-weight: 600;
-    margin: 2rem 0 .5rem; padding-bottom: .4rem; border-bottom: 1px solid #e5decb;
+    color: var(--muted); font-weight: 600;
+    margin: 2rem 0 .5rem; padding-bottom: .4rem; border-bottom: 1px solid var(--border);
   }
   ul { list-style: none; margin: 0; padding: 0; }
-  li { border-bottom: 1px solid #e5decb; }
+  li { border-bottom: 1px solid var(--border); }
   li a { display: block; padding: .9rem 0; text-decoration: none; color: inherit; }
-  li a:hover { background: #f0ece0; }
-  .title { font-weight: 600; color: #34507a; }
-  .summary { color: #4a3a28; font-size: .9375rem; }
-  .row-meta { color: #7d6b52; font-size: .8125rem; margin-top: .15rem; }
+  li a:hover { background: var(--hover); }
+  .title { font-weight: 600; color: var(--accent); }
+  .summary { color: var(--muted); font-size: .9375rem; }
+  .row-meta { color: var(--muted); font-size: .8125rem; margin-top: .15rem; }
   .tag {
     display: inline-block; margin-left: .4rem; padding: .05rem .4rem;
-    background: rgba(52,80,122,.11); color: #34507a; border-radius: 3px;
+    background: var(--chip-bg); color: var(--chip-fg); border-radius: 3px;
     font-size: .6875rem; font-weight: 600; letter-spacing: .04em;
   }
   .draft {
     display: inline-block; margin-left: .4rem; padding: .05rem .4rem;
-    background: rgba(186,117,23,.12); color: #854f0b; border-radius: 3px;
+    background: var(--draft-bg); color: var(--draft-fg); border-radius: 3px;
     font-size: .6875rem; font-weight: 600; text-transform: uppercase;
   }
-  .empty { color: #7d6b52; }
-  footer { margin-top: 4rem; color: #7d6b52; font-size: .75rem; }
-  footer a { color: #7d6b52; }
+  .empty { color: var(--muted); }
+  footer { margin-top: 4rem; color: var(--muted); font-size: .75rem; }
+  footer a { color: var(--muted); }
   @media (max-width: 480px) { body { padding: 1.5rem 1rem 3rem; } h1 { font-size: 1.4rem; } }
 </style>
 </head>
@@ -236,7 +254,7 @@ function renderPortalPage(portal: Portal, docs: DocSummary[], isOwner: boolean):
   <h1>${esc(portal.name)}</h1>
   ${portal.description ? `<p class="desc">${esc(portal.description)}</p>` : ""}
 
-  ${docs.length > 2 ? `<input class="filter" id="filter" type="search" placeholder="Filter by title or tag" autocomplete="off">` : ""}
+  ${docs.length > 0 ? `<input class="filter" id="filter" type="search" placeholder="Filter by title or tag" autocomplete="off">` : ""}
   ${empty}
   ${sections}
 

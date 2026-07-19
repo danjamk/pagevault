@@ -389,10 +389,12 @@ function buildServer(env: Env, origin: string): McpServer {
   server.tool(
     "search_portal",
     [
-      "Search one client's documents by substring — title, summary, tags, and body.",
+      "Search one client's documents by keyword — title, summary, tags, and body.",
       "",
-      "Six months into an engagement: 'what did we decide about CDC on V2?' — this finds",
-      "the architecture doc from March.",
+      "Every word in the query must appear somewhere in a document (in any order), so",
+      "'CDC V2 decision' finds the March architecture doc. It is keyword matching, not",
+      "semantic: search distinctive words, not a full natural-language question — 'what",
+      "did we decide about...' would require every one of those words to be present.",
       "",
       "The portal is REQUIRED. Searching across every client at once is how one client's",
       "material ends up in another client's report.",
