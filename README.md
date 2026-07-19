@@ -1,3 +1,7 @@
+<p align="center">
+  <img alt="PageVault" src="docs/brand/wordmark-card.svg" width="380">
+</p>
+
 # PageVault
 
 Self-hosted, single-file HTML publishing with per-document access control, on

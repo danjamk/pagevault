@@ -1,5 +1,6 @@
 import { emailsMatch } from "./access.js";
 import { identify } from "./auth.js";
+import { SORA_WORDMARK_WOFF2 } from "./console-font.js";
 import type { Env } from "./env.js";
 import { consoleForbidden } from "./pages.js";
 import { mintSession } from "./session.js";
@@ -13,6 +14,12 @@ import { mintSession } from "./session.js";
  * talks to /api with a short-lived session token, never PAGEVAULT_API_TOKEN and never a
  * cookie, under a strict nonced CSP distinct from (and tighter than) the artifact sandbox:
  * a bug in artifact serving must not reach the page that holds the session token.
+ *
+ * Look & feel follows the Claude Design console handoff (#67): the pv-* token system,
+ * light + dark themes, the leaning-v brand, and a single-selected-portal layout. All brand
+ * graphics are inline SVG; the wordmark's Sora glyphs are an inlined woff2 subset (CSP: no
+ * webfont links). The sharing model stays link-first / public-by-default (ADR-011) — the
+ * handoff mockup predates that decision and is not followed on that point.
  */
 export async function handleConsole(request: Request, env: Env): Promise<Response> {
   const identity = await identify(request, env, "admin");
@@ -28,13 +35,15 @@ export async function handleConsole(request: Request, env: Env): Promise<Respons
   const nonce = crypto.randomUUID();
   const origin = new URL(request.url).origin;
 
-  return new Response(page(session, nonce, identity.email, env.PAGEVAULT_VERSION || "dev", origin), {
+  return new Response(page(session, nonce, identity.email, env.PAGEVAULT_VERSION || "dev", env.PAGEVAULT_DEPLOYED_AT || "", origin), {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Content-Security-Policy": [
         "default-src 'none'",
         `style-src 'nonce-${nonce}'`,
         `script-src 'nonce-${nonce}'`,
+        "img-src data:", // inline SVG marks reference nothing external; kept tight
+        "font-src data:", // the inlined Sora wordmark subset (same-origin data URI)
         "connect-src 'self'", // the fetch() calls to /api
         "form-action 'none'",
         "frame-ancestors 'none'",
@@ -55,10 +64,10 @@ const esc = (s: string): string =>
   );
 
 /**
- * One server-rendered page: portals → documents. Each document row leads with a *reach*
- * icon that names how far it can travel (only you / team / anyone-with-the-link / public);
- * expanding a row reveals the sharing controls — public-link mint & revoke, and the
- * per-document email grants. Restricted portals also carry the team editor.
+ * One server-rendered page: a sidebar of portals, one selected portal in the main panel. A
+ * document row leads with a document-type icon and carries an access *badge* — a neutral chip
+ * whose icon is tinted by how far the document can travel (only you / team / anyone-with-the-
+ * link / public). Expanding a row reveals the ADR-011 sharing controls.
  *
  * The session token is embedded as a JS string and sent as a bearer; on any 401 the page
  * reloads, which re-authenticates through Access and mints a fresh token (ADR-004).
@@ -67,218 +76,394 @@ const esc = (s: string): string =>
  * read-your-write), never from a re-list — a re-list is eventually consistent and would show
  * stale state for up to a minute.
  */
-function page(session: string, nonce: string, owner: string, version: string, origin: string): string {
+function page(session: string, nonce: string, owner: string, version: string, deployedAt: string, origin: string): string {
   // Access logout lands on Cloudflare's default page and, on the next login, has no
   // redirect_url — so the user is dropped somewhere that 404s. `returnTo` closes the loop:
   // logout → login → back to /admin. Absolute (from the request origin) so it is right on
   // both the test and prod hostnames.
   const logoutUrl = `${origin}/cdn-cgi/access/logout?returnTo=${encodeURIComponent(`${origin}/admin`)}`;
+  // Footer identity: the baked version links to the changelog; the deploy date (baked at deploy,
+  // ADR-010) answers "how fresh is this?". Both degrade gracefully before a redeploy sets them.
+  const changelogUrl = "https://github.com/danjamk/pagevault/blob/main/CHANGELOG.md";
+  const deployDate = deployedAt ? esc(deployedAt.slice(0, 10)) : "";
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PageVault — console</title>
+<link rel="icon" href="data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}">
+<script nonce="${nonce}">
+  // Set the theme before first paint so there is no light→dark flash on a dark-mode load.
+  (function () {
+    try {
+      var t = localStorage.getItem("pv-theme");
+      if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  })();
+</script>
 <style nonce="${nonce}">
+  @font-face {
+    font-family:"PV Sora";
+    src:url(${SORA_WORDMARK_WOFF2}) format("woff2");
+    font-weight:400 800; font-style:normal; font-display:swap;
+  }
+
+  /* ── Design tokens (Claude Design handoff #67). Light is the default; the dark set is
+     applied by prefers-color-scheme, then hard-overridden by an explicit data-theme. ── */
   :root {
-    --ink:#1e1610; --line:#d8cdb0; --paper:#fbf6ec; --card:#fff; --blue:#34507a; --muted:#7d6b52;
-    --closed:#6f6150; --gated:#34507a; --open:#a4402a; --danger:#8a2b2b;
-    --closed-bg:#f1ead9; --gated-bg:#e9eef5; --open-bg:#f6e7e0;
+    --pv-bg:#F5F6F8; --pv-surface:#FFFFFF; --pv-surface-2:#FBFBFC; --pv-border:#E6E8EC;
+    --pv-border-2:#EDEFF2; --pv-ink:#16181D; --pv-text:#454B57; --pv-text-2:#5B6270;
+    --pv-muted:#8A909C; --pv-faint:#A2A8B4; --pv-chip:#EFF1F4; --pv-chip-bd:#E6E8EC;
+    --pv-field-bg:#FFFFFF; --pv-field-bd:#D8DBE0; --pv-accent:#2F6FED; --pv-accent-hover:#1F51B8;
+    --pv-accent-soft:#F0F4FB; --pv-header:#FFFFFF; --pv-code-bg:#EEF3FE; --pv-code-bd:#DCE7FD;
+    --pv-code-tx:#2F6FED; --pv-danger:#C6425A; --pv-warn:#B7791F;
+    --pv-lv-individual:#8A909C; --pv-lv-team:#2F6FED; --pv-lv-link:#B7791F; --pv-lv-public:#C6425A;
   }
+  ${DARK_TOKENS_MEDIA(nonce)}
+  :root[data-theme="dark"] { ${DARK_TOKENS} }
+  :root[data-theme="light"] { color-scheme:light; }
+
   *,*::before,*::after { box-sizing:border-box; }
-  body { margin:0; font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; color:var(--ink); background:var(--paper); }
-  .icon { width:1em; height:1em; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; flex:none; }
-  header { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem 1rem; padding:.7rem 1.25rem; border-bottom:1px solid var(--line); background:var(--card); }
-  .brand { display:flex; align-items:center; gap:.5rem; }
-  .brand h1 { font-size:1rem; margin:0; color:var(--blue); letter-spacing:.01em; }
-  .mark { width:1.4rem; height:1.4rem; color:var(--blue); fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
-  .user { margin-left:auto; display:flex; align-items:center; gap:.75rem; }
-  .who { color:var(--muted); font-size:.8125rem; }
-  .signout { display:inline-flex; align-items:center; gap:.3rem; color:var(--muted); font-size:.8125rem; text-decoration:none; border:1px solid var(--line); border-radius:5px; padding:.15rem .5rem; }
-  .signout:hover { color:var(--ink); background:var(--paper); }
-  .signout .icon { width:.95em; height:.95em; }
-
-  .shell { display:flex; align-items:flex-start; gap:1.5rem; max-width:64rem; margin:0 auto; padding:1.25rem 1.25rem 3rem; }
-  .sidenav { flex:none; width:11rem; position:sticky; top:1rem; display:flex; flex-direction:column; gap:.1rem; }
-  .content { flex:1 1 auto; min-width:0; }
-  .navitem { display:flex; align-items:center; gap:.45rem; width:100%; text-align:left; border:1px solid transparent; background:none; color:var(--ink); font:inherit; font-size:.82rem; padding:.35rem .5rem; border-radius:6px; cursor:pointer; }
-  .navitem:hover { background:var(--card); border-color:var(--line); }
-  .navitem .icon { flex:none; }
-  .navitem.public .icon { color:var(--open); } .navitem.restricted .icon { color:var(--gated); } .navitem.private .icon { color:var(--closed); }
-  .navitem .nm { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .navitem .cnt { margin-left:auto; color:var(--muted); font-size:.72rem; font-variant-numeric:tabular-nums; }
-  .portal { scroll-margin-top:1rem; }
-  @media (max-width:820px) {
-    .shell { flex-direction:column; gap:.75rem; }
-    .sidenav { position:static; width:auto; flex-direction:row; flex-wrap:wrap; gap:.3rem; }
-    .navitem { width:auto; }
+  body {
+    margin:0; background:var(--pv-bg); color:var(--pv-ink);
+    font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono { font-family:ui-monospace,"SF Mono",Menlo,monospace; }
+  /* The inline SVG sprite holds the <symbol> defs. It must take no layout space — and it must
+     be hidden via a CLASS, never an inline style attribute: the console CSP is
+     style-src 'nonce-…' with no unsafe-inline, which blocks inline styles outright. Left inline,
+     the attribute is dropped, the <svg> renders at its default 300x150, and the page shifts down. */
+  .sprite { position:absolute; width:0; height:0; overflow:hidden; }
+  .min0 { min-width:0; }
+  .icon { width:1em; height:1em; fill:none; stroke:currentColor; stroke-width:1.8;
+          stroke-linecap:round; stroke-linejoin:round; flex:none; }
+  input:focus-visible, button:focus-visible, a:focus-visible, select:focus-visible {
+    outline:2px solid var(--pv-accent); outline-offset:1px;
   }
 
-  .legend { display:flex; flex-wrap:wrap; gap:.35rem .9rem; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:.65rem .9rem; margin-bottom:1.1rem; font-size:.8rem; }
-  .legend .lg-title { flex-basis:100%; color:var(--muted); font-size:.68rem; text-transform:uppercase; letter-spacing:.06em; }
-  .legend .lg { display:inline-flex; align-items:center; gap:.4rem; }
-  .tc { color:var(--closed); } .tg { color:var(--gated); } .to { color:var(--open); }
+  /* ── Top bar ── */
+  header { position:sticky; top:0; z-index:5; background:var(--pv-header);
+           border-bottom:1px solid var(--pv-border); }
+  .bar { max-width:1240px; margin:0 auto; display:flex; align-items:center;
+         justify-content:space-between; gap:1rem; padding:13px 28px; }
+  .brand { display:flex; align-items:center; gap:11px; min-width:0; }
+  .mark { width:26px; height:26px; flex:none; }
+  .wm { font-family:"PV Sora",-apple-system,system-ui,sans-serif; font-size:20px; font-weight:600;
+        letter-spacing:-0.5px; color:var(--pv-ink); white-space:nowrap; }
+  .wm .v { color:var(--pv-accent); font-weight:700; display:inline-block; transform:skewX(-7deg); }
+  .wm .con { font-weight:400; color:var(--pv-muted); }
+  .actions { display:flex; align-items:center; gap:16px; }
+  .ttoggle { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px;
+             background:transparent; border:1px solid var(--pv-field-bd); border-radius:9px;
+             color:var(--pv-text-2); cursor:pointer; }
+  .ttoggle:hover { border-color:var(--pv-accent); color:var(--pv-accent); }
+  .ttoggle .icon { width:16px; height:16px; stroke-width:1.7; }
+  .profile-wrap { position:relative; display:inline-flex; }
+  .profile { width:34px; height:34px; border-radius:50%; border:1px solid var(--pv-field-bd);
+             background:var(--pv-accent-soft); color:var(--pv-accent); font:inherit; font-size:14px;
+             font-weight:600; text-transform:uppercase; cursor:pointer; display:inline-flex;
+             align-items:center; justify-content:center; }
+  .profile:hover { border-color:var(--pv-accent); }
+  .pmenu { position:absolute; top:calc(100% + 8px); right:0; min-width:220px; padding:6px; z-index:10;
+           background:var(--pv-surface); border:1px solid var(--pv-border); border-radius:10px;
+           box-shadow:0 12px 32px rgba(15,18,22,.18); }
+  .pmenu[hidden] { display:none; }
+  .pmenu-who { display:flex; flex-direction:column; gap:2px; padding:8px 10px; margin-bottom:4px;
+               border-bottom:1px solid var(--pv-border-2); }
+  .pmenu-label { font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--pv-faint); }
+  .pmenu-email { font-size:13px; color:var(--pv-ink); word-break:break-all; }
+  .pmenu-item { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:7px;
+                font-size:13px; color:var(--pv-text); text-decoration:none; cursor:pointer; }
+  .pmenu-item:hover { background:var(--pv-surface-2); color:var(--pv-ink); }
+  .pmenu-item .icon { width:15px; height:15px; }
 
-  .portal { border:1px solid var(--line); border-radius:8px; background:var(--card); margin-bottom:1.1rem; overflow:hidden; }
-  .portal > h2 { display:flex; align-items:center; gap:.55rem; font-size:.95rem; margin:0; padding:.7rem 1rem; border-bottom:1px solid var(--line); }
-  .portal > h2 .p-icon { font-size:1.05rem; }
-  .portal.public > h2 .p-icon { color:var(--open); }
-  .portal.restricted > h2 .p-icon { color:var(--gated); }
-  .portal.private > h2 .p-icon { color:var(--closed); }
-  .portal > h2 .name { font-weight:600; }
-  .portal > h2 .kind { color:var(--muted); font-weight:400; font-size:.8em; }
+  /* ── Buttons ── */
+  .btn { display:inline-flex; align-items:center; gap:7px; font:inherit; font-size:13px;
+         font-weight:500; padding:8px 14px; border:1px solid var(--pv-field-bd); border-radius:9px;
+         background:var(--pv-field-bg); color:var(--pv-ink); cursor:pointer; text-decoration:none; }
+  .btn:hover { border-color:var(--pv-accent); color:var(--pv-accent); }
+  .btn.primary { background:var(--pv-accent); border-color:var(--pv-accent); color:#fff; }
+  .btn.primary:hover { background:var(--pv-accent-hover); border-color:var(--pv-accent-hover); color:#fff; }
+  .btn.sm { font-size:12.5px; padding:6px 11px; border-radius:7px; }
+  .btn.warn:hover { border-color:var(--pv-warn); color:var(--pv-warn); }
+  .btn.ghost { background:none; border:none; color:var(--pv-accent); padding:0; font-weight:500; }
+  .btn.ghost:hover { color:var(--pv-accent-hover); }
+  .btn.danger { background:none; border:none; color:var(--pv-danger); padding:8px 6px; }
+  .btn.danger:hover { text-decoration:underline; color:var(--pv-danger); }
+  .btn .icon { width:14px; height:14px; }
+  button.x { border:0; background:none; padding:0 2px; color:var(--pv-faint); cursor:pointer;
+             display:inline-flex; }
+  button.x:hover { color:var(--pv-danger); }
+  button.x .icon { width:14px; height:14px; }
 
-  .access-note { display:flex; align-items:center; gap:.45rem; padding:.5rem 1rem; border-bottom:1px solid #efe7d4; color:var(--muted); font-size:.82rem; background:#fdfaf2; }
+  /* ── Shell: sidebar + main ── */
+  .shell { max-width:1240px; margin:0 auto; display:flex; align-items:flex-start; gap:0; }
+  .side { width:266px; flex:none; align-self:stretch; border-right:1px solid var(--pv-border);
+          padding:24px 16px; min-height:calc(100vh - 57px); }
+  .side-head { display:flex; align-items:center; justify-content:space-between;
+               padding:0 8px; margin-bottom:12px; }
+  .ulabel { font-size:11px; font-weight:600; letter-spacing:1.3px; text-transform:uppercase;
+            color:var(--pv-muted); }
+  .prow { display:flex; align-items:center; gap:11px; width:100%; text-align:left; background:none;
+          border:none; border-left:2px solid transparent; border-radius:0 8px 8px 0;
+          padding:9px 12px; margin-bottom:2px; cursor:pointer; font:inherit; }
+  .prow:hover { background:var(--pv-accent-soft); }
+  .prow[aria-current="true"] { background:var(--pv-accent-soft); border-left-color:var(--pv-accent); }
+  .prow .nm { flex:1; min-width:0; }
+  .prow .nm b { display:block; font-size:14px; font-weight:500; letter-spacing:-0.2px;
+                color:var(--pv-text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .prow[aria-current="true"] .nm b { color:var(--pv-ink); }
+  .prow .nm span { display:block; font-size:11.5px; color:var(--pv-faint); }
+  .prow .cnt { font-size:12px; color:var(--pv-muted); background:var(--pv-chip); border-radius:5px;
+               padding:1px 8px; font-variant-numeric:tabular-nums; }
+  .side-div { height:1px; background:var(--pv-border); margin:20px 8px; }
+  .legend { padding:0 8px; }
+  .legend .rows { display:flex; flex-direction:column; gap:11px; margin-top:12px; }
+  .legend .r { display:flex; align-items:center; gap:10px; font-size:12.5px; color:var(--pv-text-2); }
+  .side-foot { display:flex; flex-direction:column; gap:6px; padding:16px 8px 0; margin-top:20px;
+               border-top:1px solid var(--pv-border); }
+  .side-foot .tagline { font-size:11.5px; color:var(--pv-faint); line-height:1.5; }
+  .side-foot .build { font-size:11px; color:var(--pv-faint); line-height:1.5; word-break:break-word;
+                      font-variant-numeric:tabular-nums; }
+  .side-foot .build a { color:var(--pv-muted); text-decoration:none; }
+  .side-foot .build a:hover { color:var(--pv-accent); text-decoration:underline; }
 
-  .members { padding:.6rem 1rem; border-bottom:1px solid #efe7d4; background:#fdfaf2; }
-  .members .cap { display:flex; align-items:center; gap:.4rem; color:var(--muted); font-size:.72rem; margin-bottom:.45rem; }
+  .main { flex:1; min-width:0; padding:28px 32px 64px; }
 
-  .item { border-top:1px solid #efe7d4; }
-  .item:first-of-type { border-top:0; }
-  .doc { display:flex; align-items:center; gap:.6rem; padding:.55rem .5rem .55rem .8rem; cursor:pointer; }
-  .doc:hover { background:#fbf7ec; }
-  .doc .reach { display:inline-flex; align-items:center; justify-content:center; width:1.65rem; height:1.65rem; border-radius:6px; font-size:1rem; flex:none; }
-  .reach.closed { color:var(--closed); background:var(--closed-bg); }
-  .reach.gated  { color:var(--gated);  background:var(--gated-bg); }
-  .reach.open   { color:var(--open);   background:var(--open-bg); }
-  .doc .t { font-weight:500; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink); text-decoration:none; }
+  @media (max-width:860px) {
+    .shell { flex-direction:column; }
+    .side { width:auto; align-self:auto; min-height:0; border-right:none;
+            border-bottom:1px solid var(--pv-border); }
+    .main { padding:20px; }
+  }
+
+  /* ── Access badge (neutral chip, level-tinted icon) ── */
+  .badge { display:inline-flex; align-items:center; gap:6px; background:var(--pv-chip);
+           border:1px solid var(--pv-chip-bd); border-radius:6px; color:var(--pv-text);
+           font-size:12px; font-weight:500; padding:3px 10px 3px 7px; white-space:nowrap; }
+  .badge .icon { width:15px; height:15px; }
+  .lv-individual { color:var(--pv-lv-individual); }
+  .lv-team { color:var(--pv-lv-team); }
+  .lv-link { color:var(--pv-lv-link); }
+  .lv-public { color:var(--pv-lv-public); }
+
+  /* ── Portal header card ── */
+  .phead { background:var(--pv-surface); border:1px solid var(--pv-border); border-radius:14px;
+           padding:24px 26px; margin-bottom:26px; }
+  .phead-top { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
+  .phead h1 { font-size:24px; font-weight:600; letter-spacing:-0.6px; margin:0; color:var(--pv-ink); }
+  .phead .titrow { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  .phead .slug { font-size:13px; color:var(--pv-muted); }
+  .phead p { font-size:14px; line-height:1.55; color:var(--pv-text-2); margin:9px 0 0; max-width:560px; }
+  .phead .base { display:flex; flex-direction:column; align-items:flex-end; gap:10px; flex:none; }
+  .phead .base .lb { font-size:11px; letter-spacing:1px; text-transform:uppercase; color:var(--pv-faint); }
+  .seats { margin-top:22px; padding-top:20px; border-top:1px solid var(--pv-border-2); }
+  .seats .cap { display:flex; align-items:center; gap:8px; margin-bottom:4px; font-size:13.5px;
+                color:var(--pv-ink); }
+  .seats .cap .icon { width:15px; height:15px; color:var(--pv-text-2); }
+  .seats .cap .sub { font-size:12.5px; color:var(--pv-muted); font-weight:400; }
+  .seatrow { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:12px; }
+
+  /* ── Documents ── */
+  .dochead { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;
+             padding:0 2px; }
+  .dochead .h { display:flex; align-items:baseline; gap:10px; }
+  .dochead h2 { font-size:16px; font-weight:600; letter-spacing:-0.3px; margin:0; color:var(--pv-ink); }
+  .dochead .cnt { font-size:13px; color:var(--pv-muted); }
+  .doclist { background:var(--pv-surface); border:1px solid var(--pv-border); border-radius:14px;
+             overflow:hidden; }
+  .item + .item { border-top:1px solid var(--pv-border-2); }
+  .doc { display:flex; align-items:center; gap:16px; padding:15px 20px; cursor:pointer; }
+  .doc:hover { background:var(--pv-surface-2); }
+  .doc[aria-expanded="true"] { background:var(--pv-surface-2); }
+  .doc .dtype { width:20px; height:20px; stroke-width:1.5; color:var(--pv-muted); }
+  .doc .body { flex:1; min-width:0; }
+  .doc .trow { display:flex; align-items:center; gap:9px; }
+  .doc .t { font-size:14.5px; font-weight:500; letter-spacing:-0.2px; color:var(--pv-ink);
+            text-decoration:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .doc a.t:hover { text-decoration:underline; }
-  .doc .tag { flex:none; display:inline-flex; align-items:center; gap:.2rem; font-size:.7rem; color:var(--muted); border:1px solid var(--line); border-radius:99px; padding:.05rem .5rem; }
-  .doc .tag.warn { color:var(--open); border-color:#d9b7ab; font-weight:600; }
-  .doc .d { flex:none; margin-left:auto; color:var(--muted); font-size:.78rem; font-variant-numeric:tabular-nums; }
-  .chev { flex:none; border:1px solid transparent; background:none; color:var(--muted); cursor:pointer; padding:.15rem; border-radius:5px; display:inline-flex; }
-  .chev:hover { color:var(--ink); background:var(--paper); }
-  .chev .icon { transition:transform .15s ease; }
-  .doc[aria-expanded="true"] .chev .icon { transform:rotate(180deg); }
-  @media (prefers-reduced-motion:reduce) { .chev .icon { transition:none; } }
+  .doc .fmt { font-size:10.5px; font-weight:500; color:var(--pv-muted); text-transform:uppercase;
+              letter-spacing:.5px; }
+  .doc .widened { display:inline-flex; align-items:center; gap:5px; font-size:11.5px;
+                  color:var(--pv-warn); margin-top:4px; }
+  .doc .widened .icon { width:12px; height:12px; }
+  .doc .d { font-size:12.5px; color:var(--pv-muted); flex:none; width:88px; text-align:right;
+            font-variant-numeric:tabular-nums; }
+  .doc .chev { width:18px; height:18px; color:var(--pv-muted); transition:transform .15s ease; }
+  .doc[aria-expanded="true"] .chev { transform:rotate(180deg); color:var(--pv-muted); }
+  @media (prefers-reduced-motion:reduce) { .doc .chev { transition:none; } }
 
-  .detail { border-top:1px solid #efe7d4; background:#fdfaf2; padding:.7rem 1rem .85rem; font-size:.85rem; }
+  /* ── Expanded sharing panel (ADR-011, restyled) ── */
+  .detail { padding:6px 20px 22px 56px; background:var(--pv-surface-2);
+            border-top:1px solid var(--pv-border-2); font-size:13px; }
   .detail[hidden] { display:none; }
-  .drow { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; padding:.25rem 0; }
-  .drow .dlabel { display:inline-flex; align-items:center; gap:.35rem; color:var(--muted); min-width:9.5rem; flex:none; }
-  .detail code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78rem; word-break:break-all; background:var(--card); border:1px solid var(--line); border-radius:4px; padding:.1rem .35rem; }
-  .detail hr { border:0; border-top:1px solid #efe7d4; margin:.55rem 0; }
-  .dhint { color:var(--muted); font-size:.75rem; margin:.15rem 0 .4rem; }
-  .dhint.err { color:var(--danger); }
-  .warnline { display:flex; align-items:center; gap:.4rem; color:var(--open); font-size:.78rem; background:var(--open-bg); border:1px solid #d9b7ab; border-radius:5px; padding:.35rem .55rem; margin-bottom:.5rem; }
-  .foot { display:flex; margin-top:.55rem; }
-  .foot .grow { flex:1 1 auto; }
+  .detail code { font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:12.5px;
+                 word-break:break-all; }
+  .dhint { color:var(--pv-muted); font-size:12px; margin:.15rem 0 .5rem; line-height:1.5; }
+  .dhint.err { color:var(--pv-danger); }
+  .warnline { display:flex; align-items:center; gap:.4rem; color:var(--pv-warn); font-size:12.5px;
+              background:var(--pv-code-bg); border:1px solid var(--pv-code-bd); border-radius:7px;
+              padding:.4rem .55rem; margin:10px 0; }
+  .warnline .icon { flex:none; }
+  .sharebar { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; margin-top:14px;
+              background:var(--pv-surface); border:1px solid var(--pv-border); border-radius:9px;
+              padding:.55rem .7rem; }
+  .sharebar .lb { display:inline-flex; align-items:center; gap:.35rem; color:var(--pv-faint);
+                  font-size:11px; text-transform:uppercase; letter-spacing:.5px; flex:none; }
+  .sharebar .lb .icon { width:14px; height:14px; color:var(--pv-lv-link); }
+  .sharebar code { flex:1 1 12rem; min-width:0; color:var(--pv-code-tx); background:var(--pv-code-bg);
+                   border:1px solid var(--pv-code-bd); border-radius:7px; padding:6px 11px;
+                   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sharebar.dim code { color:var(--pv-muted); text-decoration:line-through; }
+  .reason { display:flex; align-items:flex-start; gap:.5rem; font-size:13px; margin:14px 0 2px; }
+  .reason .icon { width:16px; height:16px; margin-top:1px; }
+  .reason.link .icon { color:var(--pv-lv-link); }
+  .reason.public .icon { color:var(--pv-lv-public); }
+  .reason.team .icon { color:var(--pv-lv-team); }
+  .reason.individual .icon { color:var(--pv-lv-individual); }
+  .reason .sub { color:var(--pv-muted); }
+  .reachsel { display:flex; gap:.5rem; margin:14px 0 2px; flex-wrap:wrap; }
+  .ropt { display:flex; align-items:center; gap:.4rem; border:1px solid var(--pv-field-bd);
+          border-radius:7px; padding:7px 12px; cursor:pointer; background:var(--pv-field-bg);
+          font:inherit; font-size:12.5px; color:var(--pv-text); }
+  .ropt:hover { border-color:var(--pv-accent); }
+  .ropt .icon { width:15px; height:15px; color:var(--pv-muted); }
+  .ropt[aria-pressed="true"] { border-color:var(--pv-accent); background:var(--pv-accent-soft);
+                               color:var(--pv-ink); font-weight:600; }
+  .ropt[data-reach="open"] .icon { color:var(--pv-lv-link); }
+  .ropt[data-reach="open"][aria-pressed="true"] { border-color:var(--pv-lv-link);
+    background:var(--pv-code-bg); }
+  .keynote { display:flex; align-items:flex-start; gap:.4rem; font-size:12px; color:var(--pv-text-2);
+             background:var(--pv-code-bg); border:1px solid var(--pv-code-bd); border-radius:7px;
+             padding:.45rem .6rem; margin:12px 0 2px; }
+  .keynote .icon { width:14px; height:14px; color:var(--pv-lv-link); margin-top:1px; flex:none; }
+  .draftbar { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; background:var(--pv-chip);
+              border:1px solid var(--pv-chip-bd); border-radius:9px; padding:.55rem .7rem;
+              font-size:12.5px; margin-top:14px; }
+  .draftbar .icon { width:15px; height:15px; color:var(--pv-lv-individual); flex:none; }
+  .grow { flex:1 1 auto; }
+  .subrow { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin-top:18px;
+            padding-top:14px; border-top:1px solid var(--pv-border-2); }
+  .subrow .lb { color:var(--pv-text); font-size:12.5px; font-weight:500; display:inline-flex;
+                align-items:center; gap:.4rem; }
+  .subrow .lb .icon { width:15px; height:15px; color:var(--pv-muted); }
+  .foot { display:flex; align-items:center; margin-top:18px; padding-top:14px;
+          border-top:1px solid var(--pv-border-2); gap:8px; }
 
-  .chips { list-style:none; display:flex; flex-wrap:wrap; gap:.4rem; margin:.1rem 0 .5rem; padding:0; }
-  .chip { display:inline-flex; align-items:center; gap:.3rem; background:var(--gated-bg); border:1px solid #cdd9e8; color:#2c435f; border-radius:99px; padding:.1rem .3rem .1rem .6rem; font-size:.8rem; }
-  .addrow { display:flex; gap:.4rem; }
-  .addrow input { flex:1 1 auto; padding:.32rem .55rem; border:1px solid var(--line); border-radius:5px; font:inherit; font-size:.85rem; background:var(--card); }
-  input:focus-visible, button:focus-visible, a:focus-visible { outline:2px solid var(--blue); outline-offset:1px; }
+  .chips { list-style:none; display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 10px; padding:0; }
+  .chip { display:inline-flex; align-items:center; gap:8px; background:var(--pv-chip);
+          border:1px solid var(--pv-chip-bd); border-radius:8px; padding:6px 8px 6px 12px;
+          font-size:13px; color:var(--pv-text); }
+  .addrow { display:flex; gap:8px; align-items:center; }
+  .addrow input { flex:1 1 auto; max-width:240px; padding:8px 12px; border:1px solid var(--pv-field-bd);
+                  border-radius:8px; font:inherit; font-size:13px; background:var(--pv-field-bg);
+                  color:var(--pv-ink); }
+  .addrow input::placeholder { color:var(--pv-faint); }
 
-  button.btn, a.btn { font:inherit; font-size:.78rem; padding:.24rem .6rem; border:1px solid var(--line); border-radius:5px; background:var(--card); color:var(--blue); cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:.3rem; }
-  button.btn:hover, a.btn:hover { background:var(--paper); }
-  button.btn.danger { color:var(--danger); }
-  button.btn.open { color:var(--open); border-color:#d9b7ab; }
-  button.x { border:0; background:none; padding:0 .15rem; color:#7690b0; cursor:pointer; display:inline-flex; }
-  button.x:hover { color:var(--danger); }
+  .empty { color:var(--pv-muted); padding:24px 20px; font-size:13px; }
+  .err { color:var(--pv-danger); }
 
-  .empty { color:var(--muted); padding:.55rem 1rem; font-size:.85rem; }
-  .err { color:var(--danger); }
-  footer { max-width:64rem; margin:0 auto; padding:.25rem 1.25rem 1.5rem; color:var(--muted); font-size:.72rem; }
-
-  /* Create-portal / upload dialogs (#43, #6). Native <dialog>: modal, Esc-to-close, focus-trapped. */
-  dialog { border:1px solid var(--line); border-radius:10px; padding:0; background:var(--card); color:var(--ink); max-width:30rem; width:calc(100% - 2rem); box-shadow:0 12px 44px rgba(30,22,16,.2); }
-  dialog::backdrop { background:rgba(30,22,16,.38); }
-  .dlg-head { display:flex; align-items:center; gap:.5rem; padding:.8rem 1rem; border-bottom:1px solid var(--line); font-weight:600; font-size:.95rem; }
-  .dlg-head .icon { color:var(--blue); }
-  .dlg-body { padding:1rem; display:flex; flex-direction:column; gap:.8rem; }
-  .field { display:flex; flex-direction:column; gap:.25rem; }
-  .field > label { font-size:.8rem; color:var(--muted); }
-  .field input[type=text], .field input[type=email] { padding:.42rem .55rem; border:1px solid var(--line); border-radius:5px; font:inherit; font-size:.9rem; background:var(--paper); color:var(--ink); }
-  .field .hint { font-size:.72rem; color:var(--muted); }
-  .kinds { display:flex; flex-direction:column; gap:.4rem; }
-  .kindopt { display:flex; gap:.55rem; align-items:flex-start; border:1px solid var(--line); border-radius:6px; padding:.5rem .6rem; cursor:pointer; }
-  .kindopt:hover { background:var(--paper); }
-  .kindopt input { margin:.15rem 0 0; flex:none; }
-  .kindopt .kb { display:flex; flex-direction:column; gap:.12rem; }
-  .kindopt .kt { font-weight:600; font-size:.84rem; display:flex; align-items:center; gap:.35rem; }
-  .kindopt .kt.private .icon { color:var(--closed); } .kindopt .kt.restricted .icon { color:var(--gated); } .kindopt .kt.public .icon { color:var(--open); }
-  .kindopt .kd { font-size:.75rem; color:var(--muted); line-height:1.4; }
-  .kindopt:has(input:checked) { border-color:var(--blue); background:var(--gated-bg); }
-  .dlg-foot { display:flex; justify-content:flex-end; gap:.5rem; padding:.8rem 1rem; border-top:1px solid var(--line); }
-  .dlg-err { color:var(--danger); font-size:.8rem; }
+  /* ── Dialogs (#43 new portal, #6 upload) ── */
+  dialog { border:1px solid var(--pv-border); border-radius:14px; padding:0; background:var(--pv-surface);
+           color:var(--pv-ink); max-width:30rem; width:calc(100% - 2rem);
+           box-shadow:0 16px 50px rgba(15,18,22,.28); }
+  dialog::backdrop { background:rgba(15,18,22,.45); }
+  .dlg-head { display:flex; align-items:center; gap:.5rem; padding:14px 18px;
+              border-bottom:1px solid var(--pv-border); font-weight:600; font-size:15px; }
+  .dlg-head .icon { width:17px; height:17px; color:var(--pv-accent); }
+  .dlg-body { padding:18px; display:flex; flex-direction:column; gap:14px; }
+  .field { display:flex; flex-direction:column; gap:5px; }
+  .field > label { font-size:12.5px; color:var(--pv-muted); }
+  .field input[type=text], .field input[type=email], .field select {
+    padding:8px 11px; border:1px solid var(--pv-field-bd); border-radius:8px; font:inherit;
+    font-size:14px; background:var(--pv-field-bg); color:var(--pv-ink); }
+  .field input::placeholder { color:var(--pv-faint); }
+  .field .hint { font-size:11.5px; color:var(--pv-muted); }
+  .kinds { display:flex; flex-direction:column; gap:8px; }
+  .kindopt { display:flex; gap:10px; align-items:flex-start; border:1px solid var(--pv-field-bd);
+             border-radius:9px; padding:10px 12px; cursor:pointer; }
+  .kindopt:hover { border-color:var(--pv-accent); }
+  .kindopt input { margin:2px 0 0; flex:none; }
+  .kindopt .kb { display:flex; flex-direction:column; gap:2px; }
+  .kindopt .kt { font-weight:600; font-size:13px; display:flex; align-items:center; gap:6px; }
+  .kindopt .kt .icon { width:15px; height:15px; }
+  .kindopt .kt.private .icon { color:var(--pv-lv-individual); }
+  .kindopt .kt.restricted .icon { color:var(--pv-lv-team); }
+  .kindopt .kt.public .icon { color:var(--pv-lv-public); }
+  .kindopt .kd { font-size:12px; color:var(--pv-muted); line-height:1.45; }
+  .kindopt:has(input:checked) { border-color:var(--pv-accent); background:var(--pv-accent-soft); }
+  .dlg-foot { display:flex; justify-content:flex-end; gap:.6rem; padding:14px 18px;
+              border-top:1px solid var(--pv-border); }
+  .dlg-err { color:var(--pv-danger); font-size:12.5px; }
   .dlg-err[hidden] { display:none; }
-  /* Upload dialog (#6) */
-  .dropzone { display:flex; align-items:center; justify-content:center; text-align:center; gap:.5rem; border:1.5px dashed var(--line); border-radius:8px; padding:1.1rem 1rem; color:var(--muted); font-size:.85rem; cursor:pointer; background:var(--paper); }
-  .dropzone.drag { border-color:var(--blue); background:var(--gated-bg); color:var(--ink); }
-  .dropzone.has-file { border-style:solid; color:var(--ink); }
-  .field select { padding:.42rem .55rem; border:1px solid var(--line); border-radius:5px; font:inherit; font-size:.9rem; background:var(--paper); color:var(--ink); }
-  .checkrow { display:flex; align-items:flex-start; gap:.5rem; font-size:.85rem; cursor:pointer; }
-  .checkrow input { margin:.15rem 0 0; flex:none; }
-  .donerow { display:flex; flex-direction:column; gap:.55rem; }
-  .donerow .lnk { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; }
-  .donerow code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78rem; word-break:break-all; background:var(--paper); border:1px solid var(--line); border-radius:4px; padding:.15rem .4rem; }
-  .done-ok { display:flex; align-items:center; gap:.4rem; color:var(--gated); font-weight:600; font-size:.9rem; }
-  .done-ok .icon { color:var(--gated); }
-  /* Link-first sharing panel (#65 / ADR-011) */
-  button.btn.primary, a.btn.primary { background:var(--blue); color:#fff; border-color:var(--blue); }
-  button.btn.primary:hover, a.btn.primary:hover { filter:brightness(1.08); background:var(--blue); }
-  .sharebar { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; background:var(--card); border:1px solid var(--line); border-radius:7px; padding:.5rem .6rem; }
-  .sharebar .lb { display:inline-flex; align-items:center; gap:.35rem; color:var(--muted); font-size:.68rem; text-transform:uppercase; letter-spacing:.05em; flex:none; }
-  .sharebar code { flex:1 1 12rem; min-width:0; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.78rem; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background:none; border:0; padding:0; }
-  .sharebar.dim code { color:var(--muted); text-decoration:line-through; }
-  .reason { display:flex; align-items:flex-start; gap:.45rem; font-size:.82rem; margin:.6rem 0 .1rem; }
-  .reason .icon { margin-top:.15rem; }
-  .reason.open .icon { color:var(--open); } .reason.gated .icon { color:var(--gated); } .reason.closed .icon { color:var(--closed); }
-  .reason .sub { color:var(--muted); }
-  .reachsel { display:flex; gap:.4rem; margin:.6rem 0 .1rem; flex-wrap:wrap; }
-  .ropt { display:flex; align-items:center; gap:.4rem; border:1px solid var(--line); border-radius:7px; padding:.35rem .6rem; cursor:pointer; background:var(--card); font:inherit; font-size:.8rem; color:var(--ink); }
-  .ropt:hover { background:var(--paper); }
-  .ropt .icon { color:var(--muted); }
-  .ropt[aria-pressed="true"] { border-color:var(--blue); background:var(--gated-bg); font-weight:600; }
-  .ropt[aria-pressed="true"] .icon { color:var(--blue); }
-  .ropt[data-reach="open"][aria-pressed="true"] { border-color:var(--open); background:var(--open-bg); }
-  .ropt[data-reach="open"][aria-pressed="true"] .icon { color:var(--open); }
-  .keynote { display:flex; align-items:flex-start; gap:.4rem; font-size:.75rem; color:var(--muted); background:var(--open-bg); border:1px solid #e6cabf; border-radius:6px; padding:.4rem .55rem; margin:.5rem 0 .1rem; }
-  .keynote .icon { color:var(--open); margin-top:.1rem; }
-  .draftbar { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; background:var(--closed-bg); border:1px solid #d8c9a6; border-radius:7px; padding:.5rem .6rem; font-size:.82rem; margin-bottom:.5rem; }
-  .draftbar .icon { color:var(--closed); flex:none; }
-  .subrow { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin-top:.75rem; padding-top:.7rem; border-top:1px solid #efe7d4; }
-  .subrow .lb { color:var(--muted); font-size:.78rem; display:inline-flex; align-items:center; gap:.35rem; }
+  .dropzone { display:flex; align-items:center; justify-content:center; text-align:center; gap:.5rem;
+              border:1.5px dashed var(--pv-field-bd); border-radius:10px; padding:18px 16px;
+              color:var(--pv-muted); font-size:13px; cursor:pointer; background:var(--pv-surface-2); }
+  .dropzone.drag { border-color:var(--pv-accent); background:var(--pv-accent-soft); color:var(--pv-ink); }
+  .dropzone.has-file { border-style:solid; color:var(--pv-ink); }
+  .dropzone code { font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+  .checkrow { display:flex; align-items:flex-start; gap:.5rem; font-size:13px; cursor:pointer; }
+  .checkrow input { margin:2px 0 0; flex:none; }
+  .donerow { display:flex; flex-direction:column; gap:.6rem; }
+  .donerow .lnk { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; }
+  .donerow code { font-family:ui-monospace,Menlo,monospace; font-size:12.5px; word-break:break-all;
+                  background:var(--pv-code-bg); border:1px solid var(--pv-code-bd); border-radius:7px;
+                  padding:6px 10px; color:var(--pv-code-tx); }
+  .done-ok { display:flex; align-items:center; gap:.5rem; color:var(--pv-lv-team); font-weight:600;
+             font-size:14px; }
+  .done-ok .icon { width:16px; height:16px; }
+  footer { max-width:1240px; margin:0 auto; padding:8px 32px 28px; color:var(--pv-faint); font-size:11.5px; }
   [hidden] { display:none !important; }
 </style>
 </head>
 <body>
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
-  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
-  <symbol id="i-link" viewBox="0 0 24 24"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></symbol>
-  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18"/></symbol>
-  <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></symbol>
-  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3Z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="17" x2="12" y2="17"/></symbol>
-  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
-  <symbol id="i-x" viewBox="0 0 24 24"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></symbol>
-  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
-  <symbol id="i-aperture" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m14.31 8 5.74 9.94"/><path d="M9.69 8h11.48"/><path d="m7.38 12 5.74-9.94"/><path d="M9.69 16 3.95 6.06"/><path d="M14.31 16H2.83"/><path d="m16.62 12-5.74 9.94"/></symbol>
-  <symbol id="i-signout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></symbol>
-  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
-</svg>
+${ICON_DEFS}
 <header>
-  <span class="brand"><svg class="mark" aria-hidden="true"><use href="#i-aperture"/></svg><h1>PageVault console</h1></span>
-  <span class="user">
-    <button class="btn" id="new-doc"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>New document</button>
-    <button class="btn" id="new-portal">${"＋"} New portal</button>
-    <span class="who">${esc(owner)}</span>
-    <a class="signout" href="${logoutUrl}" title="End your Cloudflare Access session"><svg class="icon" aria-hidden="true"><use href="#i-signout"/></svg>Sign out</a>
-  </span>
+  <div class="bar">
+    <span class="brand">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="2" width="28" height="28" rx="8" fill="var(--pv-accent)"/><path d="M9.5 10 L16 22.5 L22.5 10" transform="translate(2.5 0) skewX(-7)" stroke="#FFFFFF" stroke-width="4.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="wm" aria-label="PageVault console">page<span class="v">v</span>ault <span class="con">console</span></span>
+    </span>
+    <span class="actions">
+      <button class="ttoggle" id="theme-toggle" title="Toggle theme" aria-label="Toggle light/dark theme"></button>
+      <button class="btn primary" id="new-doc"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Upload</button>
+      <div class="profile-wrap">
+        <button class="profile" id="profile" aria-haspopup="true" aria-expanded="false" title="Account">${esc(owner.slice(0, 1))}</button>
+        <div class="pmenu" id="pmenu" role="menu" hidden>
+          <div class="pmenu-who"><span class="pmenu-label">Signed in as</span><span class="pmenu-email">${esc(owner)}</span></div>
+          <a class="pmenu-item" role="menuitem" href="${logoutUrl}" title="End your Cloudflare Access session"><svg class="icon" aria-hidden="true"><use href="#i-signout"/></svg>Sign out</a>
+        </div>
+      </div>
+    </span>
+  </div>
 </header>
 <div class="shell">
-  <nav id="nav" class="sidenav" aria-label="Portals"></nav>
-  <main class="content">
-    <div class="legend">
-      <span class="lg-title">Who can reach a document</span>
-      <span class="lg tc"><svg class="icon"><use href="#i-lock"/></svg> Only you</span>
-      <span class="lg tg"><svg class="icon"><use href="#i-users"/></svg> Team &mdash; login required</span>
-      <span class="lg to"><svg class="icon"><use href="#i-link"/></svg> Anyone with the link</span>
-      <span class="lg to"><svg class="icon"><use href="#i-globe"/></svg> Public &mdash; listed</span>
+  <aside class="side">
+    <div class="side-head">
+      <span class="ulabel">Portals</span>
+      <button class="btn ghost" id="new-portal"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New</button>
     </div>
-    <div id="app"><p class="empty">Loading…</p></div>
-  </main>
+    <nav id="nav" aria-label="Portals"></nav>
+    <div class="side-div"></div>
+    <div class="legend">
+      <span class="ulabel">Reach</span>
+      <div class="rows">
+        <span class="r"><svg class="icon lv-individual" aria-hidden="true"><use href="#i-individual"/></svg>Individuals &mdash; only named people</span>
+        <span class="r"><svg class="icon lv-team" aria-hidden="true"><use href="#i-users"/></svg>Team &mdash; portal scope, login required</span>
+        <span class="r"><svg class="icon lv-link" aria-hidden="true"><use href="#i-link"/></svg>Anyone with the link</span>
+        <span class="r"><svg class="icon lv-public" aria-hidden="true"><use href="#i-globe"/></svg>Public &mdash; listed &amp; browsable</span>
+      </div>
+    </div>
+    <div class="side-foot">
+      <span class="tagline">Self-hosted &middot; Cloudflare &middot; MIT</span>
+      <span class="build">
+        <a href="${changelogUrl}" target="_blank" rel="noopener" title="Changelog">v${esc(version)}</a>${deployDate ? ` &middot; deployed ${deployDate}` : ""}
+      </span>
+    </div>
+  </aside>
+  <main class="main" id="app"><p class="empty">Loading&hellip;</p></main>
 </div>
 <dialog id="dlg-portal" aria-labelledby="dlg-portal-title">
   <form id="form-portal" method="dialog">
@@ -291,14 +476,14 @@ function page(session: string, nonce: string, owner: string, version: string, or
       <div class="field">
         <label for="np-slug">Slug</label>
         <input type="text" id="np-slug" placeholder="acme-corp" autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false">
-        <span class="hint">The URL path — lowercase letters, digits and hyphens, 2&ndash;40 chars.</span>
+        <span class="hint">The URL path &mdash; lowercase letters, digits and hyphens, 2&ndash;40 chars.</span>
       </div>
       <div class="field">
         <label>Who can reach it</label>
         <div class="kinds">
           <label class="kindopt">
             <input type="radio" name="np-kind" value="private" checked>
-            <span class="kb"><span class="kt private"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg>Private</span>
+            <span class="kb"><span class="kt private"><svg class="icon" aria-hidden="true"><use href="#i-individual"/></svg>Private</span>
             <span class="kd">Only you. Documents inside are yours alone, unless one widens itself.</span></span>
           </label>
           <label class="kindopt">
@@ -321,7 +506,7 @@ function page(session: string, nonce: string, owner: string, version: string, or
     </div>
     <div class="dlg-foot">
       <button type="button" class="btn" id="np-cancel">Cancel</button>
-      <button type="submit" class="btn" id="np-create">Create portal</button>
+      <button type="submit" class="btn primary" id="np-create">Create portal</button>
     </div>
   </form>
 </dialog>
@@ -365,17 +550,52 @@ function page(session: string, nonce: string, owner: string, version: string, or
     </div>
     <div class="dlg-foot" id="up-donefoot" hidden>
       <button type="button" class="btn" id="up-again">Publish another</button>
-      <button type="button" class="btn" id="up-close">Done</button>
+      <button type="button" class="btn primary" id="up-close">Done</button>
     </div>
   </form>
 </dialog>
-<footer>PageVault ${esc(version)}</footer>
 <script nonce="${nonce}">
   const T = ${JSON.stringify(session)};
   const app = document.getElementById("app");
-  const PORTALS = {};
+  const nav = document.getElementById("nav");
+  const PORTALS = {};      // slug -> { slug, name, kind, description, docCount, members }
+  const DOCS = {};         // slug -> docs[] (lazy, cached after first view)
+  let selected = null;     // selected portal slug
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-  const ico = (id) => '<svg class="icon"><use href="#i-' + id + '"/></svg>';
+  const ico = (id, cls) => '<svg class="icon' + (cls ? ' ' + cls : '') + '" aria-hidden="true"><use href="#i-' + id + '"/></svg>';
+
+  // ── Theme ──────────────────────────────────────────────────────────────────
+  const SUN = '<svg class="icon" aria-hidden="true"><use href="#i-sun"/></svg>';
+  const MOON = '<svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg>';
+  const themeToggle = document.getElementById("theme-toggle");
+  function currentTheme() {
+    const set = document.documentElement.dataset.theme;
+    if (set) return set;
+    return matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  function paintToggle() { themeToggle.innerHTML = currentTheme() === "dark" ? SUN : MOON; }
+  themeToggle.addEventListener("click", () => {
+    const next = currentTheme() === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("pv-theme", next); } catch (e) {}
+    paintToggle();
+  });
+  paintToggle();
+
+  // ── Profile menu (email + sign out under one avatar) ─────────────────────────
+  const profileBtn = document.getElementById("profile");
+  const pmenu = document.getElementById("pmenu");
+  const closeMenu = () => { pmenu.hidden = true; profileBtn.setAttribute("aria-expanded", "false"); };
+  profileBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = pmenu.hidden;
+    pmenu.hidden = !open;
+    profileBtn.setAttribute("aria-expanded", String(open));
+  });
+  document.addEventListener("click", (e) => {
+    if (!pmenu.hidden && !pmenu.contains(e.target) && e.target !== profileBtn) closeMenu();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
 
   async function api(path, opts) {
     opts = opts || {};
@@ -399,51 +619,68 @@ function page(session: string, nonce: string, owner: string, version: string, or
     const s = encodeURIComponent(slug), i = encodeURIComponent(id);
     return kind === "public" ? "/pub/" + s + "/" + i : "/v/" + s + "/" + i;
   }
-
   // Works on a listing summary (has .public) or a full meta (has .publicToken).
   const hasLink = (d) => (d.public !== undefined ? !!d.public : !!d.publicToken);
 
   // The link worth handing out: the most-open URL that actually works for its audience.
-  // Copying the /v route for a page that is public just hands someone a login wall. Needs
-  // full meta (the /p token is not in the listing).
   function shareUrl(m, portal) {
     if (portal.kind === "public") return location.origin + viewPath("public", portal.slug, m.id);
     if (m.publicToken) return location.origin + "/p/" + m.publicToken;
     return location.origin + viewPath(portal.kind, portal.slug, m.id);
   }
 
-  // Effective reach — the most-open door this document has. A draft narrows to owner-only
-  // and beats everything (the one rule canView() applies before any grant).
+  // A shareable link to the portal *index* (the browsable list, gated by canViewPortal):
+  //   public     -> /pub/{slug}   anyone browses, no login
+  //   restricted -> /v/{slug}     the team browses after signing in
+  //   private     -> null          it opens only for the owner, so there is nothing to share.
+  function portalUrl(p) {
+    const s = encodeURIComponent(p.slug);
+    if (p.kind === "public") return location.origin + "/pub/" + s;
+    if (p.kind === "restricted") return location.origin + "/v/" + s;
+    return null;
+  }
+
+  // Rank the reach ladder so a document "widened past the portal base" can be detected.
+  const LV_RANK = { individual:0, team:1, link:2, public:3 };
+  const baseLevel = (kind) => kind === "public" ? "public" : kind === "restricted" ? "team" : "individual";
+
+  // Effective reach → the access level, its icon, and a human label. A draft narrows to
+  // owner-only and beats everything (the one rule canView() applies before any grant).
   function reach(d, kind) {
-    if (d.ownerOnly)       return { tier:"closed", icon:"lock",  label:"Draft — only you" };
-    if (kind === "public") return { tier:"open",   icon:"globe", label:"Public — listed" };
-    if (hasLink(d))        return { tier:"open",   icon:"link",  label:"Anyone with the link" };
-    if (kind === "restricted") return { tier:"gated", icon:"users", label:"Team — login required" };
-    return { tier:"closed", icon:"lock", label:"Only you" };
+    if (d.ownerOnly)       return { level:"individual", icon:"lock",       label:"Draft — only you", draft:true };
+    if (kind === "public") return { level:"public",     icon:"globe",      label:"Public — listed" };
+    if (hasLink(d))        return { level:"link",        icon:"link",       label:"Anyone with link" };
+    if (kind === "restricted") return { level:"team",   icon:"users",      label:"Team" };
+    return { level:"individual", icon:"individual", label:"Only you" };
+  }
+
+  // AccessBadge: neutral chip, icon tinted by level. iconOnly is used in nav rows and legend.
+  function badge(r) {
+    return '<span class="badge">' + ico(r.icon, "lv-" + r.level) + '<span>' + esc(r.label) + '</span></span>';
   }
 
   function rowHtml(d, portal) {
     const r = reach(d, portal.kind);
     const href = viewPath(portal.kind, portal.slug, d.id);
-    const tags =
-      (d.ownerOnly ? '<span class="tag">draft</span>' : '') +
-      (d.sourceKind === "markdown" ? '<span class="tag">md</span>' : '') +
-      // A public link on an otherwise-private document is the case worth flagging out loud.
-      (hasLink(d) && portal.kind === "private" ? '<span class="tag warn">' + ico("alert") + 'public link</span>' : '');
+    const widened = !r.draft && LV_RANK[r.level] > LV_RANK[baseLevel(portal.kind)];
+    const dtype = d.sourceKind === "markdown" ? "doc-md" : "doc-html";
     return (
       '<div class="doc" data-id="' + esc(d.id) + '" aria-expanded="false">' +
-        '<span class="reach ' + r.tier + '" title="' + esc(r.label) + '">' + ico(r.icon) + '</span>' +
-        '<a class="t" data-role="open" href="' + esc(href) + '" target="_blank" rel="noopener">' + esc(d.title) + '</a>' +
-        tags +
-        '<span class="d">' + esc((d.updatedAt || "").slice(0, 10)) + '</span>' +
-        '<button class="chev" data-act="expand" data-id="' + esc(d.id) + '" aria-expanded="false" aria-controls="dt-' + esc(d.id) + '" title="Sharing details">' + ico("chev") + '</button>' +
+        ico(dtype, "dtype") +
+        '<span class="body">' +
+          '<span class="trow">' +
+            '<a class="t" data-role="open" href="' + esc(href) + '" target="_blank" rel="noopener">' + esc(d.title) + '</a>' +
+            '<span class="fmt mono">' + (d.sourceKind === "markdown" ? "md" : "html") + '</span>' +
+          '</span>' +
+          (widened ? '<span class="widened">Widened past the portal base</span>' : '') +
+        '</span>' +
+        badge(r) +
+        '<span class="d mono">' + esc((d.updatedAt || "").slice(0, 10)) + '</span>' +
+        ico("chev", "chev") +
       '</div>'
     );
   }
 
-  // The sharing panel, built from a full-meta read (publicToken + extraEmails, absent from the
-  // listing). The notice arg renders a one-line banner — used to surface a group-sync that did
-  // not fully succeed after a grant.
   // The sharing panel (ADR-011). The link is always the hero; reach is one contextual choice
   // that defaults to the most open. Every action reuses the existing session-bearer mutations.
   function detailHtml(m, portal, notice) {
@@ -461,7 +698,7 @@ function page(session: string, nonce: string, owner: string, version: string, or
         '<div class="draftbar">' + ico("alert") +
         '<span><strong>Draft</strong> — opens for no one yet, even people you have shared it with. Publish to make the link live.</span>' +
         '<span class="grow"></span>' +
-        '<button class="btn primary" data-act="toggle" data-id="' + esc(m.id) + '" data-owneronly="1">Publish</button></div>'
+        '<button class="btn primary sm" data-act="toggle" data-id="' + esc(m.id) + '" data-owneronly="1">Publish</button></div>'
       );
     }
 
@@ -469,31 +706,30 @@ function page(session: string, nonce: string, owner: string, version: string, or
     parts.push(
       '<div class="sharebar' + (draft ? ' dim' : '') + '"><span class="lb">' + ico("link") + 'Share link</span>' +
       '<code>' + esc(link) + '</code>' +
-      '<button class="btn" data-act="copy" data-url="' + esc(link) + '">' + ico("copy") + 'Copy</button>' +
-      '<a class="btn" data-role="open" href="' + esc(link) + '" target="_blank" rel="noopener">Open &#8599;</a></div>'
+      '<button class="btn sm" data-act="copy" data-url="' + esc(link) + '">' + ico("copy") + 'Copy</button>' +
+      '<a class="btn sm" data-role="open" href="' + esc(link) + '" target="_blank" rel="noopener">Open &#8599;</a></div>'
     );
 
     if (isPublicPortal) {
-      parts.push('<div class="reason open">' + ico("globe") + '<span><b>Anyone with this link can open it.</b> <span class="sub">This portal is public — everything in it is readable by anyone with the link, so per-person sharing does not apply.</span></span></div>');
+      parts.push('<div class="reason public">' + ico("globe") + '<span><b>Anyone with this link can open it.</b> <span class="sub">This portal is public — everything in it is readable by anyone with the link, so per-person sharing does not apply.</span></span></div>');
     } else {
-      // Plain-language reach, reflecting current state.
       const nExtra = (m.extraEmails || []).length;
       let rTier, rIcon, rTitle, rSub;
-      if (draft) { rTier = "closed"; rIcon = "lock"; rTitle = "Only you — this is a draft"; rSub = "Publish above to let the link open for anyone else."; }
-      else if (hasPub) { rTier = "open"; rIcon = "globe"; rTitle = "Anyone with this link can open it"; rSub = "No login, no account — the simplest way to hand someone a report."; }
-      else if (kind === "restricted") { rTier = "gated"; rIcon = "users"; rTitle = "Your team can open it, after signing in"; rSub = "Portal members only — the link is not forwardable to outsiders."; }
-      else if (nExtra) { rTier = "gated"; rIcon = "users"; rTitle = "You and " + nExtra + " specific " + (nExtra === 1 ? "person" : "people") + " can open it"; rSub = "They sign in first. Add or remove people below, or open it to anyone with the link."; }
-      else { rTier = "closed"; rIcon = "lock"; rTitle = "Only you can open it"; rSub = "Nothing is shared yet — choose a wider reach, or add a person below."; }
+      if (draft) { rTier = "individual"; rIcon = "lock"; rTitle = "Only you — this is a draft"; rSub = "Publish above to let the link open for anyone else."; }
+      else if (hasPub) { rTier = "link"; rIcon = "link"; rTitle = "Anyone with this link can open it"; rSub = "No login, no account — the simplest way to hand someone a report."; }
+      else if (kind === "restricted") { rTier = "team"; rIcon = "users"; rTitle = "Your team can open it, after signing in"; rSub = "Portal members only — the link is not forwardable to outsiders."; }
+      else if (nExtra) { rTier = "team"; rIcon = "users"; rTitle = "You and " + nExtra + " specific " + (nExtra === 1 ? "person" : "people") + " can open it"; rSub = "They sign in first. Add or remove people below, or open it to anyone with the link."; }
+      else { rTier = "individual"; rIcon = "lock"; rTitle = "Only you can open it"; rSub = "Nothing is shared yet — choose a wider reach, or add a person below."; }
       parts.push('<div class="reason ' + rTier + '">' + ico(rIcon) + '<span><b>' + esc(rTitle) + '</b> <span class="sub">' + esc(rSub) + '</span></span></div>');
 
       // Reach is one choice: Anyone-with-link (default) vs portal-governed. The second option's
       // meaning comes from the portal — team for restricted, you for private. Moot for a draft.
       if (!draft) {
-        const otherLabel = kind === "restricted" ? "My team" : "Only me";
+        const otherLabel = kind === "restricted" ? "My team" : "Only you";
         const otherIcon = kind === "restricted" ? "users" : "lock";
         parts.push(
           '<div class="reachsel" role="group" aria-label="Who can open this">' +
-          '<button class="ropt" data-reach="open"' + (hasPub ? ' aria-pressed="true"' : ' data-act="mint" data-id="' + esc(m.id) + '"') + '>' + ico("globe") + 'Anyone with the link</button>' +
+          '<button class="ropt" data-reach="open"' + (hasPub ? ' aria-pressed="true"' : ' data-act="mint" data-id="' + esc(m.id) + '"') + '>' + ico("link") + 'Anyone with the link</button>' +
           '<button class="ropt" data-reach="other"' + (hasPub ? ' data-act="revoke" data-id="' + esc(m.id) + '"' : ' aria-pressed="true"') + '>' + ico(otherIcon) + esc(otherLabel) + '</button>' +
           '</div>'
         );
@@ -503,95 +739,126 @@ function page(session: string, nonce: string, owner: string, version: string, or
         }
       }
 
-      // Named individuals — portal-level access for specific people, additive.
-      parts.push('<div class="subrow"><span class="lb">' + ico("mail") + 'Also give specific people access</span></div>');
-      parts.push('<div class="dhint">Added to this document only. Additive — it never removes anyone the portal already lets in.</div>');
-      const emails = m.extraEmails || [];
-      parts.push(emails.length
-        ? '<ul class="chips">' + emails.map((e) =>
-            '<li class="chip">' + esc(e) + '<button class="x" data-act="unshare" data-id="' + esc(m.id) + '" data-email="' + esc(e) + '" title="remove">' + ico("x") + '</button></li>'
-          ).join("") + '</ul>'
-        : '<div class="dhint">No one specific yet.</div>');
-      parts.push(
-        '<div class="addrow"><input type="email" placeholder="email to add" data-email-for="' + esc(m.id) + '">' +
-        '<button class="btn" data-act="share" data-id="' + esc(m.id) + '">Add</button></div>'
-      );
+      // Named individuals — specific people, additive. Only meaningful when the link is NOT
+      // open to anyone: once it is, per-person grants add nothing, so the section is hidden.
+      if (!hasPub) {
+        parts.push('<div class="subrow"><span class="lb">' + ico("mail") + 'Also give specific people access</span></div>');
+        parts.push('<div class="dhint">Added to this document only. Additive — it never removes anyone the portal already lets in.</div>');
+        const emails = m.extraEmails || [];
+        parts.push(emails.length
+          ? '<ul class="chips">' + emails.map((e) =>
+              '<li class="chip">' + esc(e) + '<button class="x" data-act="unshare" data-id="' + esc(m.id) + '" data-email="' + esc(e) + '" title="remove">' + ico("x") + '</button></li>'
+            ).join("") + '</ul>'
+          : '<div class="dhint">No one specific yet.</div>');
+        parts.push(
+          '<div class="addrow"><input type="email" placeholder="email to add" data-email-for="' + esc(m.id) + '">' +
+          '<button class="btn sm" data-act="share" data-id="' + esc(m.id) + '">Add</button></div>'
+        );
+      }
     }
 
     // "Make draft" sits quietly by Delete when not already a draft (Publish lives in the draftbar).
     parts.push('<div class="foot"><span class="grow"></span>' +
-      (draft ? '' : '<button class="btn" data-act="toggle" data-id="' + esc(m.id) + '" data-owneronly="0">Make draft</button>') +
+      (draft ? '' : '<button class="btn sm warn" data-act="toggle" data-id="' + esc(m.id) + '" data-owneronly="0">Make draft</button>') +
       '<button class="btn danger" data-act="delete" data-id="' + esc(m.id) + '" data-title="' + esc(m.title) + '">Delete document</button></div>');
     return parts.join("");
   }
 
-  const nav = document.getElementById("nav");
+  // ── Render ─────────────────────────────────────────────────────────────────
+  function renderNav() {
+    nav.innerHTML = Object.values(PORTALS).map((p) => {
+      const r = reach({ }, p.kind); // base level of the portal, icon-only
+      const cur = p.slug === selected;
+      return '<button class="prow" data-nav="' + esc(p.slug) + '"' + (cur ? ' aria-current="true"' : '') + '>' +
+        ico(r.icon, "lv-" + r.level) +
+        '<span class="nm"><b>' + esc(p.name) + '</b><span class="mono">' + esc(p.slug) + '</span></span>' +
+        '<span class="cnt">' + (p.docCount || 0) + '</span></button>';
+    }).join("");
+  }
+
+  function memberEditor(p) {
+    if (p.kind === "restricted") {
+      const members = p.members || [];
+      const chips = members.length
+        ? '<ul class="chips">' + members.map((m) => '<li class="chip">' + esc(m) + '<button class="x" data-act="remove-member" data-portal="' + esc(p.slug) + '" data-email="' + esc(m) + '" title="remove">' + ico("x") + '</button></li>').join("") + '</ul>'
+        : '<div class="dhint">No members yet.</div>';
+      return '<div class="seats"><div class="cap">' + ico("users") + '<span>Team seats</span><span class="sub">&middot; everyone here reaches every document in the portal</span></div>' +
+        chips +
+        '<div class="addrow"><input type="email" placeholder="email to add" data-member-for="' + esc(p.slug) + '">' +
+        '<button class="btn sm" data-act="add-member" data-portal="' + esc(p.slug) + '">Add</button></div></div>';
+    }
+    return "";
+  }
+
+  function renderMain() {
+    const p = PORTALS[selected];
+    if (!p) { app.innerHTML = '<p class="empty">No portals yet. Publish a document to create one.</p>'; return; }
+    const r = reach({ }, p.kind);
+    const docs = DOCS[p.slug];
+    const pShare = portalUrl(p);
+    const shareBtn = pShare
+      ? '<button class="btn sm" data-act="copy" data-url="' + esc(pShare) + '" title="' +
+        esc(p.kind === "public"
+          ? "Anyone with this link can browse this portal — no login."
+          : "Your team can browse this portal after signing in. Not forwardable to outsiders.") +
+        '">' + ico("link") + 'Copy portal link</button>'
+      : '';
+    const head =
+      '<div class="phead"><div class="phead-top"><div class="min0">' +
+        '<div class="titrow"><h1>' + esc(p.name) + '</h1><span class="slug mono">/' + esc(p.slug) + '</span></div>' +
+        (p.description ? '<p>' + esc(p.description) + '</p>' : '') +
+      '</div><div class="base"><span class="lb">Base access</span>' + badge(r) + shareBtn + '</div></div>' +
+      memberEditor(p) + '</div>';
+
+    let list;
+    if (!docs) list = '<p class="empty">Loading&hellip;</p>';
+    else if (!docs.length) list = '<p class="empty">No documents yet. Publish one with the button above.</p>';
+    else list = '<div class="doclist">' + docs.map((d) =>
+      '<div class="item" data-item="' + esc(d.id) + '">' + rowHtml(d, p) +
+      '<div class="detail" id="dt-' + esc(d.id) + '" data-detail="' + esc(d.id) + '" hidden></div></div>').join("") + '</div>';
+
+    app.innerHTML = head +
+      '<div class="dochead"><div class="h"><h2>Documents</h2><span class="cnt">' + (docs ? docs.length : "") + '</span></div>' +
+      '<button class="btn" id="pub-here"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Upload to ' + esc(p.name) + '</button></div>' + list;
+  }
+
+  async function selectPortal(slug) {
+    selected = slug;
+    renderNav();
+    renderMain();
+    if (!DOCS[slug]) {
+      try {
+        const res = await api("/api/docs?portal=" + encodeURIComponent(slug));
+        DOCS[slug] = res.docs || [];
+      } catch (e) { DOCS[slug] = []; }
+      if (selected === slug) renderMain();
+    }
+  }
 
   async function load() {
     try {
       const { portals } = await api("/api/portals");
-      if (!portals.length) { app.innerHTML = '<p class="empty">No portals yet. Publish a document to create one.</p>'; nav.innerHTML = ""; return; }
-      const blocks = [];
-      const navItems = [];
-      for (const p of portals) {
-        PORTALS[p.slug] = p;
-        const [detail, docsRes] = await Promise.all([
-          api("/api/portals/" + encodeURIComponent(p.slug)),
-          api("/api/docs?portal=" + encodeURIComponent(p.slug)),
-        ]);
-
-        // canView() reads members only for restricted portals. Rendering the team editor for
-        // the other kinds admits emails to the Access group (burning a seat) while granting
-        // nothing — so it is restricted-only; private and public get a one-line access note.
-        let access;
-        if (p.kind === "restricted") {
-          const members = detail.members || [];
-          const chips = members.length
-            ? '<ul class="chips">' + members.map((m) => '<li class="chip">' + esc(m) + '<button class="x" data-act="remove-member" data-portal="' + esc(p.slug) + '" data-email="' + esc(m) + '" title="remove">' + ico("x") + '</button></li>').join("") + '</ul>'
-            : '<div class="dhint">No members yet.</div>';
-          access =
-            '<div class="members"><span class="cap">' + ico("users") + 'Team — everyone here sees every document in this portal</span>' +
-            chips +
-            '<div class="addrow"><input type="email" placeholder="email to add" data-member-for="' + esc(p.slug) + '">' +
-            '<button class="btn" data-act="add-member" data-portal="' + esc(p.slug) + '">Add</button></div></div>';
-        } else if (p.kind === "public") {
-          access = '<div class="access-note">' + ico("globe") + 'Anyone with the link — no login, no Access seats. This portal is listed and browsable.</div>';
-        } else {
-          access = '<div class="access-note">' + ico("lock") + 'Yours only, unless a document below widens itself.</div>';
-        }
-
-        const docs = docsRes.docs || [];
-        const rows = docs.length
-          ? docs.map((d) => '<div class="item" data-item="' + esc(d.id) + '">' + rowHtml(d, p) + '<div class="detail" id="dt-' + esc(d.id) + '" data-detail="' + esc(d.id) + '" hidden></div></div>').join("")
-          : '<p class="empty">No documents.</p>';
-
-        const pico = p.kind === "public" ? "globe" : p.kind === "restricted" ? "users" : "lock";
-        navItems.push(
-          '<button class="navitem ' + p.kind + '" data-nav="' + esc(p.slug) + '">' + ico(pico) +
-          '<span class="nm">' + esc(p.name) + '</span><span class="cnt">' + docs.length + '</span></button>'
-        );
-
-        blocks.push(
-          '<section class="portal ' + p.kind + '" id="portal-' + esc(p.slug) + '">' +
-          '<h2><span class="p-icon">' + ico(pico) + '</span>' +
-          '<span class="name">' + esc(p.name) + '</span><span class="kind">' + esc(p.slug) + ' &middot; ' + esc(p.kind) + '</span></h2>' +
-          access + rows + '</section>'
-        );
+      if (!portals.length) {
+        nav.innerHTML = "";
+        app.innerHTML = '<p class="empty">No portals yet. Publish a document to create one.</p>';
+        return;
       }
-      app.innerHTML = blocks.join("");
-      nav.innerHTML = navItems.join("");
+      // One detail read per portal gives its docCount + members for the sidebar and header
+      // card. Documents themselves load lazily for the selected portal (kinder to the KV
+      // list quota than fetching every portal's docs up front).
+      const details = await Promise.all(portals.map((p) => api("/api/portals/" + encodeURIComponent(p.slug))));
+      details.forEach((d) => { PORTALS[d.slug] = d; });
+      const want = (selected && PORTALS[selected]) ? selected
+        : (PORTALS["default"] ? "default" : Object.keys(PORTALS)[0]);
+      await selectPortal(want);
     } catch (e) {
       app.innerHTML = '<p class="empty err">Could not load: ' + esc(e.message) + '</p>';
     }
   }
 
-  // Left-nav: clicking a portal brings it to the top — a quick table of contents.
-  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
   nav.addEventListener("click", (ev) => {
     const b = ev.target.closest("[data-nav]");
-    if (!b) return;
-    const el = document.getElementById("portal-" + b.dataset.nav);
-    if (el) el.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+    if (b) selectPortal(b.dataset.nav);
   });
 
   // Expand/collapse a row, reading full meta lazily on first open.
@@ -625,6 +892,9 @@ function page(session: string, nonce: string, owner: string, version: string, or
     const detail = item.querySelector('[data-detail="' + id + '"]');
     detail.dataset.loaded = "1";
     detail.innerHTML = detailHtml(meta, portal, notice);
+    // Keep the cache coherent so a portal re-select shows the mutation.
+    const cache = DOCS[meta.portal];
+    if (cache) { const i = cache.findIndex((d) => d.id === id); if (i >= 0) cache[i] = meta; }
   }
 
   function copyBtn(btn) {
@@ -645,7 +915,6 @@ function page(session: string, nonce: string, owner: string, version: string, or
       ev.stopPropagation();
       const a = actEl.dataset.act, id = actEl.dataset.id;
       try {
-        if (a === "expand") { await toggle(id); return; }
         if (a === "copy") { copyBtn(actEl); return; }
         if (a === "mint") {
           // Widening to the default reach — no confirm; it is the expected action (ADR-011).
@@ -664,7 +933,6 @@ function page(session: string, nonce: string, owner: string, version: string, or
           const v = inp && inp.value.trim();
           if (!v) return;
           const m = await patch(id, { addEmails: [v] });
-          // Surface a grant that landed in KV but that Access will not (yet) honor. ADR-002.
           const notice = m.sync && m.sync !== "synced" && m.sync !== "noop"
             ? (m.sync === "not_configured" ? "Saved, but email sharing needs Access (enable portals) before this person can open it." : "Saved, but admitting them to Access failed — they cannot open it yet.")
             : null;
@@ -678,18 +946,24 @@ function page(session: string, nonce: string, owner: string, version: string, or
           await api("/api/docs/" + encodeURIComponent(id), { method: "DELETE" });
           const item = app.querySelector('[data-item="' + id + '"]');
           if (item) item.remove();
+          const cache = DOCS[selected];
+          if (cache) { const i = cache.findIndex((d) => d.id === id); if (i >= 0) cache.splice(i, 1); }
+          if (PORTALS[selected]) PORTALS[selected].docCount = Math.max(0, (PORTALS[selected].docCount || 1) - 1);
+          renderNav();
           return;
         }
         if (a === "add-member") {
           const inp = app.querySelector('[data-member-for="' + actEl.dataset.portal + '"]');
           const v = inp && inp.value.trim();
           if (!v) return;
-          await api("/api/portals/" + encodeURIComponent(actEl.dataset.portal), { method: "PATCH", body: JSON.stringify({ addMembers: [v] }) });
-          await load(); return;
+          const res = await api("/api/portals/" + encodeURIComponent(actEl.dataset.portal), { method: "PATCH", body: JSON.stringify({ addMembers: [v] }) });
+          if (PORTALS[actEl.dataset.portal]) PORTALS[actEl.dataset.portal].members = res.members || [];
+          renderMain(); return;
         }
         if (a === "remove-member") {
-          await api("/api/portals/" + encodeURIComponent(actEl.dataset.portal), { method: "PATCH", body: JSON.stringify({ removeMembers: [actEl.dataset.email] }) });
-          await load(); return;
+          const res = await api("/api/portals/" + encodeURIComponent(actEl.dataset.portal), { method: "PATCH", body: JSON.stringify({ removeMembers: [actEl.dataset.email] }) });
+          if (PORTALS[actEl.dataset.portal]) PORTALS[actEl.dataset.portal].members = res.members || [];
+          renderMain(); return;
         }
       } catch (e) {
         alert("Failed: " + e.message);
@@ -703,8 +977,7 @@ function page(session: string, nonce: string, owner: string, version: string, or
     if (row) toggle(row.dataset.id);
   });
 
-  // New-portal dialog (#43). The console's writes all go through the same session-bearer api()
-  // helper; this is one more POST, and the server owns slug validation — we just surface it.
+  // ── New-portal dialog (#43) ──────────────────────────────────────────────────
   const dlgPortal = document.getElementById("dlg-portal");
   const npErr = document.getElementById("np-err");
   function showNpErr(msg) { npErr.textContent = msg; npErr.hidden = false; }
@@ -732,17 +1005,16 @@ function page(session: string, nonce: string, owner: string, version: string, or
     try {
       await api("/api/portals", { method: "POST", body: JSON.stringify(body) });
       dlgPortal.close();
+      selected = slug; // land on the portal you just made
       await load();
     } catch (e) {
-      // Surfaces the server's own message: invalid_slug (the reserved/format rule) or portal_exists.
       showNpErr(e.message);
     } finally {
       btn.disabled = false;
     }
   });
 
-  // Upload / publish dialog (#6). The file is read in the browser and published through the
-  // same session-bearer api(); the two warnings the issue calls for live in the UI, not the docs.
+  // ── Upload / publish dialog (#6) ──────────────────────────────────────────────
   const dlgUpload = document.getElementById("dlg-upload");
   const upErr = document.getElementById("up-err");
   const upDrop = document.getElementById("up-drop");
@@ -756,11 +1028,10 @@ function page(session: string, nonce: string, owner: string, version: string, or
   let uploadHtml = null;
   let uploadKind = "html";
   const showUpErr = (msg) => { upErr.textContent = msg; upErr.hidden = false; };
-  const parseList = (s) => (s || "").split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+  const parseList = (s) => (s || "").split(/[\\s,]+/).map((x) => x.trim()).filter(Boolean);
 
   // Cheap relative-reference scan: a reference that is not absolute http(s), data:, blob:, a
   // #anchor, or a mail/tel/js scheme will 404 for the recipient — we host one file, no assets.
-  // HTML carries them as src/href; markdown as ](path) in image/link syntax.
   function relativeRefs(text, kind) {
     const re = kind === "markdown" ? /\\]\\(([^)\\s]+)/g : /(?:src|href)\\s*=\\s*["']([^"']+)["']/gi;
     const found = []; let m;
@@ -797,42 +1068,40 @@ function page(session: string, nonce: string, owner: string, version: string, or
   upInternal.addEventListener("change", () => { upPubWarn.hidden = upInternal.checked; });
   dlgUpload.addEventListener("click", (e) => { const c = e.target.closest('[data-act="copy"]'); if (c) { e.preventDefault(); copyBtn(c); } });
 
-  function openUpload() {
+  function openUpload(presetPortal) {
     document.getElementById("form-upload").reset();
     uploadHtml = null; uploadKind = "html";
     upErr.hidden = true; upRelWarn.hidden = true; upPubWarn.hidden = false;
     upDrop.classList.remove("has-file", "drag");
     upFileLabel.innerHTML = 'Drop an <code>.html</code> or <code>.md</code> file here, or click to choose';
     const slugs = Object.keys(PORTALS);
-    // Populate from live portals so the user can only pick one that exists. With none yet, an
-    // empty value omits the portal on publish — the server then auto-creates the default (ADR-005).
     upPortalSel.innerHTML = slugs.length
       ? slugs.map((s) => '<option value="' + esc(s) + '">' + esc(PORTALS[s].name) + ' (' + esc(PORTALS[s].kind) + ')</option>').join("")
       : '<option value="">default (created on first publish)</option>';
-    if (PORTALS["default"]) upPortalSel.value = "default";
+    const want = (presetPortal && PORTALS[presetPortal]) ? presetPortal : (PORTALS["default"] ? "default" : (selected || ""));
+    if (want) upPortalSel.value = want;
     document.getElementById("up-body").hidden = false;
     document.getElementById("up-done").hidden = true;
     document.getElementById("up-foot").hidden = false;
     document.getElementById("up-donefoot").hidden = true;
     dlgUpload.showModal();
   }
-  document.getElementById("new-doc").addEventListener("click", openUpload);
+  document.getElementById("new-doc").addEventListener("click", () => openUpload(selected));
+  app.addEventListener("click", (ev) => { if (ev.target.closest("#pub-here")) openUpload(selected); });
   document.getElementById("up-cancel").addEventListener("click", () => dlgUpload.close());
   document.getElementById("up-close").addEventListener("click", () => dlgUpload.close());
-  document.getElementById("up-again").addEventListener("click", openUpload);
+  document.getElementById("up-again").addEventListener("click", () => openUpload(selected));
 
   function showUploadDone(res) {
     const link = res.publicUrl || res.url;
-    // Best-effort auto-copy — clipboard access can lapse after the publish round-trip, so the
-    // primary Copy button below is the guaranteed path.
     try { navigator.clipboard && navigator.clipboard.writeText(link); } catch (e) {}
     const done = document.getElementById("up-done");
     const wide = !res.ownerOnly && !!res.publicUrl;
     done.innerHTML =
       '<div class="donerow"><div class="done-ok">' + ico(wide ? "globe" : "lock") + 'Published to ' + esc(res.portal) + (wide ? ' — anyone with the link can open it' : '') + '</div>' +
       '<div class="lnk"><code>' + esc(link) + '</code>' +
-      '<button type="button" class="btn primary" data-act="copy" data-url="' + esc(link) + '">' + ico("copy") + 'Copy link</button>' +
-      '<a class="btn" href="' + esc(link) + '" target="_blank" rel="noopener">Open &#8599;</a></div></div>';
+      '<button type="button" class="btn primary sm" data-act="copy" data-url="' + esc(link) + '">' + ico("copy") + 'Copy link</button>' +
+      '<a class="btn sm" href="' + esc(link) + '" target="_blank" rel="noopener">Open &#8599;</a></div></div>';
     document.getElementById("up-body").hidden = true;
     done.hidden = false;
     document.getElementById("up-foot").hidden = true;
@@ -861,7 +1130,6 @@ function page(session: string, nonce: string, owner: string, version: string, or
       try {
         res = await publish(false);
       } catch (e) {
-        // A same-title doc in the portal replaces in place — but only on explicit confirm.
         if (/already exists in portal/i.test(e.message)) {
           if (!confirm(e.message + ". Publishing replaces it in place, keeping the same URL. Replace it?")) { btn.disabled = false; return; }
           res = await publish(true);
@@ -870,7 +1138,10 @@ function page(session: string, nonce: string, owner: string, version: string, or
         }
       }
       showUploadDone(res);
-      load(); // refresh the list behind the modal
+      // The published portal's doc cache is now stale — drop it so a re-select refetches.
+      if (res.portal) delete DOCS[res.portal];
+      if (res.portal === selected) { delete DOCS[selected]; selectPortal(selected); }
+      else { load(); }
     } catch (e) {
       showUpErr(e.message);
     } finally {
@@ -883,3 +1154,49 @@ function page(session: string, nonce: string, owner: string, version: string, or
 </body>
 </html>`;
 }
+
+// ── Brand + icon assets (inline SVG; CSP-safe) ─────────────────────────────────
+
+// Favicon: the leaning-v knocked out of a blue rounded square. Inlined as a data: URI in <link>.
+const FAVICON_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+  '<rect x="2" y="2" width="28" height="28" rx="8" fill="#2F6FED"/>' +
+  '<path d="M9.5 10 L16 22.5 L22.5 10" transform="translate(2.5 0) skewX(-7)" stroke="#fff" stroke-width="4.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+// The dark token set, shared by the prefers-color-scheme default and the explicit override.
+const DARK_TOKENS = `color-scheme:dark;
+    --pv-bg:#0F1216; --pv-surface:#161A20; --pv-surface-2:#1B2027; --pv-border:#262C35;
+    --pv-border-2:#232830; --pv-ink:#F1F3F6; --pv-text:#C4CAD4; --pv-text-2:#AEB5C0;
+    --pv-muted:#828B98; --pv-faint:#646D7A; --pv-chip:#222831; --pv-chip-bd:#2B323C;
+    --pv-field-bg:#10141A; --pv-field-bd:#2E353F; --pv-accent:#5B8CF5; --pv-accent-hover:#7CA4F8;
+    --pv-accent-soft:#182231; --pv-header:#12161B; --pv-code-bg:#14202F; --pv-code-bd:#1F3350;
+    --pv-code-tx:#7CA4F8; --pv-danger:#E0687E; --pv-warn:#D6A24A;
+    --pv-lv-individual:#98A0AC; --pv-lv-team:#5B8CF5; --pv-lv-link:#D6A24A; --pv-lv-public:#E0687E;`;
+
+// prefers-color-scheme dark, but only when the user has not pinned a theme (data-theme unset).
+// The :not([data-theme]) guard lets an explicit light choice win over the OS preference.
+const DARK_TOKENS_MEDIA = (_nonce: string): string =>
+  `@media (prefers-color-scheme: dark) { :root:not([data-theme]) { ${DARK_TOKENS} } }`;
+
+// The icon symbol set — from the Claude Design handoff where provided (access + doc icons at
+// their specified stroke widths), feather-style for the rest. Referenced with <use href="#i-…">.
+const ICON_DEFS = `<svg class="sprite" aria-hidden="true"><defs>
+  <symbol id="i-individual" viewBox="0 0 24 24"><circle cx="12" cy="7.5" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="8.5" cy="8" r="3"/><path d="M2.5 19a6 6 0 0 1 12 0"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6"/><path d="M17 13.6a6 6 0 0 1 4.5 5.4"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M9 15l6-6"/><path d="M11 6.5l1.4-1.4a4.2 4.2 0 0 1 6 6L17 12.5"/><path d="M13 17.5l-1.4 1.4a4.2 4.2 0 0 1-6-6L7 11.5"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 3.6 9 14 14 0 0 1-3.6 9 14 14 0 0 1-3.6-9A14 14 0 0 1 12 3z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-doc-html" viewBox="0 0 24 24"><path d="M13 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6l5 5v11a2 2 0 0 1-2 2z"/><path d="M10 13l-1.6 1.6L10 16.2M14 13l1.6 1.6L14 16.2"/></symbol>
+  <symbol id="i-doc-md" viewBox="0 0 24 24"><path d="M13 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6l5 5v11a2 2 0 0 1-2 2z"/><path d="M8.5 16v-3l1.6 1.8L11.7 13v3M14 13v3M12.6 14.6L14 16.2l1.4-1.6"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 20h20L12 3Z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="17" x2="12" y2="17"/></symbol>
+  <symbol id="i-widen" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+  <symbol id="i-signout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
+</defs></svg>`;

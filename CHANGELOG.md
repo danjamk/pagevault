@@ -7,6 +7,52 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-07-19
+
+The owner console adopts the Claude Design system — a new brand, a dark theme, and a
+single-portal layout — alongside a batch of smaller console, provisioning, and docs improvements.
+
+### Added
+- **Copy a shareable portal link** — the portal card now offers a **Copy portal link** button for
+  public and team portals: `/pub/{slug}` (anyone browses, no login) or `/v/{slug}` (the team
+  browses after signing in, not forwardable to outsiders). A private portal opens only for the
+  owner, so it gets no button. No new route — the browsable index pages already existed and stay
+  gated by `canViewPortal`.
+- **Deploy date, in the console and `/health`** — a new `PAGEVAULT_DEPLOYED_AT`, baked at deploy
+  alongside the version (ADR-010). The console footer shows it next to the version (which links to
+  the changelog), and `/health` now returns `deployedAt` so an operator or CI can read what is
+  running and when it shipped without opening the console. `/health` stays deliberately shallow: it
+  is public, so probing KV on every hit would hand anyone a way to burn the free-tier read quota.
+- **The wordmark on the README** — outlined from Sora so it renders on GitHub with no webfont, on a
+  card legible in both light and dark. Brand assets live in `docs/brand/`. Two `examples/` fixtures
+  reference a remote image to show how export handles it: the interactive viewer loads it, a PDF
+  export does not (the [#50](https://github.com/danjamk/pagevault/issues/50) renderer blocks all
+  network by design).
+
+### Changed
+- **A console design system** ([#67](https://github.com/danjamk/pagevault/issues/67)) — the owner
+  console adopts the Claude Design handoff: a signal-blue accent, a cool-grey ground, and the
+  leaning-**v** wordmark that retires the aperture. It gains a **dark theme** with a persisted
+  toggle, an access **badge** whose icon is tinted by how far a document can travel (only you /
+  team / anyone-with-the-link / public), and a single-selected-portal layout — a sidebar of
+  portals, one portal's header card and document list in the main panel. Account details (email,
+  sign out) collapse into a profile menu; the entry point to publishing is named **Upload** to
+  distinguish it from acting on existing documents. The wordmark's Sora glyphs ship as a ~2.5KB
+  inlined woff2 subset (no webfont link, no build step, owner-page only); UI text stays on the
+  system stack. Link-first / public-by-default sharing
+  ([ADR-011](docs/adr/ADR-011-public-by-default-console.md)) is unchanged — the handoff mockup
+  predates that decision and is not followed on it. Per-person sharing now hides once a document
+  is open to anyone with the link (it adds nothing there), and "anyone with the link" carries the
+  link icon, not the globe. No new dependencies; still one server-rendered page under the strict
+  nonced CSP.
+- **`make provision` confirms Browser Run** — PDF export ([#50](https://github.com/danjamk/pagevault/issues/50))
+  needs the BROWSER binding, and provisioning now reports whether Browser Run looks ready instead of
+  leaving it unsaid. It is a printed confirmation, not a live probe: Browser Run is on by default on
+  the Workers Free plan (nothing to enable), and there is no clean read-only capability endpoint —
+  every quick-action endpoint spends the daily allocation.
+- **`make help` reads by group** — targets are grouped (Develop · Test & check · Cloudflare account ·
+  Deploy & operate · Data) instead of one flat list.
+
 ## [0.5.0] — 2026-07-19
 
 The owner console gets author-side controls and a link-first sharing model.

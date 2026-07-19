@@ -90,6 +90,14 @@ describe("🔴 /admin — session token + strict CSP (ADR-004)", () => {
     expect(csp).not.toContain("unsafe-inline");
   });
 
+  it("🔴 carries no inline style attributes — the nonced CSP drops them, so any would break layout", async () => {
+    // style-src 'nonce-…' without 'unsafe-inline' blocks inline style="" attributes outright.
+    // An inline style is therefore silently dropped in the browser (not in a no-CSP test render),
+    // which is exactly how a hidden sprite <svg> once fell back to 300x150 and shoved the page down.
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).not.toMatch(/\sstyle=/i);
+  });
+
   it("embeds a session token, never the long-lived API token", async () => {
     const body = await (await getAdmin(await adminJwt(OWNER))).text();
     expect(body).not.toContain(API_TOKEN); // ADR-004: the API token must never reach the DOM
@@ -226,5 +234,21 @@ describe("link-first sharing + public-by-default (#65 / ADR-011)", () => {
     // Public is the default: body.public is set UNLESS internal is checked.
     expect(body).toContain("upInternal.checked");
     expect(body).toContain("Publish &amp; copy link");
+  });
+});
+
+describe("shareable portal link on the portal card", () => {
+  // The portal card is built client-side, so this asserts the embedded script's logic. The
+  // link points at the browsable index route, which already exists and is gated by
+  // canViewPortal: public -> /pub/{slug}, restricted -> /v/{slug}, private -> none (it opens
+  // only for the owner, so there is nothing to hand out).
+  it("copies the portal's index URL for public and team portals, but not private", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain("Copy portal link");
+    expect(body).toContain("function portalUrl");
+    expect(body).toContain('"/pub/"'); // public portal index
+    expect(body).toContain('"/v/"'); // restricted portal index
+    // Private returns null — the button is only rendered when portalUrl is non-null.
+    expect(body).toMatch(/return null;\s*\n\s*}/);
   });
 });

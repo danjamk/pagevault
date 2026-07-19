@@ -117,6 +117,19 @@ let kvId = ctx.kvId;
   }
 }
 
+// --- Browser Run: confirm, don't probe (PDF export, #50) -------------------
+//
+// PDF export (#50) needs the BROWSER binding (Browser Run / Puppeteer). Two facts make this a
+// printed confirmation, not a live check. There is nothing to enable — Browser Run is on by
+// default on the Workers Free plan. And there is no clean read-only probe: the only capability
+// signal is the binding's limits() at runtime (post-deploy, not from here), while every REST
+// quick-action launches a browser and spends the daily allocation, so poking one from a setup
+// script would be the wrong thing. So I confirm and point, and never fail — PDF is optional and
+// degrades off cleanly (env.ts), so a missing allocation is a warning at worst, not a stop.
+ok("Browser Run: on by default (Workers Free) — PDF export needs no setup step");
+info("  The daily free allocation (~10 min) is the only limit; past it /pdf returns 429 and the");
+console.log(`  ${c.dim("viewer's PDF button degrades off until it resets — https://developers.cloudflare.com/browser-rendering/platform/limits/")}`);
+
 // --- One-time PIN: the zero-onboarding mechanism ---------------------------
 //
 // 🔴 A fresh Zero Trust org ships with "Sign in with Cloudflare" as its only login method,
@@ -250,6 +263,7 @@ const template = readFileSync(CONFIG_IN, "utf8");
 const generated = template
   .replace(/"id": "REPLACE_WITH_KV_NAMESPACE_ID"/, `"id": "${kvId}"`)
   .replace(/"PAGEVAULT_VERSION": ""/, `"PAGEVAULT_VERSION": "${releaseTag()}"`)
+  .replace(/"PAGEVAULT_DEPLOYED_AT": ""/, `"PAGEVAULT_DEPLOYED_AT": "${new Date().toISOString()}"`)
   .replace(/"OWNER_EMAIL": ""/, `"OWNER_EMAIL": "${ownerEmail}"`)
   .replace(/"CF_TEAM_NAME": ""/, `"CF_TEAM_NAME": "${team}"`)
   .replace(/"PUBLIC_HOST": ""/, `"PUBLIC_HOST": "${host}"`)

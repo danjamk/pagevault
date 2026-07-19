@@ -30,10 +30,19 @@ export default {
     const { pathname } = url;
 
     // Version, machine-readable and unauthenticated: what code this deployment is running
-    // (<version>+<sha>, ADR-010). Lets `make verify` and CI (#38) answer "am I up to date?".
-    // No secrets here — the source is public — so there's nothing to gate.
+    // (<version>+<sha>, ADR-010) and when it shipped. Lets `make verify` and CI (#38) answer
+    // "am I up to date?". No secrets here — the source is public — so there's nothing to gate.
+    //
+    // I keep this shallow on purpose: it reports the build, it does NOT probe KV or any binding.
+    // The endpoint is public, so a KV read on every hit would hand anyone on the internet a way to
+    // burn the free-tier KV read quota (100k/day) — the one resource the product runs on. This is
+    // a build report, not a liveness probe, and that shallowness is the point.
     if (pathname === "/health") {
-      return json({ name: "pagevault", version: env.PAGEVAULT_VERSION || "unknown" });
+      return json({
+        name: "pagevault",
+        version: env.PAGEVAULT_VERSION || "unknown",
+        deployedAt: env.PAGEVAULT_DEPLOYED_AT || null,
+      });
     }
 
     // Remote MCP, Streamable HTTP. Bearer token, and NO Cloudflare Access application —

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remote image reference — export test</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { max-width: 42rem; margin: 3rem auto; padding: 0 1.25rem;
+         font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  h1 { font-size: 1.5rem; letter-spacing: -0.02em; }
+  img { max-width: 100%; height: auto; margin: 1.5rem 0; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em; }
+  .muted { opacity: 0.75; }
+</style>
+</head>
+<body>
+  <h1>Remote image reference — export test</h1>
+
+  <p>This page tests how PageVault handles a <strong>remote image</strong> — one loaded from an
+  absolute <code>https://</code> URL rather than embedded in the file. The image below is the
+  PageVault wordmark, served from this repository over GitHub's raw host:</p>
+
+  <img src="https://raw.githubusercontent.com/danjamk/pagevault/main/docs/brand/wordmark.png"
+       alt="PageVault wordmark" width="320">
+
+  <p>What to expect:</p>
+  <ul>
+    <li><strong>In the interactive viewer</strong> the image loads — the sandbox CSP allows
+      images from any <code>https:</code> host (<code>img-src data: blob: https:</code>).</li>
+    <li><strong>In a PDF export</strong> the image is missing. The PDF renderer (#50) aborts
+      every outbound request during the render, so nothing fetched from the network survives
+      into the PDF. Only images inlined as <code>data:</code> URIs render in a PDF.</li>
+  </ul>
+
+  <p class="muted">The gap is deliberate: the interactive view is full fidelity; the PDF trades
+  remote assets for the guarantee that the render never touches the network.</p>
+</body>
+</html>

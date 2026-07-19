@@ -88,6 +88,7 @@ let generated = template
   .replace(/"id": "REPLACE_WITH_KV_NAMESPACE_ID"/, `"id": "${kvId}"`)
   .replace(/"OWNER_EMAIL": ""/, `"OWNER_EMAIL": "${ownerEmail}"`)
   .replace(/"PAGEVAULT_VERSION": ""/, `"PAGEVAULT_VERSION": "${version}"`)
+  .replace(/"PAGEVAULT_DEPLOYED_AT": ""/, `"PAGEVAULT_DEPLOYED_AT": "${new Date().toISOString()}"`)
   .replace(/"workers_dev": false/, `"workers_dev": ${workersDev}`);
 
 // 🔴 Pin the deploy to the account preflight verified. Without this, wrangler falls back to
