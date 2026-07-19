@@ -172,6 +172,16 @@ describe("/v/{slug} — the portal index", () => {
     expect(body).not.toContain("Draft Roadmap");
   });
 
+  it("tidied: filter shows for any non-empty portal, and the retired tan/amber palette is gone (#71)", async () => {
+    // The client sees exactly one document here (the draft is hidden) — the old `> 2` gate hid
+    // the filter for it. It now appears for any non-empty portal, which also eases testing.
+    const body = await (await SELF.fetch(`${HOST}/v/realplus`, { headers: await as(REALPLUS_CTO) })).text();
+    expect(body).toContain('class="filter"');
+    expect(body).not.toContain("#fbf6ec"); // the retired tan background
+    expect(body).not.toContain("854f0b"); // the retired amber draft chip
+    expect(body).toContain("prefers-color-scheme: dark"); // dark mode, matching console/viewer
+  });
+
   it("shows ownerOnly drafts to the owner, marked as drafts", async () => {
     const body = await (await SELF.fetch(`${HOST}/v/realplus`, { headers: await as(OWNER) })).text();
     expect(body).toContain("Draft Roadmap");
