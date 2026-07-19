@@ -236,3 +236,19 @@ describe("link-first sharing + public-by-default (#65 / ADR-011)", () => {
     expect(body).toContain("Publish &amp; copy link");
   });
 });
+
+describe("shareable portal link on the portal card", () => {
+  // The portal card is built client-side, so this asserts the embedded script's logic. The
+  // link points at the browsable index route, which already exists and is gated by
+  // canViewPortal: public -> /pub/{slug}, restricted -> /v/{slug}, private -> none (it opens
+  // only for the owner, so there is nothing to hand out).
+  it("copies the portal's index URL for public and team portals, but not private", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain("Copy portal link");
+    expect(body).toContain("function portalUrl");
+    expect(body).toContain('"/pub/"'); // public portal index
+    expect(body).toContain('"/v/"'); // restricted portal index
+    // Private returns null — the button is only rendered when portalUrl is non-null.
+    expect(body).toMatch(/return null;\s*\n\s*}/);
+  });
+});

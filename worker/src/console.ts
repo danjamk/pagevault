@@ -629,6 +629,17 @@ ${ICON_DEFS}
     return location.origin + viewPath(portal.kind, portal.slug, m.id);
   }
 
+  // A shareable link to the portal *index* (the browsable list, gated by canViewPortal):
+  //   public     -> /pub/{slug}   anyone browses, no login
+  //   restricted -> /v/{slug}     the team browses after signing in
+  //   private     -> null          it opens only for the owner, so there is nothing to share.
+  function portalUrl(p) {
+    const s = encodeURIComponent(p.slug);
+    if (p.kind === "public") return location.origin + "/pub/" + s;
+    if (p.kind === "restricted") return location.origin + "/v/" + s;
+    return null;
+  }
+
   // Rank the reach ladder so a document "widened past the portal base" can be detected.
   const LV_RANK = { individual:0, team:1, link:2, public:3 };
   const baseLevel = (kind) => kind === "public" ? "public" : kind === "restricted" ? "team" : "individual";
@@ -784,11 +795,19 @@ ${ICON_DEFS}
     if (!p) { app.innerHTML = '<p class="empty">No portals yet. Publish a document to create one.</p>'; return; }
     const r = reach({ }, p.kind);
     const docs = DOCS[p.slug];
+    const pShare = portalUrl(p);
+    const shareBtn = pShare
+      ? '<button class="btn sm" data-act="copy" data-url="' + esc(pShare) + '" title="' +
+        esc(p.kind === "public"
+          ? "Anyone with this link can browse this portal — no login."
+          : "Your team can browse this portal after signing in. Not forwardable to outsiders.") +
+        '">' + ico("link") + 'Copy portal link</button>'
+      : '';
     const head =
       '<div class="phead"><div class="phead-top"><div class="min0">' +
         '<div class="titrow"><h1>' + esc(p.name) + '</h1><span class="slug mono">/' + esc(p.slug) + '</span></div>' +
         (p.description ? '<p>' + esc(p.description) + '</p>' : '') +
-      '</div><div class="base"><span class="lb">Base access</span>' + badge(r) + '</div></div>' +
+      '</div><div class="base"><span class="lb">Base access</span>' + badge(r) + shareBtn + '</div></div>' +
       memberEditor(p) + '</div>';
 
     let list;
