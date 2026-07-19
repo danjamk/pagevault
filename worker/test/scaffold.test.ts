@@ -58,12 +58,15 @@ describe("router", () => {
     expect(await res.json()).toEqual({ error: "Not found", code: "not_found" });
   });
 
-  it("serves /health with the deployment version, unauthenticated", async () => {
+  it("serves /health with the deployment version and deploy time, unauthenticated", async () => {
     const res = await SELF.fetch("https://share.example.com/health");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { name: string; version: string };
+    const body = (await res.json()) as { name: string; version: string; deployedAt: string | null };
     expect(body.name).toBe("pagevault");
     expect(typeof body.version).toBe("string");
+    // Additive: present, and either the baked ISO string or null when it wasn't baked (as in tests).
+    expect("deployedAt" in body).toBe(true);
+    expect(body.deployedAt === null || typeof body.deployedAt === "string").toBe(true);
   });
 
   // /api/* (#2), /render + /p/* (#3), /v/* (#13), and /admin (#5) are all live now.
