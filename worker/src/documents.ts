@@ -428,27 +428,45 @@ export async function searchPortal(
   const q = query.trim().toLowerCase();
   if (!q) throw new BadRequest("invalid_field", `"query" cannot be blank`);
 
+  // AND-of-terms, not phrase-contiguous (#19). "bearer token loop" must match a document that
+  // contains all three words anywhere, in any order — not only one holding that exact substring.
+  // Split on whitespace and require EVERY term to appear somewhere in the searchable text. Still
+  // zero-machinery: substring matching, whitespace split, no index, no tokenizer (directive #2).
+  // This is keyword search, not semantic — the tool description sets that promise honestly.
+  const terms = q.split(/\s+/).filter(Boolean);
   const docs = await listDocs(env, portal);
   const hits: SearchHit[] = [];
 
   for (const doc of docs) {
-    const matched: SearchHit["matched"] = [];
+    const fields = new Set<SearchHit["matched"][number]>();
+    const title = doc.title.toLowerCase();
+    const summary = doc.summary?.toLowerCase() ?? "";
+    const tags = doc.tags?.join(" ").toLowerCase() ?? "";
 
-    if (doc.title.toLowerCase().includes(q)) matched.push("title");
-    if (doc.summary?.toLowerCase().includes(q)) matched.push("summary");
-    if (doc.tags?.some((tag) => tag.toLowerCase().includes(q))) matched.push("tag");
+    // Which terms does the metadata already satisfy? Track where each was found.
+    const unmet = terms.filter((term) => {
+      let found = false;
+      if (title.includes(term)) (fields.add("title"), (found = true));
+      if (summary.includes(term)) (fields.add("summary"), (found = true));
+      if (tags.includes(term)) (fields.add("tag"), (found = true));
+      return !found;
+    });
 
-    if (matched.length === 0) {
-      // Search the authored source for markdown, not the rendered HTML — a query for
-      // "summary" should match prose, not stumble over generated tag soup.
+    // Read the body ONLY when metadata alone didn't cover every term — at most one body read per
+    // doc, and none when metadata already matches, so the KV read budget is unchanged from before.
+    if (unmet.length > 0) {
+      // Search the authored source for markdown, not the rendered HTML — a query for "summary"
+      // should match prose, not stumble over generated tag soup.
       const source =
         doc.sourceKind === "markdown"
           ? ((await getRawSource(env, doc.id)) ?? (await getDoc(env, doc.id)))
           : await getDoc(env, doc.id);
-      if (source?.toLowerCase().includes(q)) matched.push("body");
+      const body = source?.toLowerCase() ?? "";
+      if (unmet.every((term) => body.includes(term))) fields.add("body");
+      else continue; // a term appears in neither metadata nor body → not a hit
     }
 
-    if (matched.length > 0) hits.push({ doc, matched });
+    hits.push({ doc, matched: [...fields] });
     if (hits.length >= limit) break;
   }
 

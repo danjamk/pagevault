@@ -251,6 +251,35 @@ describe("⭐ the read side — the portal is memory, not an outbox", () => {
     expect(out).toContain("matched: body");
   });
 
+  it("🔴 matches every term non-adjacently, across fields — not phrase-contiguous (#19)", async () => {
+    await callTool("publish_document", {
+      title: "Data Warehouse Architecture Review",
+      html: "<h1>Architecture</h1><p>We chose Debezium for CDC on V2.</p>",
+      summary: "CDC approach and the retire/wrap/rebuild roadmap",
+      tags: ["type:architecture"],
+    });
+    await callTool("publish_document", { title: "Q3 Report", html: "<h1>unrelated</h1>" });
+
+    // "CDC" is in the summary, "V2" only in the body — two terms, non-adjacent, spanning fields.
+    // The old phrase-only matcher returned zero for this; AND-of-terms finds it.
+    const out = await callTool("search_portal", { portal: "default", query: "CDC V2" });
+
+    expect(out).toContain("Data Warehouse Architecture Review");
+    expect(out).toContain("matched: summary, body");
+    expect(out).not.toContain("Q3 Report");
+  });
+
+  it("excludes a document when any single term is absent (#19)", async () => {
+    await callTool("publish_document", {
+      title: "Architecture",
+      html: "<h1>x</h1><p>We chose Debezium for CDC on V2.</p>",
+      summary: "CDC approach",
+    });
+
+    const out = await callTool("search_portal", { portal: "default", query: "CDC banana" });
+    expect(out).toContain("No matches");
+  });
+
   it("read_document returns the source", async () => {
     const pub = await callTool("publish_document", {
       title: "Architecture",
