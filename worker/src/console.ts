@@ -131,6 +131,12 @@ function page(session: string, nonce: string, owner: string, version: string, de
     -webkit-font-smoothing:antialiased;
   }
   .mono { font-family:ui-monospace,"SF Mono",Menlo,monospace; }
+  /* The inline SVG sprite holds the <symbol> defs. It must take no layout space — and it must
+     be hidden via a CLASS, never an inline style attribute: the console CSP is
+     style-src 'nonce-…' with no unsafe-inline, which blocks inline styles outright. Left inline,
+     the attribute is dropped, the <svg> renders at its default 300x150, and the page shifts down. */
+  .sprite { position:absolute; width:0; height:0; overflow:hidden; }
+  .min0 { min-width:0; }
   .icon { width:1em; height:1em; fill:none; stroke:currentColor; stroke-width:1.8;
           stroke-linecap:round; stroke-linejoin:round; flex:none; }
   input:focus-visible, button:focus-visible, a:focus-visible, select:focus-visible {
@@ -779,7 +785,7 @@ ${ICON_DEFS}
     const r = reach({ }, p.kind);
     const docs = DOCS[p.slug];
     const head =
-      '<div class="phead"><div class="phead-top"><div style="min-width:0">' +
+      '<div class="phead"><div class="phead-top"><div class="min0">' +
         '<div class="titrow"><h1>' + esc(p.name) + '</h1><span class="slug mono">/' + esc(p.slug) + '</span></div>' +
         (p.description ? '<p>' + esc(p.description) + '</p>' : '') +
       '</div><div class="base"><span class="lb">Base access</span>' + badge(r) + '</div></div>' +
@@ -1155,7 +1161,7 @@ const DARK_TOKENS_MEDIA = (_nonce: string): string =>
 
 // The icon symbol set — from the Claude Design handoff where provided (access + doc icons at
 // their specified stroke widths), feather-style for the rest. Referenced with <use href="#i-…">.
-const ICON_DEFS = `<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"><defs>
+const ICON_DEFS = `<svg class="sprite" aria-hidden="true"><defs>
   <symbol id="i-individual" viewBox="0 0 24 24"><circle cx="12" cy="7.5" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0"/></symbol>
   <symbol id="i-users" viewBox="0 0 24 24"><circle cx="8.5" cy="8" r="3"/><path d="M2.5 19a6 6 0 0 1 12 0"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6"/><path d="M17 13.6a6 6 0 0 1 4.5 5.4"/></symbol>
   <symbol id="i-link" viewBox="0 0 24 24"><path d="M9 15l6-6"/><path d="M11 6.5l1.4-1.4a4.2 4.2 0 0 1 6 6L17 12.5"/><path d="M13 17.5l-1.4 1.4a4.2 4.2 0 0 1-6-6L7 11.5"/></symbol>
