@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install setup status login logout preflight dev demo test test-security check-sandbox check provision deploy verify destroy backup restore logs
+.PHONY: help install setup dev demo status test test-security check-sandbox check login logout preflight provision deploy verify health logs destroy backup restore
 
 # Written by `make provision`. Gitignored — it holds your email, team name, AUD tags and
 # KV id, and this is a public repo.
@@ -10,10 +10,14 @@ DEPLOY_CONFIG := worker/wrangler.generated.jsonc
 # not obviously say "wrong Node".
 NVM := . $$HOME/.nvm/nvm.sh && nvm use --silent
 
-help: ## List targets
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
-		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+# `##@ ` lines are section headers; `## ` after a target is its one-line help. The awk
+# prints them in file order, so keep each target under the header it belongs to.
+help: ## List targets by group
+	@awk 'BEGIN {FS = ":.*## "} \
+		/^##@ / {printf "\n\033[1m%s\033[0m\n", substr($$0, 5); next} \
+		/^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
+##@ Develop
 install: ## Install dependencies
 	@$(NVM) && pnpm install --frozen-lockfile --silent
 
@@ -23,12 +27,6 @@ setup: install ## Decide your rung and get the repo ready (local; nothing create
 		echo "→ created worker/.dev.vars from the example (gitignored)"; \
 	fi
 	@$(NVM) && node scripts/setup.mjs
-
-login: ## Log in to Cloudflare (opens a browser), under the right Node
-	@$(NVM) && npx wrangler login
-
-logout: ## Log out of Cloudflare — for a clean, newbie-style test
-	@$(NVM) && npx wrangler logout
 
 dev: ## Run the Worker locally against Miniflare KV
 	@if [ ! -f worker/.dev.vars ]; then \
@@ -40,6 +38,10 @@ dev: ## Run the Worker locally against Miniflare KV
 demo: ## Seed a running local Worker with a demo client engagement, and print where to look
 	@bash scripts/demo.sh
 
+status: ## Show what this clone is configured for (versions, rung, account)
+	@$(NVM) && node scripts/status.mjs
+
+##@ Test & check
 test: ## Run the test suite
 	@$(NVM) && pnpm test
 	@$(NVM) && node --test scripts/*.test.mjs cli/*.test.mjs
@@ -67,12 +69,17 @@ check-sandbox: ## Fail the build if the iframe is ever granted our origin (ADR-0
 check: check-sandbox ## Typecheck + test — the pre-PR gate, and what CI runs
 	@$(NVM) && pnpm check
 
-status: ## Show what this clone is configured for (versions, rung, account)
-	@$(NVM) && node scripts/status.mjs
+##@ Cloudflare account
+login: ## Log in to Cloudflare (opens a browser), under the right Node
+	@$(NVM) && npx wrangler login
+
+logout: ## Log out of Cloudflare — for a clean, newbie-style test
+	@$(NVM) && npx wrangler logout
 
 preflight: ## Check your Cloudflare account is ready for your rung (read-only)
 	@$(NVM) && node scripts/preflight.mjs
 
+##@ Deploy & operate
 provision: ## Rung 3: create the KV namespace, Access group, and two Access apps
 	@$(NVM) && node scripts/provision.mjs
 
@@ -85,14 +92,15 @@ verify: ## Smoke-test the live deployment (run after deploy)
 health: ## Assert the live /health matches this checkout's build (<version>+<sha>)
 	@$(NVM) && node scripts/health-check.mjs
 
+logs: ## Tail the deployed Worker
+	@$(NVM) && npx wrangler tail --config $(DEPLOY_CONFIG)
+
 destroy: ## Tear the deployment down — Worker, DNS, Access apps, group, and KV data
 	@$(NVM) && node scripts/destroy.mjs
 
+##@ Data (KV)
 backup: ## Snapshot the KV namespace to a JSON file (OUT=path, KV=id optional)
 	@$(NVM) && node scripts/kv-backup.mjs $(if $(OUT),--out $(OUT),) $(if $(KV),--kv $(KV),)
 
 restore: ## Restore a backup into the KV namespace (make restore FILE=backup.json [KV=id] [FORCE=1])
 	@$(NVM) && node scripts/kv-restore.mjs --in "$(FILE)" $(if $(KV),--kv $(KV),) $(if $(FORCE),--force,)
-
-logs: ## Tail the deployed Worker
-	@$(NVM) && npx wrangler tail --config $(DEPLOY_CONFIG)
