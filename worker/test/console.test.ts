@@ -155,6 +155,27 @@ describe("create-portal control (#43)", () => {
   });
 });
 
+describe("edit-portal control (#70)", () => {
+  it("renders an Edit affordance and a name/description dialog, PATCHing the portal", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain('data-act="edit-portal"');
+    expect(body).toContain('id="dlg-edit"');
+    expect(body).toContain('id="form-edit"');
+    expect(body).toContain('id="ep-name"');
+    expect(body).toContain('id="ep-desc"');
+    expect(body).toContain("/api/portals/"); // PATCHes the portal endpoint
+  });
+
+  it("🔴 offers name + description only — no kind selector, and says why", async () => {
+    // Changing a portal's kind flips its access floor; that must not ride along in a settings edit.
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    // The edit dialog carries no radio inputs (only the create dialog does).
+    const editDialog = body.slice(body.indexOf('id="dlg-edit"'), body.indexOf('id="dlg-upload"'));
+    expect(editDialog).not.toMatch(/type="radio"/i);
+    expect(editDialog).toContain("editable here");
+  });
+});
+
 describe("browser upload control (#6)", () => {
   it("renders the New document button and an upload dialog with file/portal/emails/tags", async () => {
     const body = await (await getAdmin(await adminJwt(OWNER))).text();
