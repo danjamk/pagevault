@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/wordmark-dark.svg">
+    <img alt="PageVault" src="docs/brand/wordmark-light.svg" width="320">
+  </picture>
+</p>
+
 # PageVault
 
 Self-hosted, single-file HTML publishing with per-document access control, on
