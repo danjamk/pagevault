@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-07-19
+
+Walk away with everything: a browsable, human-readable export of a whole deployment.
+
 ### Added
 - **`pagevault export` / `make export`** — walk away with everything. Writes a browsable folder
   (or a zip): an `index.html` that links it all, an `ACCESS.md` that spells out who can see what,
