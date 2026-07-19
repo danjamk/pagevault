@@ -5,9 +5,10 @@ Cloudflare account. There is no database to browse and no bucket of files; docum
 portals, members, and public-link tokens are all keys in that namespace.
 
 This page is about **disaster recovery** — snapshotting that namespace and restoring it on the
-same host. It is deliberately *not* a human-readable export (that's a different thing); a
-restore is Cloudflare → Cloudflare, and it keeps keys byte-for-byte, so **document ids and
-every `/p/` link you've already shared survive**.
+same host. It is deliberately *not* a human-readable export — that's [`make
+export`](#walking-away-a-human-readable-export) at the bottom of this page. A restore is
+Cloudflare → Cloudflare, and it keeps keys byte-for-byte, so **document ids and every `/p/` link
+you've already shared survive**.
 
 ## What's in the namespace
 
@@ -63,3 +64,26 @@ documents are still fetchable by id, but `listDocs()` skips any metadata-less `m
 So `make backup` joins each value to its key's metadata by key name and writes them together;
 `make restore` replays both. The round-trip is pinned by `scripts/kv-backup.test.mjs`, which
 fails on the naive no-metadata path.
+
+## Walking away — a human-readable export
+
+`make backup` is Cloudflare → Cloudflare. When you want the *content* — to hand a client their
+documents, or to leave PageVault entirely — `make export` writes a browsable folder instead:
+
+```bash
+make export                     # → pagevault-export-<date>.zip (everything)
+make export PORTAL=acme-corp    # just one client
+make export NOZIP=1             # leave the folder unzipped
+make export DRAFTS=1            # include owner-only drafts (excluded by default)
+```
+
+Inside: an `index.html` that links everything, an `ACCESS.md` that spells out who could see what,
+and one folder per portal with each document as a standalone file — HTML as `.html`, markdown as
+its original `.md`. Every file opens on its own, with no PageVault and no server. `make export`
+auto-targets the deployment this clone deployed (URL from `.pagevault.json`, bearer from
+`.env.local`), so no login is needed.
+
+It is intentionally **lossy and not a restore format**: document ids and `/p/` tokens are left
+out — if you're leaving, your URLs are changing anyway, and if you're recovering, that's `make
+backup` above. (The `pagevault export` CLI does the same against any deployment you hold a token
+for; `make export` is the shortcut for your own.)

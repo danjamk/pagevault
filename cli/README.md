@@ -38,6 +38,7 @@ pagevault publish <file.html> [--portal s] [--title t] [--summary s]
 pagevault list [--portal s] [--tag t] [--json]
 pagevault share <portal> <email> [email …]
 pagevault rm <id> [--yes]
+pagevault export [dir] [--portal s] [--include-drafts] [--zip]
 ```
 
 - **`publish`** uploads the file and prints its URL. The title comes from the HTML's `<title>`
@@ -47,6 +48,15 @@ pagevault rm <id> [--yes]
 - **`list`** shows your documents, newest first. `--json` for scripting.
 - **`share`** grants a client access to a whole portal by email — one write, every document in it.
 - **`rm`** deletes a document. Interactive confirm unless `--yes`.
+- **`export`** writes everything you own to a browsable folder — `index.html`, an `ACCESS.md`
+  that spells out who can see what, and one folder per portal with each document as a standalone
+  file. Unzip, double-click, browse. It's a walk-away copy, not a backup: document ids and public
+  tokens are omitted. Owner-only drafts are excluded unless you pass `--include-drafts`; `--zip`
+  bundles the folder (needs the system `zip`). The final path is printed to stdout.
+
+```bash
+pagevault export ./client-handoff --portal acme-corp --zip
+```
 
 ## The stdout contract
 
