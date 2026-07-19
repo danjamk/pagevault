@@ -7,6 +7,31 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-07-19
+
+Portal polish: term-aware search, a tidied index page, and editable portal settings.
+
+### Added
+- **Edit a portal's name and description from the console** — an **Edit** control on the portal
+  header opens a "Portal settings" dialog that `PATCH`es `/api/portals/{slug}`. A typo in a client
+  name no longer means re-creating the portal. **Name and description only** — `kind` is
+  deliberately not editable here, because changing a portal's access floor (restricted→public
+  exposes every document) is a confidentiality decision, not a settings tweak, and the slug is the
+  URL. Stays inside the nonced-CSP + session-token console model (#70).
+
+### Changed
+- **`search_portal` matches every term, not just a contiguous phrase** — `searchPortal` did one
+  substring match of the whole query, so `"bearer token loop"` missed a document that held all
+  three words non-adjacently. It now splits on whitespace and requires every term to appear
+  somewhere across title, summary, tags, and body (AND-of-terms). Still zero-machinery — no index,
+  no tokenizer — and the KV read budget is unchanged (body read at most once per doc, only when
+  metadata doesn't already cover every term). It's keyword search, not semantic; the tool
+  description now sets that promise honestly (#19).
+- **Tidied the portal index page** — retired the warm tan background and the amber draft chip for
+  the neutral white/cool-grey + signal-blue system (#67), added a `prefers-color-scheme` dark
+  variant, and now show the on-page filter for any non-empty portal (was >2 documents). Light
+  touch: no webfont, no logo — the page stays the client's work above the fold (#71).
+
 ## [0.7.0] — 2026-07-19
 
 Walk away with everything: a browsable, human-readable export of a whole deployment.
