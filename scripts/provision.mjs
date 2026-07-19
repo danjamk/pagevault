@@ -250,6 +250,7 @@ const template = readFileSync(CONFIG_IN, "utf8");
 const generated = template
   .replace(/"id": "REPLACE_WITH_KV_NAMESPACE_ID"/, `"id": "${kvId}"`)
   .replace(/"PAGEVAULT_VERSION": ""/, `"PAGEVAULT_VERSION": "${releaseTag()}"`)
+  .replace(/"PAGEVAULT_DEPLOYED_AT": ""/, `"PAGEVAULT_DEPLOYED_AT": "${new Date().toISOString()}"`)
   .replace(/"OWNER_EMAIL": ""/, `"OWNER_EMAIL": "${ownerEmail}"`)
   .replace(/"CF_TEAM_NAME": ""/, `"CF_TEAM_NAME": "${team}"`)
   .replace(/"PUBLIC_HOST": ""/, `"PUBLIC_HOST": "${host}"`)

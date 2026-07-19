@@ -36,6 +36,9 @@
     // package.json + git; reported by /health, the MCP server, and the console. See ADR-010.
     "PAGEVAULT_VERSION": "",
 
+    // When this Worker was deployed (ISO 8601). Baked at deploy; shown in the console footer.
+    "PAGEVAULT_DEPLOYED_AT": "",
+
     "OWNER_EMAIL": "",
     "CF_TEAM_NAME": "",
     "PUBLIC_HOST": "",

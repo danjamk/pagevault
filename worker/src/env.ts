@@ -8,6 +8,13 @@ export interface Env {
    */
   PAGEVAULT_VERSION?: string;
 
+  /**
+   * When this Worker was deployed (ISO 8601), baked alongside PAGEVAULT_VERSION at deploy. The
+   * console footer shows the date so the operator can tell how fresh the running code is. Absent
+   * on a hand-run dev build.
+   */
+  PAGEVAULT_DEPLOYED_AT?: string;
+
   /** Vars — plaintext, written into wrangler.jsonc by the provisioning script. */
   OWNER_EMAIL: string;
   CF_TEAM_NAME: string;

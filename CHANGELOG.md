@@ -7,6 +7,28 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **Deploy date in the console** — a new `PAGEVAULT_DEPLOYED_AT`, baked at deploy alongside the
+  version (ADR-010), so the footer answers "how fresh is this?" next to the version, which links
+  to the changelog.
+
+### Changed
+- **A console design system** ([#67](https://github.com/danjamk/pagevault/issues/67)) — the owner
+  console adopts the Claude Design handoff: a signal-blue accent, a cool-grey ground, and the
+  leaning-**v** wordmark that retires the aperture. It gains a **dark theme** with a persisted
+  toggle, an access **badge** whose icon is tinted by how far a document can travel (only you /
+  team / anyone-with-the-link / public), and a single-selected-portal layout — a sidebar of
+  portals, one portal's header card and document list in the main panel. Account details (email,
+  sign out) collapse into a profile menu; the entry point to publishing is named **Upload** to
+  distinguish it from acting on existing documents. The wordmark's Sora glyphs ship as a ~2.5KB
+  inlined woff2 subset (no webfont link, no build step, owner-page only); UI text stays on the
+  system stack. Link-first / public-by-default sharing
+  ([ADR-011](docs/adr/ADR-011-public-by-default-console.md)) is unchanged — the handoff mockup
+  predates that decision and is not followed on it. Per-person sharing now hides once a document
+  is open to anyone with the link (it adds nothing there), and "anyone with the link" carries the
+  link icon, not the globe. No new dependencies; still one server-rendered page under the strict
+  nonced CSP.
+
 ## [0.5.0] — 2026-07-19
 
 The owner console gets author-side controls and a link-first sharing model.
