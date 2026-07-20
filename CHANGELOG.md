@@ -27,6 +27,8 @@ connect Claude to it.
   Code, and the Tier-0 `npx mcp-remote` fallback — plus the ~150k-character Claude Desktop
   tool-result cap that can truncate `read_document`.
 
+## [0.11.0] — 2026-07-20
+
 Brings the terminal up to the MCP tool surface and closes a real gap in the public-link
 lifecycle on both — plus a hard net against shipping a broken CLI package.
 
