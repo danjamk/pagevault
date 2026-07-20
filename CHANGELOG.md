@@ -7,6 +7,22 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-07-20
+
+Adds the Access-group reconciler — the first slice of the packaging lifecycle (#42, ADR-014).
+
+### Added
+- **`pagevault sync-access [--reap]` (#85).** Rebuilds the `pagevault-viewers` Access group to
+  match KV: portal members, per-document grants, and the owner. Additive by default (never
+  revokes); `--reap` prunes members KV no longer authorizes, reclaiming their Cloudflare Access
+  seats. A thin `/api` call — the reconcile runs server-side (`POST /api/access/sync`), so the
+  CLI never holds a Cloudflare token. The owner is always kept, so a reap can't lock you out.
+
+### Fixed
+- **Removed portal members no longer linger in Access (#20, operational half).** Membership
+  removal narrows `canView()` immediately but left the person in the Access group holding a seat;
+  `sync-access --reap` is the reconciler that reclaims it (ADR-002).
+
 ## [0.12.0] — 2026-07-20
 
 Polishes the remote MCP server to the annotation + instructions bar, and documents how to
