@@ -120,3 +120,92 @@ export async function syncGroupMembers(env: Env, emails: string[]): Promise<Grou
 
   return { status: "synced", added: toAdd };
 }
+
+/**
+ * The outcome of a full reconcile (`sync-access`, #85). Unlike `syncGroupMembers` — which only
+ * ever adds — this can also *remove*, so it reports every delta.
+ */
+export type ReconcileResult =
+  | { status: "synced"; added: string[]; removed: string[]; kept: string[]; groupSize: number }
+  | { status: "not_configured" }
+  | { status: "failed"; error: string };
+
+/**
+ * Rebuild the viewer group to match KV exactly (#85, the reconciler ADR-002 always deferred to).
+ *
+ * `desired` is the set KV says should have Access — computed by `computeDesiredViewers` from
+ * portal members, per-document `extraEmails`, and the owner. This repairs drift the additive
+ * `syncGroupMembers` cannot: with `reap`, group members absent from `desired` are **removed**,
+ * reclaiming their seats (ADR-002). Without `reap` it only adds the missing — a safe repair that
+ * never revokes.
+ *
+ * The owner is force-added to `desired` here, so a reap can never lock the operator out of their
+ * own group even if the caller forgets. Non-email include rules (should there be any) are carried
+ * through untouched — KV cannot speak to them, so the reconcile leaves them be.
+ */
+export async function reconcileGroupMembers(env: Env, desired: string[], reap: boolean): Promise<ReconcileResult> {
+  const token = env.CF_API_TOKEN;
+  const account = env.CF_ACCOUNT_ID;
+  const groupId = env.CF_ACCESS_GROUP_ID;
+  if (!token || !account || !groupId) return { status: "not_configured" };
+
+  const want = new Set([...desired, env.OWNER_EMAIL].map(normalizeEmail).filter(Boolean));
+  const url = `${CF_API}/accounts/${account}/access/groups/${groupId}`;
+
+  let group: AccessGroup;
+  try {
+    const res = await fetch(url, { headers: authHeaders(token) });
+    const body = (await res.json()) as { success?: boolean; result?: AccessGroup };
+    if (!res.ok || !body?.success || !body.result) {
+      return { status: "failed", error: cfError(body, res.status, "read group") };
+    }
+    group = body.result;
+  } catch (e) {
+    return { status: "failed", error: `read group: ${errText(e)}` };
+  }
+
+  const emailOf = (rule: unknown): string | undefined => (rule as { email?: { email?: string } })?.email?.email;
+  const include = Array.isArray(group.include) ? group.include : [];
+  const nonEmailRules = include.filter((rule) => typeof emailOf(rule) !== "string");
+  const present = new Set(
+    include
+      .map(emailOf)
+      .filter((e): e is string => typeof e === "string")
+      .map(normalizeEmail),
+  );
+
+  const toAdd = [...want].filter((email) => !present.has(email));
+  const toRemove = reap ? [...present].filter((email) => !want.has(email)) : [];
+
+  // Additive keeps everyone and unions the missing; reap replaces the email set with exactly the
+  // desired one. Either way the owner is in `want`, so it survives.
+  const finalEmails = reap ? [...want] : [...new Set([...present, ...toAdd])];
+  const kept = finalEmails.filter((email) => present.has(email));
+
+  // Nothing to change — don't spend a KV/Access write to rewrite the same list.
+  if (toAdd.length === 0 && toRemove.length === 0) {
+    return { status: "synced", added: [], removed: [], kept, groupSize: finalEmails.length };
+  }
+
+  const nextInclude = [...nonEmailRules, ...finalEmails.map((email) => ({ email: { email } }))];
+  try {
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: authHeaders(token),
+      body: JSON.stringify({
+        name: group.name,
+        include: nextInclude,
+        exclude: group.exclude ?? [],
+        require: group.require ?? [],
+      }),
+    });
+    const body = (await res.json()) as { success?: boolean };
+    if (!res.ok || !body?.success) {
+      return { status: "failed", error: cfError(body, res.status, "update group") };
+    }
+  } catch (e) {
+    return { status: "failed", error: `update group: ${errText(e)}` };
+  }
+
+  return { status: "synced", added: toAdd, removed: toRemove, kept, groupSize: finalEmails.length };
+}

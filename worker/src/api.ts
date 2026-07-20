@@ -14,6 +14,7 @@ import {
   parseTitle,
   patchDocument,
   publishDocument,
+  reconcileAccessGroup,
   requireString,
   searchPortal,
   updatePortalMembers,
@@ -110,6 +111,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       return fail(405, "method_not_allowed", `${request.method} not allowed on /api/search`);
     }
 
+    if (rest === "/access/sync") {
+      if (request.method === "POST") return await accessSyncHandler(request, env);
+      return fail(405, "method_not_allowed", `${request.method} not allowed on /api/access/sync`);
+    }
+
     if (rest === "/portals") {
       if (request.method === "POST") return await createPortal(request, env);
       if (request.method === "GET") return json({ portals: await listPortals(env) });
@@ -152,6 +158,34 @@ async function searchHandler(request: Request, env: Env): Promise<Response> {
   if (!q) return fail(400, "invalid_field", `"q" is required`);
   const limit = Math.max(1, Math.min(50, Number(params.get("limit")) || 10));
   return json({ hits: await searchPortal(env, portal, q, limit) });
+}
+
+/**
+ * `POST /api/access/sync[?reap=true]` — reconcile the `pagevault-viewers` Access group to match
+ * KV (#85). Recomputes the desired set (portal members ∪ document `extraEmails` ∪ owner) and
+ * rebuilds the group; `?reap=true` also prunes members KV no longer authorizes, reclaiming their
+ * Access seats (ADR-002). Owner-bearer only, like every `/api` route.
+ *
+ * Tier 0 (no Access configured) is a `400 not_configured`, not a lie about success. A Cloudflare
+ * API failure is a `502` — the reconcile is a downstream call that can genuinely fail.
+ */
+async function accessSyncHandler(request: Request, env: Env): Promise<Response> {
+  const reap = new URL(request.url).searchParams.get("reap") === "true";
+  const result = await reconcileAccessGroup(env, reap);
+
+  if (result.status === "not_configured") {
+    return fail(400, "not_configured", "Email-secured access is not enabled (Tier 0) — no group to reconcile.");
+  }
+  if (result.status === "failed") {
+    return fail(502, "sync_failed", `Access group reconcile failed: ${result.error}`);
+  }
+  return json({
+    added: result.added,
+    removed: result.removed,
+    kept: result.kept,
+    groupSize: result.groupSize,
+    reaped: reap,
+  });
 }
 
 async function createDoc(request: Request, env: Env): Promise<Response> {

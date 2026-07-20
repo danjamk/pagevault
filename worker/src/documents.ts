@@ -1,4 +1,9 @@
-import { type GroupSyncResult, syncGroupMembers } from "./access-group.js";
+import {
+  type GroupSyncResult,
+  type ReconcileResult,
+  reconcileGroupMembers,
+  syncGroupMembers,
+} from "./access-group.js";
 import type { Env } from "./env.js";
 import { renderMarkdown } from "./markdown.js";
 import {
@@ -518,6 +523,37 @@ export async function updatePortalMembers(
   const sync = added.length > 0 ? await syncGroupMembers(env, added) : { status: "noop" as const };
 
   return { members: next, added, removed, sync };
+}
+
+/**
+ * The set of emails that SHOULD have Access, computed from KV alone (#85). This is the truth the
+ * viewer group is reconciled against: portal members (every portal), per-document `extraEmails`,
+ * and the owner.
+ *
+ * `extraEmails` is off the document listing (see `DocSummary`) to keep key metadata under KV's
+ * 1KB cap, so this reads a `meta:` key per document. That is N reads — fine for an occasional
+ * reconcile, never a hot path — exactly the cost `DocSummary`'s comment anticipates.
+ */
+export async function computeDesiredViewers(env: Env): Promise<string[]> {
+  const emails = new Set<string>([normalizeEmail(env.OWNER_EMAIL ?? "")]);
+
+  for (const portal of await listPortals(env)) {
+    for (const email of await getMembers(env, portal.slug)) emails.add(normalizeEmail(email));
+  }
+  for (const doc of await listDocs(env)) {
+    const meta = await getMeta(env, doc.id);
+    for (const email of meta?.extraEmails ?? []) emails.add(normalizeEmail(email));
+  }
+
+  return [...emails].filter(Boolean);
+}
+
+/**
+ * Reconcile the Access viewer group to match KV (#85). Gathers the desired set and rebuilds the
+ * group; with `reap`, prunes members KV no longer authorizes, reclaiming seats (ADR-002).
+ */
+export async function reconcileAccessGroup(env: Env, reap: boolean): Promise<ReconcileResult> {
+  return reconcileGroupMembers(env, await computeDesiredViewers(env), reap);
 }
 
 // ---------------------------------------------------------------------------

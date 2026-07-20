@@ -100,6 +100,19 @@ test("an unknown command exits 1 and points at help", () => {
   assert.match(text, /Unknown command/);
 });
 
+test("sync-access is dispatched, and --reap refuses non-interactively without --yes", () => {
+  // --reap guards before config, so a non-TTY run without --yes fails on the guard, not the network.
+  const reaped = run("sync-access", "--reap");
+  assert.equal(reaped.status, 1);
+  assert.match(reaped.text, /Refusing to --reap/);
+  assert.doesNotMatch(reaped.text, /Unknown command/);
+
+  // Plain sync-access reaches the command (config error), proving it's wired into the switch.
+  const plain = run("sync-access");
+  assert.equal(plain.status, 1);
+  assert.doesNotMatch(plain.text, /Unknown command/);
+});
+
 test("loadConfig: environment wins over the config file, and trims a trailing slash", () => {
   const cfg = loadConfig({ PAGEVAULT_URL: "https://share.example.com/", PAGEVAULT_API_TOKEN: "tok" });
   assert.equal(cfg.url, "https://share.example.com");

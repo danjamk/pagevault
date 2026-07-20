@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { syncGroupMembers } from "../src/access-group.js";
+import { reconcileGroupMembers, syncGroupMembers } from "../src/access-group.js";
 import type { Env } from "../src/env.js";
 
 /**
@@ -144,5 +144,93 @@ describe("syncGroupMembers", () => {
 
     const put = calls.find((c) => c.method === "PUT");
     expect(put?.body?.require).toEqual(requireRule);
+  });
+});
+
+describe("reconcileGroupMembers (#85)", () => {
+  const ENV = () => testEnv({ OWNER_EMAIL: OWNER });
+
+  it("adds members KV authorizes that are missing, and keeps the existing ones", async () => {
+    const { calls } = stubCf([OWNER, "old@acme.com"]);
+
+    const res = await reconcileGroupMembers(ENV(), ["old@acme.com", "new@acme.com"], false);
+
+    expect(res.status).toBe("synced");
+    if (res.status !== "synced") return;
+    expect(res.added).toEqual(["new@acme.com"]);
+    expect(res.removed).toEqual([]);
+    expect(putBodyEmails(calls).sort()).toEqual([OWNER, "new@acme.com", "old@acme.com"].sort());
+  });
+
+  it("without reap, adds the missing but never drops a member absent from the desired set", async () => {
+    const { calls } = stubCf([OWNER, "stale@acme.com"]);
+
+    const res = await reconcileGroupMembers(ENV(), ["new@acme.com"], false);
+
+    expect(res.status).toBe("synced");
+    if (res.status !== "synced") return;
+    expect(res.added).toEqual(["new@acme.com"]);
+    expect(res.removed).toEqual([]);
+    const emails = putBodyEmails(calls);
+    expect(emails).toContain("stale@acme.com"); // additive never revokes
+    expect(emails).toContain("new@acme.com");
+  });
+
+  it("with reap, removes members KV no longer authorizes", async () => {
+    const { calls } = stubCf([OWNER, "stale@acme.com", "keep@acme.com"]);
+
+    const res = await reconcileGroupMembers(ENV(), ["keep@acme.com"], true);
+
+    expect(res.status).toBe("synced");
+    if (res.status !== "synced") return;
+    expect(res.removed).toEqual(["stale@acme.com"]);
+    const emails = putBodyEmails(calls);
+    expect(emails).toContain("keep@acme.com");
+    expect(emails).toContain(OWNER);
+    expect(emails).not.toContain("stale@acme.com");
+  });
+
+  it("🔴 reap never removes the owner, even when the caller omits them from the desired set", async () => {
+    const { calls } = stubCf([OWNER, "stale@acme.com"]);
+
+    const res = await reconcileGroupMembers(ENV(), ["someone@acme.com"], true);
+
+    if (res.status !== "synced") throw new Error("expected synced");
+    expect(res.removed).not.toContain(OWNER);
+    const emails = putBodyEmails(calls);
+    expect(emails).toContain(OWNER); // owner is force-kept
+    expect(emails).toContain("someone@acme.com");
+    expect(emails).not.toContain("stale@acme.com");
+  });
+
+  it("writes nothing when the group already matches (reap, no drift)", async () => {
+    const { calls } = stubCf([OWNER, "a@acme.com"]);
+
+    const res = await reconcileGroupMembers(ENV(), ["a@acme.com"], true);
+
+    expect(res.status).toBe("synced");
+    if (res.status !== "synced") return;
+    expect(res.added).toEqual([]);
+    expect(res.removed).toEqual([]);
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  it("normalizes — a case/whitespace variant is not a spurious add or remove", async () => {
+    const { calls } = stubCf([OWNER, "cfo@acme.com"]);
+
+    const res = await reconcileGroupMembers(ENV(), ["  CFO@Acme.com "], true);
+
+    expect(res.status).toBe("synced");
+    if (res.status !== "synced") return;
+    expect(res.added).toEqual([]);
+    expect(res.removed).toEqual([]);
+    expect(calls.some((c) => c.method === "PUT")).toBe(false);
+  });
+
+  it("is not_configured at Tier 0, and makes no request", async () => {
+    const { calls } = stubCf([OWNER]);
+    const res = await reconcileGroupMembers(testEnv({ OWNER_EMAIL: OWNER }, ["CF_API_TOKEN"]), ["x@acme.com"], true);
+    expect(res).toEqual({ status: "not_configured" });
+    expect(calls).toHaveLength(0);
   });
 });
