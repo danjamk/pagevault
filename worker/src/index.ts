@@ -26,11 +26,11 @@ import { handleRender, renderShell } from "./viewer.js";
  *   /p/*      none      capability URL, zero Access seats burned
  *   /api/*    none      bearer token
  *   /mcp      none      bearer (Claude Code) OR OAuth 2.1 (hosted surfaces); CANNOT be Access-covered (ADR-006)
- *   /authorize none     OAuth consent (operator) — app-implemented, see oauth.ts
+ *   /admin/authorize App B  OAuth consent — Access-gated (Tier 3) IdP, see oauth.ts / ADR-012
  *
  * As of #22 this router is the OAuthProvider's `defaultHandler`: it receives every request
  * that is not the MCP apiRoute (`/mcp`) or an OAuth endpoint (`/token`, `/register`, the
- * `.well-known` metadata) — including `/authorize`, which the provider routes here to serve.
+ * `.well-known` metadata) — including `/admin/authorize`, which the provider routes here to serve.
  */
 const router = {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -53,11 +53,14 @@ const router = {
       });
     }
 
-    // The OAuth consent screen (ADR-006 / #22). `authorizeEndpoint` is app-implemented — the
-    // OAuthProvider routes it here rather than serving it. See oauth.ts. `/mcp` itself never
-    // reaches this router: the OAuthProvider owns it (a bearer request is intercepted in the
-    // default export before OAuth; an OAuth-token request goes to mcpApiHandler).
-    if (pathname === "/authorize") {
+    // The OAuth consent screen at /admin/authorize (ADR-012). Living under /admin means the
+    // existing pagevault-owner Access app gates it, so at Tier 3 the operator logs in as
+    // themselves — real IdP, no pasted token (Tier 0/1 falls back to the token; see oauth.ts).
+    // 🔴 MUST come before the /admin console route below. `authorizeEndpoint` is app-implemented
+    // — the OAuthProvider routes it here rather than serving it. (`/mcp` never reaches this
+    // router: the OAuthProvider owns it — a bearer request is intercepted in the default export
+    // before OAuth; an OAuth-token request goes to mcpApiHandler.)
+    if (pathname === "/admin/authorize") {
       return handleAuthorize(request, env);
     }
 
@@ -126,7 +129,7 @@ const oauth = new OAuthProvider({
   apiRoute: "/mcp",
   apiHandler: mcpApiHandler,
   defaultHandler: router,
-  authorizeEndpoint: "/authorize",
+  authorizeEndpoint: "/admin/authorize",
   tokenEndpoint: "/token",
   clientRegistrationEndpoint: "/register",
 });

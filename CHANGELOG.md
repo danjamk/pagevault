@@ -7,6 +7,33 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-07-20
+
+OAuth 2.1 on the remote MCP server — connect PageVault to claude.ai, Claude Desktop, and mobile,
+not just Claude Code — plus live MCP smoke checks so a broken `/mcp` can't ship unnoticed.
+
+### Added
+- **OAuth 2.1 for the remote MCP server (#22)** — the hosted Claude surfaces (claude.ai, Desktop,
+  mobile) can now connect over OAuth 2.1 (PKCE, RFC 8414/9728 discovery, Dynamic Client
+  Registration), alongside the bearer path Claude Code already used. The Worker validates every
+  token itself; `canView()` still owns document authorization — OAuth only gates access to the MCP
+  server (ADR-006). Built on `@cloudflare/workers-oauth-provider`: stateless, no Durable Objects.
+- **Cloudflare Access as the OAuth consent IdP ([ADR-012](docs/adr/ADR-012-oauth-consent-access-idp.md))**
+  — consent lives at `/admin/authorize`, behind the existing owner Access app, so at Tier 3 the
+  operator logs in as themselves and grants tokenlessly. Tier 0/1 (no Access) keeps a paste-token
+  fallback.
+- **Live MCP smoke in `verify` and `health` (#75)** — `make verify` now drives `/mcp`
+  (`initialize`, `tools/list`, a `publish→read→revoke` round-trip, OAuth discovery) and `make
+  health` asserts the MCP surface answers, so a version-correct deploy with a dead `/mcp` fails
+  loudly instead of shipping quietly.
+- **`OAUTH_KV` provisioning** — `provision` (rung 3) and `tier0` (rung 0/1) create and wire the
+  `pagevault-oauth` KV namespace; `destroy` tears it down.
+
+### Changed
+- The Worker is now wrapped by the OAuthProvider at every tier (the router became its
+  `defaultHandler`), and `OAUTH_KV` is a required binding — created automatically by provisioning,
+  so `make deploy` needs no manual step.
+
 ## [0.8.0] — 2026-07-19
 
 Portal polish: term-aware search, a tidied index page, and editable portal settings.

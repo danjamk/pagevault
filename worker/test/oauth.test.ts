@@ -18,7 +18,8 @@ describe("OAuth 2.1 surface (#22)", () => {
     const res = await SELF.fetch(`${HOST}/.well-known/oauth-authorization-server`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(String(body["authorization_endpoint"])).toContain("/authorize");
+    // Consent lives under /admin so the owner Access app gates it (ADR-012).
+    expect(String(body["authorization_endpoint"])).toContain("/admin/authorize");
     expect(String(body["token_endpoint"])).toContain("/token");
     expect(String(body["registration_endpoint"])).toContain("/register");
   });
