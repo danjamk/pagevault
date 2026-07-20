@@ -283,6 +283,39 @@ correctness bug in the shared publish path; fix independent of the above.
 
 ---
 
+## PR / branch groups (execution) — decided 2026-07-20
+
+Four branches, ~5 PRs, ordered **1 → 2 → 3 → 4**. Kept deliberately few: grouped by
+functional release, not per-ticket.
+
+**Group 1 — `feature/mcp-oauth-prod` · OAuth live on prod, provably solid** *(build on
+`feature/22-oauth-spike`; likely 2 PRs — feature, then tests)*
+1. #75 — Live MCP smoke in verify + health *(first — the guardrail)*
+2. #22 — Add OAuth 2.1 to the remote MCP server *(harden: Access IdP, OAUTH_KV provisioning, /health fix, bearer preserved → prod)*
+3. #76 — Comprehensive MCP test coverage *(incident tier → `make check`)*
+
+**Group 2 — `feature/publish-path` · Publish engine: correct + more formats** *(both in
+`documents.ts`; independent, can run parallel to Group 1)*
+1. #74 — publish_document overwrite guard fails on KV eventual consistency *(deterministic id; maybe an ADR)*
+2. #63 — Publish markdown from the CLI and MCP (sourceKind support)
+
+**Group 3 — `feature/cli-mcp-reach` · Complete the client surfaces**
+1. #56 — Guard CLI publishes with a pack-and-install smoke test *(first — guards the package)*
+2. #73 — CLI ↔ MCP surface parity: read, search, revoke, rotate (+ /api endpoints)
+3. #21 — *(re-evaluate — likely closes)* stdio proxy shim for Claude Desktop
+   — #22-on-prod reaches Desktop via the claude.ai account connector, undercutting the shim's rationale.
+
+**Group 4 — `feature/packaging-lifecycle` · npm install → deploy → operate**
+1. #42 — pagevault CLI: init / upgrade / sync-access (provisioning commands) *(keystone)*
+2. #28 — Add a Deploy to Cloudflare button for one-click Tier-0 deploy
+3. #33 — LLM-legible setup: agent runbook + drivable tools *(last — drives #42/#28)*
+
+**Cross-group dependencies:**
+- #76 (G1) carries regression tests for #74 and #63 (G2) — those trail in when G2 lands.
+- #73's `read` needs no Worker change (ships first in its group); `search`/`revoke`/`rotate` add `/api` endpoints.
+
+---
+
 ## Definition of done
 
 - A PageVault MCP tool call executes from a **claude.ai web conversation** (the
