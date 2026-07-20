@@ -7,7 +7,25 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
-## [0.11.0] — 2026-07-20
+## [0.12.0] — 2026-07-20
+
+Polishes the remote MCP server to the annotation + instructions bar, and documents how to
+connect Claude to it.
+
+### Added
+- **Tool annotations on every MCP tool (#80).** All eleven tools moved to `registerTool` and now
+  carry `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint` plus a human `title`.
+  A host can auto-run the four read tools and knows to confirm before `revoke_document`,
+  `revoke_public_link`, `rotate_public_link`, or a `publish_document` overwrite. Hints are
+  advisory — the Worker still authorizes every call; they never substitute for `canView()`.
+- **Server `instructions` (#80).** The three cross-cutting rules — the portal is a client
+  boundary and must never be guessed (prime directive #5), public links are capability URLs, and
+  publishing over a title replaces in place — are stated once at `initialize` instead of
+  copy-pasted across tool descriptions.
+- **MCP connection guide (`docs/setup/connect-mcp.md`).** How to point Claude at the server: the
+  claude.ai account connector for web and Desktop (#22 OAuth), a bearer-token setup for Claude
+  Code, and the Tier-0 `npx mcp-remote` fallback — plus the ~150k-character Claude Desktop
+  tool-result cap that can truncate `read_document`.
 
 Brings the terminal up to the MCP tool surface and closes a real gap in the public-link
 lifecycle on both — plus a hard net against shipping a broken CLI package.
