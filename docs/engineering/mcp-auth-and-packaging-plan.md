@@ -315,7 +315,10 @@ functional release, not per-ticket.
    unrepresentable, not policed. `findByTitle` deleted; unit + integration regression tests.
 2. ✅ **favicon** — serve `/favicon.ico` + `/favicon.svg` (the leaning-v mark) so a remote MCP
    connector shows the PageVault icon, not the parent domain's. (Rode along, no GHI.)
-3. ⏳ #63 — Publish markdown from the CLI and MCP (sourceKind support)
+3. ✅ #63 — Publish markdown from CLI + MCP: CLI infers `sourceKind` from the extension
+   (`.md`→markdown, `--source-kind` override); MCP `publish_document` gains a `sourceKind` param.
+
+**→ Group 2 is code-complete (all three items). Ready for a PR.**
 
 **Group 3 — `feature/cli-mcp-reach` · Complete the client surfaces**
 1. #56 — Guard CLI publishes with a pack-and-install smoke test *(first — guards the package)*
