@@ -93,60 +93,102 @@ export const mcpApiHandler = {
   },
 };
 
+/**
+ * Server-level `instructions` — the rules that cut across every tool, stated once (#80).
+ *
+ * These are guidance to the model for the whole server, not enforcement: the Worker still
+ * authorizes every call and the portal boundary is enforced in `canView()` / `resolvePortal`.
+ * Keeping them here (instead of copy-pasted into each tool description) is the de-duplication
+ * §3 of mcp-best-practices.md asks for — but the security-critical rules also stay named in the
+ * tools that act on them, so trimming a description never silently drops a guardrail.
+ */
+const INSTRUCTIONS = [
+  "PageVault holds one operator's confidential client deliverables. Three rules cut across every tool:",
+  "",
+  "1. A portal is a client boundary. If exactly one portal exists it is used automatically; if",
+  "   several exist and none is the default, the publish and search tools error and list them —",
+  "   ASK THE USER which client this is for. Never infer the portal from conversation. Guessing is",
+  "   how one client's report lands in another client's portal.",
+  "",
+  "2. A public /p/ link is a capability URL: anyone who receives, forwards, or finds it can open",
+  "   the document with no login. Minting or rotating one is a WIDENING action — confirm with the",
+  "   user first and tell them what it means. Public links cost no Cloudflare Access seats.",
+  "",
+  "3. Publishing over an existing document with the same title REPLACES it in place at the same",
+  "   URL. That needs confirm: true, and you must show the user what is being replaced first.",
+].join("\n");
+
 function buildServer(env: Env, origin: string): McpServer {
   // The version a client sees in serverInfo is the deployed build, not a hardcoded string —
   // baked at deploy (ADR-010).
-  const server = new McpServer({ name: "pagevault", version: env.PAGEVAULT_VERSION || "0.0.0" });
+  //
+  // Server `instructions` carry the rules that cut across every tool, stated ONCE here instead
+  // of copy-pasted into each tool description (#80). A host surfaces these to the model as
+  // standing context for the whole server. The tools still name the rule they act on — the
+  // security-critical "never guess the portal" (#5) stays operative where it is enforced — but
+  // the shared rationale lives here.
+  const server = new McpServer(
+    { name: "pagevault", version: env.PAGEVAULT_VERSION || "0.0.0" },
+    { instructions: INSTRUCTIONS },
+  );
 
   // -------------------------------------------------------------------------
   // Write
+  //
+  // Annotations (MCP 2025-11-25) tell a host how to gate a call: `readOnlyHint` for
+  // auto-approve, `destructiveHint` for a confirm prompt. They are HINTS, not enforcement —
+  // the Worker still authorizes every call. Every write tool here is a closed-world operation
+  // against our own KV, so `openWorldHint` is false throughout. See mcp-best-practices.md §2.
   // -------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     "publish_document",
-    [
-      "Publish a self-contained HTML or Markdown document to a PageVault portal and return its URL.",
-      "",
-      "Portals are per-client collections. If the user has exactly one portal, it is used",
-      "automatically — do not ask. If several exist and none is the default, this tool will",
-      "error and list them: ASK THE USER which client this is for. Never infer the portal",
-      "from conversation; guessing is how one client's report lands in another's portal.",
-      "",
-      "Publishing over an existing document with the same title REPLACES it in place,",
-      "keeping the same URL. That requires confirm: true, and you must show the user what",
-      "is being replaced before you set it.",
-    ].join("\n"),
     {
-      title: z.string().describe("Human-readable title. Also the update key within a portal."),
-      html: z
-        .string()
-        .describe(
-          "The complete, self-contained document body (HTML, or Markdown if sourceKind is markdown). Inline all CSS and JS, and embed " +
-            "images as data: URIs — PageVault stores only this one HTML blob and hosts no " +
-            "separate assets. An external https:// image loads, but it adds a live dependency " +
-            "and phones home: for a private document the third-party host learns who opened it " +
-            "and when. Embed to stay self-contained. Ceiling is ~25 MiB per document.",
-        ),
-      portal: z.string().optional().describe("Portal slug. Omit to use the only/default portal."),
-      summary: z.string().optional().describe("One line, shown in the portal index."),
-      tags: z.array(z.string()).optional(),
-      ownerOnly: z.boolean().optional().describe("A draft. Invisible to the client, even with a link."),
-      emails: z
-        .array(z.string())
-        .optional()
-        .describe("Grant these people access to THIS document only. Additive; never removes access."),
-      confirm: z
-        .boolean()
-        .optional()
-        .describe("Required to overwrite an existing document with the same title."),
-      sourceKind: z
-        .enum(["html", "markdown"])
-        .optional()
-        .describe(
-          "Format of the document body (default html). Set markdown to publish a Markdown " +
-            "document — it is rendered to HTML at publish. Same single-file rule: images must be " +
-            "absolute https:// or data: URIs; there are no separate assets.",
-        ),
+      title: "Publish document",
+      // Overwrites an existing deliverable in place when the title matches (with confirm), so a
+      // host should confirm rather than auto-run. Not idempotent: each call can change content.
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+      description: [
+        "Publish a self-contained HTML or Markdown document to a PageVault portal and return its URL.",
+        "",
+        "Portal selection (see server instructions — never guess): one portal → used automatically;",
+        "several with no default → this tool errors and lists them, so ASK THE USER which client it is for.",
+        "",
+        "Publishing over an existing document with the same title REPLACES it in place at the same URL;",
+        "that requires confirm: true, and you must show the user what is being replaced first.",
+      ].join("\n"),
+      inputSchema: {
+        title: z.string().describe("Human-readable title. Also the update key within a portal."),
+        html: z
+          .string()
+          .describe(
+            "The complete, self-contained document body (HTML, or Markdown if sourceKind is markdown). Inline all CSS and JS, and embed " +
+              "images as data: URIs — PageVault stores only this one HTML blob and hosts no " +
+              "separate assets. An external https:// image loads, but it adds a live dependency " +
+              "and phones home: for a private document the third-party host learns who opened it " +
+              "and when. Embed to stay self-contained. Ceiling is ~25 MiB per document.",
+          ),
+        portal: z.string().optional().describe("Portal slug. Omit to use the only/default portal."),
+        summary: z.string().optional().describe("One line, shown in the portal index."),
+        tags: z.array(z.string()).optional(),
+        ownerOnly: z.boolean().optional().describe("A draft. Invisible to the client, even with a link."),
+        emails: z
+          .array(z.string())
+          .optional()
+          .describe("Grant these people access to THIS document only. Additive; never removes access."),
+        confirm: z
+          .boolean()
+          .optional()
+          .describe("Required to overwrite an existing document with the same title."),
+        sourceKind: z
+          .enum(["html", "markdown"])
+          .optional()
+          .describe(
+            "Format of the document body (default html). Set markdown to publish a Markdown " +
+              "document — it is rendered to HTML at publish. Same single-file rule: images must be " +
+              "absolute https:// or data: URIs; there are no separate assets.",
+          ),
+      },
     },
     async (args) => {
       try {
@@ -189,20 +231,24 @@ function buildServer(env: Env, origin: string): McpServer {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "create_portal",
-    [
-      "Create a portal — a durable, per-client collection with its own URL and audience.",
-      "",
-      "restricted: the client portal. Members (by email) see everything in it.",
-      "private:    yours only. The default bucket.",
-      "public:     anyone with the link, no login, and it burns no Access seats.",
-    ].join("\n"),
     {
-      slug: z.string().describe("URL-safe: lowercase letters, digits, hyphens. e.g. 'realplus'"),
-      name: z.string().describe("Display name, e.g. 'RealPlus'"),
-      kind: z.enum(["private", "restricted", "public"]),
-      description: z.string().optional(),
+      title: "Create portal",
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      description: [
+        "Create a portal — a durable, per-client collection with its own URL and audience.",
+        "",
+        "restricted: the client portal. Members (by email) see everything in it.",
+        "private:    yours only. The default bucket.",
+        "public:     anyone with the link, no login, and it burns no Access seats.",
+      ].join("\n"),
+      inputSchema: {
+        slug: z.string().describe("URL-safe: lowercase letters, digits, hyphens. e.g. 'realplus'"),
+        name: z.string().describe("Display name, e.g. 'RealPlus'"),
+        kind: z.enum(["private", "restricted", "public"]),
+        description: z.string().optional(),
+      },
     },
     async (args) => {
       try {
@@ -231,18 +277,24 @@ function buildServer(env: Env, origin: string): McpServer {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "update_portal_members",
-    [
-      "Add or remove people from a portal's audience.",
-      "",
-      "One call grants or revokes access to EVERY document that client has ever received.",
-      "Permissions live on the portal, not the document.",
-    ].join("\n"),
     {
-      portal: z.string(),
-      add: z.array(z.string()).optional(),
-      remove: z.array(z.string()).optional(),
+      title: "Update portal members",
+      // Membership edits are reversible (re-add restores access) and reach the same end state on
+      // repeat, so not destructive and idempotent.
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      description: [
+        "Add or remove people from a portal's audience.",
+        "",
+        "One call grants or revokes access to EVERY document that client has ever received.",
+        "Permissions live on the portal, not the document.",
+      ].join("\n"),
+      inputSchema: {
+        portal: z.string(),
+        add: z.array(z.string()).optional(),
+        remove: z.array(z.string()).optional(),
+      },
     },
     async (args) => {
       try {
@@ -273,19 +325,22 @@ function buildServer(env: Env, origin: string): McpServer {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "mint_public_link",
-    [
-      "⚠️ WIDENING. Mint an unguessable public URL for a document.",
-      "",
-      "Anyone who receives, forwards, or finds this link can open the document with no",
-      "login. Unguessable is NOT private — it is a capability URL. Confirm with the user",
-      "before calling this, and tell them what it means.",
-      "",
-      "Upside: public links cost no Cloudflare Access seats, so they are the right choice",
-      "for one-time readers like a client's board.",
-    ].join("\n"),
-    { id: z.string() },
+    {
+      title: "Mint public link",
+      // Widening, not destructive — no data is lost. Idempotent: a second call on an
+      // already-public document returns the existing link.
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      description: [
+        "⚠️ WIDENING. Mint an unguessable public /p/ URL for a document — a capability link anyone",
+        "it reaches can open with no login (see server instructions). Confirm with the user first.",
+        "",
+        "Public links cost no Cloudflare Access seats — the right choice for one-time readers like a",
+        "client's board. Idempotent: if the document is already public, returns the existing link.",
+      ].join("\n"),
+      inputSchema: { id: z.string() },
+    },
     async (args) => {
       try {
         const meta = await getMeta(env, args.id);
@@ -313,17 +368,23 @@ function buildServer(env: Env, origin: string): McpServer {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "revoke_public_link",
-    [
-      "Kill a document's public link. The document itself is kept — only the unguessable",
-      "/p/ URL stops working, immediately and permanently.",
-      "",
-      "This is the move when a public link leaked or was forwarded further than intended.",
-      "To hand out a working link again afterwards, mint a new one (it will be a different",
-      "URL) or use rotate_public_link to do both in one step.",
-    ].join("\n"),
-    { id: z.string() },
+    {
+      title: "Revoke public link",
+      // Destructive: the /p/ URL dies permanently. Idempotent: revoking an already-private
+      // document is a no-op. Not to be confused with revoke_document (which deletes the doc).
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      description: [
+        "Kill a document's public link. The document itself is kept — only the unguessable",
+        "/p/ URL stops working, immediately and permanently.",
+        "",
+        "This is the move when a public link leaked or was forwarded further than intended.",
+        "To hand out a working link again afterwards, mint a new one (it will be a different",
+        "URL) or use rotate_public_link to do both in one step.",
+      ].join("\n"),
+      inputSchema: { id: z.string() },
+    },
     async (args) => {
       try {
         const result = await patchDocument(env, args.id, { makePublic: false });
@@ -339,17 +400,22 @@ function buildServer(env: Env, origin: string): McpServer {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "rotate_public_link",
-    [
-      "⚠️ WIDENING. Replace a document's public link with a fresh one in a single step: the",
-      "old /p/ URL dies and a new unguessable URL is minted, whether or not a link existed.",
-      "",
-      "Use this to invalidate a link that spread too far while keeping the document publicly",
-      "reachable at a new URL you hand out again. Like mint_public_link, the result is a",
-      "capability URL — anyone it reaches can open the document with no login.",
-    ].join("\n"),
-    { id: z.string() },
+    {
+      title: "Rotate public link",
+      // Both destructive (old URL dies) and widening (new capability URL). NOT idempotent: each
+      // call mints a different token.
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+      description: [
+        "⚠️ WIDENING. Replace a document's public link with a fresh one in a single step: the",
+        "old /p/ URL dies and a new unguessable capability URL is minted, whether or not a link existed.",
+        "",
+        "Use it to invalidate a link that spread too far while keeping the document publicly reachable",
+        "at a new URL. Confirm with the user (see server instructions on capability links).",
+      ].join("\n"),
+      inputSchema: { id: z.string() },
+    },
     async (args) => {
       try {
         const result = await patchDocument(env, args.id, { rotatePublic: true });
@@ -368,10 +434,19 @@ function buildServer(env: Env, origin: string): McpServer {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "revoke_document",
-    "Permanently delete a document and any public link to it. There is no undo.",
-    { id: z.string() },
+    {
+      title: "Delete document",
+      // The most destructive tool: irreversible deletion of a client deliverable. Idempotent in
+      // the HTTP-DELETE sense — the end state of a repeat call is the same (gone), so a host may
+      // safely retry a call whose response was lost.
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      description:
+        "Permanently delete a document and any public link to it. There is no undo. " +
+        "To un-publish a link but keep the document, use revoke_public_link instead.",
+      inputSchema: { id: z.string() },
+    },
     async (args) => {
       try {
         const meta = await getMeta(env, args.id);
@@ -394,12 +469,17 @@ function buildServer(env: Env, origin: string): McpServer {
   // These four tools turn the portal into durable, per-client, searchable memory that an
   // agent can read. Publishing a report and remembering it become the same act — which is
   // what makes a portal worth having at ONE client. See spec-05 §1.
+  //
+  // All four carry readOnlyHint: true, so a host can auto-run them without a confirm prompt.
   // -------------------------------------------------------------------------
 
-  server.tool(
+  server.registerTool(
     "list_portals",
-    "List the client portals. Use this when you need to know which clients exist.",
-    {},
+    {
+      title: "List portals",
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      description: "List the client portals. Use this when you need to know which clients exist.",
+    },
     async () => {
       try {
         const portals = await listPortals(env);
@@ -418,12 +498,16 @@ function buildServer(env: Env, origin: string): McpServer {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "list_documents",
-    "List documents, newest first. Metadata only — use read_document for the contents.",
     {
-      portal: z.string().optional().describe("Omit to list across all portals."),
-      tag: z.string().optional(),
+      title: "List documents",
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      description: "List documents, newest first. Metadata only — use read_document for the contents.",
+      inputSchema: {
+        portal: z.string().optional().describe("Omit to list across all portals."),
+        tag: z.string().optional(),
+      },
     },
     async (args) => {
       try {
@@ -439,15 +523,19 @@ function buildServer(env: Env, origin: string): McpServer {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "read_document",
-    [
-      "Read a document's source back.",
-      "",
-      "This is what makes the portal memory rather than an outbox: six months into an",
-      "engagement you can ask what was decided, and the answer is in here.",
-    ].join("\n"),
-    { id: z.string() },
+    {
+      title: "Read document",
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      description: [
+        "Read a document's source back.",
+        "",
+        "This is what makes the portal memory rather than an outbox: six months into an",
+        "engagement you can ask what was decided, and the answer is in here.",
+      ].join("\n"),
+      inputSchema: { id: z.string() },
+    },
     async (args) => {
       try {
         const result = await readDocument(env, args.id);
@@ -470,22 +558,26 @@ function buildServer(env: Env, origin: string): McpServer {
     },
   );
 
-  server.tool(
+  server.registerTool(
     "search_portal",
-    [
-      "Search one client's documents by keyword — title, summary, tags, and body.",
-      "",
-      "Every word in the query must appear somewhere in a document (in any order), so",
-      "'CDC V2 decision' finds the March architecture doc. It is keyword matching, not",
-      "semantic: search distinctive words, not a full natural-language question — 'what",
-      "did we decide about...' would require every one of those words to be present.",
-      "",
-      "The portal is REQUIRED. Searching across every client at once is how one client's",
-      "material ends up in another client's report.",
-    ].join("\n"),
     {
-      portal: z.string().describe("Which client. Required — ask the user if you are unsure."),
-      query: z.string(),
+      title: "Search portal",
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      description: [
+        "Search one client's documents by keyword — title, summary, tags, and body.",
+        "",
+        "Every word in the query must appear somewhere in a document (in any order), so",
+        "'CDC V2 decision' finds the March architecture doc. It is keyword matching, not",
+        "semantic: search distinctive words, not a full natural-language question — 'what",
+        "did we decide about...' would require every one of those words to be present.",
+        "",
+        "The portal is REQUIRED (see server instructions on the client boundary): searching",
+        "across every client at once is how one client's material ends up in another's report.",
+      ].join("\n"),
+      inputSchema: {
+        portal: z.string().describe("Which client. Required — ask the user if you are unsure."),
+        query: z.string(),
+      },
     },
     async (args) => {
       try {

@@ -22,15 +22,19 @@ Full reference list at the bottom.
 ## The short version
 
 The server is already above the median on the parts people usually get wrong — request
-isolation, auth posture, errors-as-results, and description quality. The gap between
-"good" and "reference-quality" is four things, in leverage order:
+isolation, auth posture, errors-as-results, and description quality. Two of the four gaps
+between "good" and "reference-quality" are now closed (#80, 0.12.0); two remain, in
+leverage order:
 
-1. **Tool annotations** — we ship none. Highest ROI, lowest effort.
-2. **Server `instructions`** — unset; our security-critical rules are duplicated per tool.
+1. ~~**Tool annotations** — we ship none.~~ ✅ **Done (#80).** All tools carry
+   `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint` + a human `title`.
+2. ~~**Server `instructions`** — unset.~~ ✅ **Done (#80).** The three cross-cutting rules
+   (portal boundary, capability links, publish-overwrite) are stated once at `initialize`
+   and de-duplicated out of the per-tool descriptions.
 3. **Structured tool output** — everything is prose; the read→publish chain re-parses IDs.
 4. **Resources** — documents are addressable content we expose only through tools.
 
-The sequenced work that closes these is at the end.
+The sequenced work that closes the remaining two is at the end.
 
 ---
 
@@ -90,10 +94,9 @@ clients MUST treat annotations as untrusted hints, never a security control.** S
 honestly for good client behavior; we never rely on another server's being honest, and they
 never substitute for `canView()`.
 
-**Where we stand.** ❌ We ship **zero** annotations — every tool uses the deprecated
-`tool(name, desc, schema, cb)` overload. Most glaring: `revoke_document` **permanently deletes
-a client deliverable with no undo** and nothing on the wire says so. The fix is to migrate to
-`registerTool` (supported in our SDK, 1.29.0) and set the table below.
+**Where we stand.** ✅ **Done (#80, 0.12.0).** Every tool is on `registerTool` and carries the
+annotation table below; `revoke_document` now says `destructiveHint` on the wire. `mcp.test.ts`
+asserts the read tools are `readOnlyHint` and the four destructive tools are flagged.
 
 | Tool | readOnly | destructive | idempotent | title |
 |---|:---:|:---:|:---:|---|
@@ -111,12 +114,12 @@ a client deliverable with no undo** and nothing on the wire says so. The fix is 
 **The rule.** The `instructions` string returned at `initialize` is where you tell the model
 what the server is for and how to use it. Best-in-class servers write it deliberately.
 
-**Where we stand.** ❌ Unset. Worse, the consequence is duplication: our single most important
-invariant — *never infer the portal; one client's report in another's portal ends the
-business* (prime directive #5) — is copy-pasted across `publish_document`, `search_portal`, and
-others. Hoist the cross-cutting rules (portal = client boundary, never guess, public links are
-capability URLs) into `instructions`; let each tool description shrink to its specifics. One
-place for the security-critical guidance, less drift.
+**Where we stand.** ✅ **Done (#80, 0.12.0).** The three cross-cutting rules — portal = client
+boundary and never guess (prime directive #5), public links are capability URLs, and
+publish-overwrites-in-place — are stated once in `instructions` (the `INSTRUCTIONS` constant in
+`worker/src/mcp.ts`) and returned at `initialize`. The per-tool descriptions were trimmed to
+their specifics, but the security-critical rule stays *named* in the tools that enforce it
+(`publish_document`, `search_portal`) so trimming never silently drops a guardrail.
 
 ### 4. Tool output — structured content alongside prose
 
@@ -217,20 +220,20 @@ Recording these so they are decisions, not oversights:
 | Description quality | ✅ Meets | hold the bar |
 | Security (confused-deputy, passthrough, session) | ✅ Meets | don't regress |
 | Tool design / naming | ✅ Meets | prefix only if collisions appear |
-| **Tool annotations** | ❌ Missing | **P1** |
-| **Server `instructions`** | ❌ Missing | **P2** |
+| **Tool annotations** | ✅ Meets (#80) | done in 0.12.0 |
+| **Server `instructions`** | ✅ Meets (#80) | done in 0.12.0 |
 | **Structured tool output** | ⚠️ Prose-only | **P3** |
 | **Resources** | ⚠️ Tools-only | **P4 (ADR-gated)** |
 | Pagination / prompts / elicitation / Tasks | ⏭️ Skipped | recorded above |
 
 ## Sequenced work
 
-Three tracked issues, in leverage order. P1 and P2 are one small PR — both live entirely in
-`worker/src/mcp.ts` and ship in an afternoon.
+P1 and P2 shipped in #80 (0.12.0) — `registerTool`, annotations, and server `instructions`, all
+in `worker/src/mcp.ts`. Two remain, in leverage order:
 
-1. **MCP polish — annotations + server instructions (P1 + P2).** Migrate to `registerTool`,
-   set the annotation table above, add `instructions`, de-duplicate the portal rules out of the
-   tool descriptions. Smallest change, biggest correctness gain.
+1. ✅ **MCP polish — annotations + server instructions (P1 + P2).** Done (#80): migrated to
+   `registerTool`, set the annotation table above, added `instructions`, de-duplicated the
+   cross-cutting rules out of the tool descriptions.
 2. **Structured tool output (P3).** `outputSchema` + `structuredContent` on the four read tools
    and `publish_document`, keeping the existing prose blocks.
 3. **Documents as MCP Resources (P4).** ADR first (the trade-off is real), then implement
