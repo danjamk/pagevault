@@ -386,7 +386,9 @@ server instance is created **per request** — sharing one across requests leaks
 cross-client response data.
 
 **Write:** `publish_document`, `create_portal`, `update_portal_members`,
-`mint_public_link` (widening — the tool description must say so), `revoke_document`.
+`mint_public_link` (widening — the tool description must say so), `revoke_public_link`,
+`rotate_public_link` (widening), `revoke_document` (deletes the document — the mirror of
+the CLI's `rm`, not a link-only revoke).
 
 **Read — the differentiator:** `list_portals`, `list_documents`, `read_document`,
 `search_portal`.
