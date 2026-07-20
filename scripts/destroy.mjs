@@ -36,15 +36,17 @@ console.log(banner("tear down"));
 
 // --- Resolve the deployment: rung 3 (provision) or rung 1/2 (context) ------
 
-let tier, host, kvId, accountId, state;
+let tier, host, kvId, oauthKvId, accountId, state;
 if (existsSync(PROVISION_STATE)) {
   state = JSON.parse(readFileSync(PROVISION_STATE, "utf8"));
   tier = 3;
   ({ host, kvId, accountId } = state);
+  oauthKvId = state.oauthKvId;
 } else if (existsSync(CONTEXT_FILE)) {
   state = JSON.parse(readFileSync(CONTEXT_FILE, "utf8"));
   tier = (state.rung ?? 1) >= 3 ? 3 : state.rung ?? 1;
   kvId = state.kvId;
+  oauthKvId = state.oauthKvId;
   accountId = state.accountId;
   host = state.host || (state.deployedUrl ? new URL(state.deployedUrl).host : "");
 } else {
@@ -150,6 +152,18 @@ if (KEEP_DATA) {
     : warn(`KV namespace ${kvId} may not have been deleted — check the dashboard.`);
 } else {
   skip("No KV namespace id in state");
+}
+
+// The OAuth provider's KV (#22) — issued tokens and client registrations, not documents.
+// --keep-data spares it too, for the same "don't delete what the operator kept" reason.
+if (KEEP_DATA) {
+  if (oauthKvId) skip(`OAuth KV namespace kept ${c.dim(oauthKvId)}`);
+} else if (oauthKvId) {
+  (await del(`/accounts/${accountId}/storage/kv/namespaces/${oauthKvId}`))
+    ? ok(`OAuth KV namespace deleted ${c.dim(oauthKvId)}`)
+    : warn(`OAuth KV namespace ${oauthKvId} may not have been deleted — check the dashboard.`);
+} else {
+  skip("No OAuth KV namespace id in state");
 }
 
 // --- Local artifacts -------------------------------------------------------

@@ -117,6 +117,37 @@ let kvId = ctx.kvId;
   }
 }
 
+// --- OAUTH_KV: the OAuth provider's own KV (ADR-006 / #22) ------------------
+//
+// The OAuthProvider is mounted in front of the Worker at every tier, so its KV binding must
+// exist even before anyone connects a hosted surface — an unbound OAUTH_KV fails the deploy.
+// Same self-healing reconcile as PAGEVAULT, under its own title so the two never collide.
+
+let oauthKvId = ctx.oauthKvId;
+{
+  const res = await cfApi(`/accounts/${account.id}/storage/kv/namespaces?per_page=100`);
+  const namespaces = res.ok ? res.result ?? [] : [];
+  const live = oauthKvId ? namespaces.find((n) => n.id === oauthKvId) : null;
+  const byTitle = namespaces.find((n) => n.title === "pagevault-oauth");
+  if (live) {
+    ok(`OAuth KV namespace ${c.dim(oauthKvId)}`);
+  } else {
+    if (oauthKvId) warn(`Saved OAuth KV namespace ${c.dim(oauthKvId)} no longer exists — reconciling.`);
+    if (byTitle) {
+      oauthKvId = byTitle.id;
+      ok(`OAuth KV namespace ${c.dim(oauthKvId)} ${c.dim('(reusing the existing "pagevault-oauth")')}`);
+    } else {
+      const created = await cfApi(`/accounts/${account.id}/storage/kv/namespaces`, {
+        method: "POST",
+        body: JSON.stringify({ title: "pagevault-oauth" }),
+      });
+      if (!created.ok) die(`Couldn't create the OAuth KV namespace (${cfErr(created.errors)}).`, "Check 'Workers KV Storage — Edit'.");
+      oauthKvId = created.result.id;
+      ok(`OAuth KV namespace created ${c.dim(oauthKvId)}`);
+    }
+  }
+}
+
 // --- Browser Run: confirm, don't probe (PDF export, #50) -------------------
 //
 // PDF export (#50) needs the BROWSER binding (Browser Run / Puppeteer). Two facts make this a
@@ -262,6 +293,7 @@ if (runtimeToken) {
 const template = readFileSync(CONFIG_IN, "utf8");
 const generated = template
   .replace(/"id": "REPLACE_WITH_KV_NAMESPACE_ID"/, `"id": "${kvId}"`)
+  .replace(/"id": "REPLACE_WITH_OAUTH_KV_ID"/, `"id": "${oauthKvId}"`)
   .replace(/"PAGEVAULT_VERSION": ""/, `"PAGEVAULT_VERSION": "${releaseTag()}"`)
   .replace(/"PAGEVAULT_DEPLOYED_AT": ""/, `"PAGEVAULT_DEPLOYED_AT": "${new Date().toISOString()}"`)
   .replace(/"OWNER_EMAIL": ""/, `"OWNER_EMAIL": "${ownerEmail}"`)
@@ -278,13 +310,13 @@ const generated = template
 
 // A silent substitution miss would deploy a Worker with no KV and no audiences, surfacing as
 // "nothing works" rather than an error. Fail loud instead.
-for (const [key, value] of Object.entries({ kv: kvId, team, host, audDocs, audAdmin, accountId: account.id, groupId: group.id })) {
+for (const [key, value] of Object.entries({ kv: kvId, oauthKv: oauthKvId, team, host, audDocs, audAdmin, accountId: account.id, groupId: group.id })) {
   if (!generated.includes(value)) die(`Failed to write ${key} into ${CONFIG_OUT}. Did the template change?`);
 }
 writeFileSync(CONFIG_OUT, generated);
 ok(`Wrote ${CONFIG_OUT} ${c.dim("(rung 3, gitignored)")}`);
 
-saveContext({ ...loadContext(), host, ownerEmail, accountId: account.id, kvId, team, audDocs, audAdmin, groupId: group.id });
+saveContext({ ...loadContext(), host, ownerEmail, accountId: account.id, kvId, oauthKvId, team, audDocs, audAdmin, groupId: group.id });
 
 // Provision's job ends here. deploy runs `wrangler deploy` and sets the secrets — the bearer
 // (PAGEVAULT_API_TOKEN) and, next phase, the scoped runtime CF_API_TOKEN. No manual steps.

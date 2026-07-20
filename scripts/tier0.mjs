@@ -70,6 +70,39 @@ if (kvId) {
   saveContext({ ...ctx, kvId }); // remember the reconciled id
 }
 
+// --- The OAuth provider's KV (ADR-006 / #22) -------------------------------
+//
+// The OAuthProvider wraps the Worker at every tier, so OAUTH_KV must be bound even at Tier 0,
+// or the deploy fails on the placeholder. Same reconcile as PAGEVAULT, under its own title.
+
+let oauthKvId = ctx.oauthKvId;
+{
+  if (!ctx.accountId) die("No account pinned.", "Run `make preflight` first — it pins the account.");
+  const res = await cfApi(`/accounts/${ctx.accountId}/storage/kv/namespaces?per_page=100`);
+  const namespaces = res.ok ? res.result ?? [] : [];
+  const live = oauthKvId ? namespaces.find((n) => n.id === oauthKvId) : null;
+  const byTitle = namespaces.find((n) => n.title === "pagevault-oauth");
+  if (live) {
+    ok(`OAuth KV namespace ${c.dim(oauthKvId)}`);
+  } else {
+    if (oauthKvId) warn(`Saved OAuth KV namespace ${c.dim(oauthKvId)} no longer exists — reconciling.`);
+    if (byTitle) {
+      oauthKvId = byTitle.id;
+      ok(`OAuth KV namespace ${c.dim(oauthKvId)} ${c.dim('(reusing the existing "pagevault-oauth")')}`);
+    } else {
+      info("Creating the OAuth KV namespace…");
+      const created = await cfApi(`/accounts/${ctx.accountId}/storage/kv/namespaces`, {
+        method: "POST",
+        body: JSON.stringify({ title: "pagevault-oauth" }),
+      });
+      if (!created.ok) die(`Couldn't create the OAuth KV namespace (${cfErr(created.errors)}).`, "Check the token has 'Workers KV Storage — Edit'.");
+      oauthKvId = created.result.id;
+      ok(`OAuth KV namespace created ${c.dim(oauthKvId)}`);
+    }
+  }
+  saveContext({ ...loadContext(), oauthKvId }); // remember the reconciled id (merge, kvId already saved)
+}
+
 // --- Write the config ------------------------------------------------------
 //
 // The committed wrangler.jsonc is the Tier-1-shaped template; fill only what Tier 0 needs
@@ -86,6 +119,7 @@ const workersDev = host ? "false" : "true";
 const version = releaseTag();
 let generated = template
   .replace(/"id": "REPLACE_WITH_KV_NAMESPACE_ID"/, `"id": "${kvId}"`)
+  .replace(/"id": "REPLACE_WITH_OAUTH_KV_ID"/, `"id": "${oauthKvId}"`)
   .replace(/"OWNER_EMAIL": ""/, `"OWNER_EMAIL": "${ownerEmail}"`)
   .replace(/"PAGEVAULT_VERSION": ""/, `"PAGEVAULT_VERSION": "${version}"`)
   .replace(/"PAGEVAULT_DEPLOYED_AT": ""/, `"PAGEVAULT_DEPLOYED_AT": "${new Date().toISOString()}"`)
@@ -108,7 +142,7 @@ if (host) {
     );
 }
 
-if (!generated.includes(kvId) || !generated.includes(ownerEmail) || !generated.includes(`"workers_dev": ${workersDev}`)) {
+if (!generated.includes(kvId) || !generated.includes(oauthKvId) || !generated.includes(ownerEmail) || !generated.includes(`"workers_dev": ${workersDev}`)) {
   die(`Failed to write ${CONFIG_OUT}. Did the template change?`);
 }
 if (host && !generated.includes(`"pattern": "${host}"`)) die(`Failed to write the ${host} route.`);

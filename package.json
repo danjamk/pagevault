@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^1.1.0",
+    "@cloudflare/workers-oauth-provider": "^0.8.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@vscode/markdown-it-katex": "^1.1.1",
     "agents": "^0.17.4",
