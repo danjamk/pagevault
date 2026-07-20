@@ -150,13 +150,12 @@ Access-as-IdP, `OAUTH_KV` in provisioning, then the prod deploy + live retest.
       real operator login. OAuth authenticates the **operator** to *their own* MCP
       server; `canView()` still owns document authorization (prime directives #5/#6).
       This is the one "do not ship as-is" item from the spike.
-- [ ] **`OAUTH_KV` in provisioning — this is a real pipeline gap, now confirmed.**
-      The deploy path (`context.mjs` generator + `scripts/deploy.mjs`) substitutes only
-      the `PAGEVAULT` KV id; the spike's `OAUTH_KV` binding stays a
-      `REPLACE_WITH_OAUTH_KV_ID` placeholder, so `make deploy` from the spike would fail
-      or mis-bind. For the test deploy this was wired by hand (namespace `7a8fca83…`).
-      Fix: teach `provision.mjs` to create `OAUTH_KV` and the generator to substitute
-      its id (mirror the `PAGEVAULT` path). Store the id in `.pagevault.json`. (Ties #42.)
+- [x] **`OAUTH_KV` in provisioning — DONE.** Both `provision.mjs` (rung 3) and
+      `tier0.mjs` (rung 0/1 — the OAuthProvider wraps the Worker at *every* tier, so the
+      binding is universal) now create-or-reconcile a `pagevault-oauth` KV namespace,
+      substitute `REPLACE_WITH_OAUTH_KV_ID`, fail loud on a miss, and save `oauthKvId` to
+      `.pagevault.json`. `destroy.mjs` tears it down (respecting `--keep-data`). `make
+      deploy` now produces a valid OAuth config with no hand-wiring. 15 script tests green.
 - [x] **Preserve the Claude Code bearer path — DONE.** The default export shortcuts
       `/mcp` + valid `PAGEVAULT_API_TOKEN` to `handleMcp` before OAuth sees it. Verified
       200 on the test deploy (the `verify` smoke drives it). Regression test still owed
