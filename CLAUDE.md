@@ -66,7 +66,6 @@ worker/          the Worker — the whole product
   src/viewer.ts    the trusted shell, /render
   src/console.ts   /admin
 cli/             `pagevault` — thin HTTP client of /api  (Layer 1)
-mcp/             thin stdio bin that proxies to /mcp, for Claude Desktop
 docs/
   README.md            the docs map — start here
   architecture.md      the design

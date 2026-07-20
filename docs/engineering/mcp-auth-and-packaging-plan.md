@@ -346,8 +346,11 @@ functional release, not per-ticket.
        two new tools), CLI `pagevault.test.mjs` (subprocess arg-guard dispatch). Full suite green:
        389 worker, 37 script+CLI, smoke passes.
    - Then commit + PR (closes #73). Note: #56 also lives on this branch, done.
-3. #21 — *(re-evaluate — likely closes)* stdio proxy shim for Claude Desktop
-   — #22-on-prod reaches Desktop via the claude.ai account connector, undercutting the shim's rationale.
+3. ✅ #21 — stdio proxy shim for Claude Desktop — **CLOSED 2026-07-20 as superseded by #22.**
+   OAuth on prod reaches Desktop via the claude.ai account connector, so the shim's premise
+   (remote MCP can't auth in Desktop) is gone. ADR-006 argues against stdio; the one residual
+   case (Tier-0 bearer-only Desktop) is served by the generic `npx mcp-remote` bridge, not our
+   code. The `mcp/` directory was never built and was removed from the CLAUDE.md layout.
 
 **Group 4 — `feature/packaging-lifecycle` · npm install → deploy → operate**
 1. #42 — pagevault CLI: init / upgrade / sync-access (provisioning commands) *(keystone)*
@@ -365,9 +368,11 @@ functional release, not per-ticket.
 - A PageVault MCP tool call executes from a **claude.ai web conversation** (the
   differentiator ADR-006 stakes the project on), **or** a documented, evidenced
   reason it's blocked platform-side with a re-test cadence.
-- **Claude Desktop** works via the #21 shim.
-- `pagevault` npm package is a single install for **deploy + operate + Desktop MCP**,
-  guarded by a pack-and-install test so a broken tarball can't publish.
+- **Claude Desktop** works via the claude.ai account connector (#22 OAuth on prod) —
+  no stdio shim. #21 closed 2026-07-20 as superseded; a Tier-0 bearer-only deployment
+  reaches Desktop with the generic `npx mcp-remote` bridge, documented, not shipped.
+- `pagevault` npm package is a single install for **deploy + operate**, guarded by a
+  pack-and-install test so a broken tarball can't publish.
 
 ## Key files & references
 
@@ -381,5 +386,5 @@ functional release, not per-ticket.
 - ADR-006 (`docs/adr/ADR-006-remote-mcp.md`) — remote, staged auth.
 - Reference implementation: **RealPlus** MCP server (Dan's machine) — the working
   custom OAuth connector to diff against.
-- Issues: #22 (OAuth), #21 (stdio shim), #63 (markdown), #56 (pack test), #42
-  (provisioning CLI), #28 (deploy button), #33 (agent runbook).
+- Issues: #22 (OAuth ✅), #21 (stdio shim — closed, superseded by #22), #63 (markdown ✅),
+  #56 (pack test ✅), #42 (provisioning CLI), #28 (deploy button), #33 (agent runbook).
