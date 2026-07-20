@@ -17,7 +17,7 @@ import {
   listDocs,
   listPortals,
   metadataFits,
-  mintId,
+  docId,
   mintPublicToken,
   normalizeEmail,
   putDoc,
@@ -150,18 +150,20 @@ export async function publishDocument(env: Env, input: PublishInput): Promise<Pu
   const portal = await resolvePortal(env, input.portal);
   const title = parseTitle(input.title);
 
-  // Create-or-update, keyed on (portal, title). This is what makes "the link stays
-  // current" true: iterating on a report updates the same URL instead of producing a
-  // graveyard of stale links — which is, with some irony, the exact problem this project
-  // set out to solve.
-  const existing = await findByTitle(env, portal.slug, title);
+  // Create-or-update, keyed on (portal, title) via a DETERMINISTIC id (ADR-013): the id is a
+  // hash of (portal, normalized title), so iterating on a report overwrites the same keys in
+  // place — the link stays current — and a duplicate is unrepresentable, not merely rejected.
+  // No `list()`, so none of KV's eventual-consistency race (#74). The `getMeta` is only the
+  // confirm guard; even a stale read there overwrites in place rather than forking a duplicate.
+  const id = await docId(portal.slug, title);
+  const existing = await getMeta(env, id);
   if (existing && input.confirm !== true) throw new Conflict(existing, bytes);
 
   const sourceKind: SourceKind = input.sourceKind ?? "html";
 
   const now = new Date().toISOString();
   const meta: DocMeta = {
-    id: existing?.id ?? mintId(),
+    id,
     portal: portal.slug,
     title,
     sourceKind,
@@ -311,13 +313,6 @@ export const portalPath = (portal: Portal): string =>
   portal.kind === "public"
     ? `/pub/${encodeURIComponent(portal.slug)}`
     : `/v/${encodeURIComponent(portal.slug)}`;
-
-/** Case-insensitive: "Q3 Review" and "q3 review" are the same deliverable. */
-async function findByTitle(env: Env, portal: string, title: string): Promise<DocMeta | null> {
-  const wanted = title.trim().toLowerCase();
-  const match = (await listDocs(env, portal)).find((d) => d.title.trim().toLowerCase() === wanted);
-  return match ? getMeta(env, match.id) : null;
-}
 
 /**
  * Which portal does this document go in?

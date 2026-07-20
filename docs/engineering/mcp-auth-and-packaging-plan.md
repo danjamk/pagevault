@@ -309,10 +309,13 @@ functional release, not per-ticket.
 2. ✅ #22 — OAuth 2.1 on the remote MCP server *(Access-IdP/ADR-012, OAUTH_KV provisioning, bearer preserved → **prod, v0.9.0**)*
 3. ⏳ #76 — Comprehensive MCP test coverage *(incident tier → `make check`) — the one open item*
 
-**Group 2 — `feature/publish-path` · Publish engine: correct + more formats** *(both in
-`documents.ts`; independent, can run parallel to Group 1)*
-1. #74 — publish_document overwrite guard fails on KV eventual consistency *(deterministic id; maybe an ADR)*
-2. #63 — Publish markdown from the CLI and MCP (sourceKind support)
+**Group 2 — `feature/publish-path` · Publish engine: correct + more formats**
+1. ✅ #74 — overwrite guard KV race → **deterministic document ids** (ADR-013): id is a hash
+   of (portal, normalized title), so a republish overwrites in place — a duplicate is
+   unrepresentable, not policed. `findByTitle` deleted; unit + integration regression tests.
+2. ✅ **favicon** — serve `/favicon.ico` + `/favicon.svg` (the leaning-v mark) so a remote MCP
+   connector shows the PageVault icon, not the parent domain's. (Rode along, no GHI.)
+3. ⏳ #63 — Publish markdown from the CLI and MCP (sourceKind support)
 
 **Group 3 — `feature/cli-mcp-reach` · Complete the client surfaces**
 1. #56 — Guard CLI publishes with a pack-and-install smoke test *(first — guards the package)*

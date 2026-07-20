@@ -4,6 +4,7 @@ import {
   type Portal,
   getMembers,
   getPortal,
+  docId,
   isValidSlug,
   listPortals,
   mintId,
@@ -70,6 +71,19 @@ describe("ids and tokens", () => {
   it("does not repeat itself", () => {
     const ids = new Set(Array.from({ length: 500 }, mintId));
     expect(ids.size).toBe(500);
+  });
+
+  it("derives a deterministic doc id from (portal, title) — ADR-013 / #74", async () => {
+    const a = await docId("acme", "Q3 Review");
+    expect(a).toMatch(/^[23456789abcdefghijkmnpqrstuvwxyz]{12}$/);
+    // Same (portal, title) → same id. This is what makes a republish overwrite the same keys
+    // in place instead of forking a stale-linked duplicate (the #74 KV race).
+    expect(await docId("acme", "Q3 Review")).toBe(a);
+    // Case- and surrounding-whitespace-insensitive, matching the old findByTitle match.
+    expect(await docId("acme", "  q3 review ")).toBe(a);
+    // A different portal or title is a different document.
+    expect(await docId("beta", "Q3 Review")).not.toBe(a);
+    expect(await docId("acme", "Q4 Review")).not.toBe(a);
   });
 });
 
