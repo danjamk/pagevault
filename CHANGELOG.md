@@ -7,6 +7,29 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-07-20
+
+Fixes the publish race that could fork a client's link, plus Markdown publishing and a proper
+connector icon.
+
+### Fixed
+- **Republishing a document no longer forks its URL (#74).** `publish_document` is
+  create-or-update keyed on (portal, title), but the title lookup ran through KV `list()`, which
+  is eventually consistent — a republish inside that window missed the existing document, minted a
+  new id, and silently created a duplicate with a stale client link. Document ids are now
+  **deterministic** in (portal, normalized title)
+  ([ADR-013](docs/adr/ADR-013-deterministic-document-ids.md)), so a republish overwrites the same
+  keys in place: a duplicate is unrepresentable, not merely rejected.
+- **The remote MCP connector shows the PageVault mark, not the parent domain's icon.** The Worker
+  now serves `/favicon.ico` and `/favicon.svg` (the leaning-v); a `pagevault.<yourdomain>`
+  deployment was otherwise falling back to the parent site's favicon.
+
+### Added
+- **Publish Markdown from the CLI and MCP (#63).** `pagevault publish report.md` infers the format
+  from the extension (`--source-kind` overrides); MCP `publish_document` gains an optional
+  `sourceKind`. The Worker renders Markdown to HTML at publish and keeps the original `.md` as the
+  raw source — it could already render Markdown (#46); the publish surfaces just couldn't ask.
+
 ## [0.9.0] — 2026-07-20
 
 OAuth 2.1 on the remote MCP server — connect PageVault to claude.ai, Claude Desktop, and mobile,
