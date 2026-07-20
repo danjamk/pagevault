@@ -73,6 +73,25 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
   return createMcpHandler(server, { route: "/mcp" })(request, env, ctx);
 }
 
+/**
+ * The OAuth-authenticated MCP path (ADR-006 / #22).
+ *
+ * Identical to `handleMcp` except it does NOT check the bearer itself: the OAuthProvider has
+ * already validated an issued token before routing here, and the request carries the granted
+ * operator identity on `ctx.props`. The static-bearer path stays in `handleMcp` so Claude Code
+ * keeps working — this is the second, independent auth surface ADR-006 says `/mcp` should have,
+ * not a replacement for the first.
+ */
+export const mcpApiHandler = {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    // Reached only after the OAuthProvider validated an issued token; the operator identity
+    // rides on ctx.props. A fresh server per request, same as handleMcp (ADR-006).
+    const origin = new URL(request.url).origin;
+    const server = buildServer(env, origin);
+    return createMcpHandler(server, { route: "/mcp" })(request, env, ctx);
+  },
+};
+
 function buildServer(env: Env, origin: string): McpServer {
   // The version a client sees in serverInfo is the deployed build, not a hardcoded string —
   // baked at deploy (ADR-010).

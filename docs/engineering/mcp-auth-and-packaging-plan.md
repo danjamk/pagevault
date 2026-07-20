@@ -131,12 +131,20 @@ The flow is **validated** (see RESOLVED, above). This is now the whole MCP job:
 turn the proven spike into shippable code and get it onto prod. Ordered roughly
 cheapest → riskiest.
 
-- [ ] **Fix the `/health` 404 regression.** Wrapping the router in `OAuthProvider`
-      (spike `worker/src/index.ts`) made `/health` return 404 (works on `main`).
-      Confirmed on the test deploy. Check other non-OAuth routes (`/admin`, `/api`,
-      `/`, `/v`, `/p`, `/render`) for the same — the wrapping changed the entry point,
-      so nothing routed through `defaultHandler` is guaranteed until tested. The
-      durable regression test for this lives in **#76** (non-OAuth-route audit).
+**Status 2026-07-20 — the OAuth port onto current `main` is DONE and validated on
+test.** `oauth.ts` + the `index.ts` OAuthProvider wiring + `env.ts` (`OAUTH_KV`,
+`OAUTH_PROVIDER`) + `mcp.ts` (`mcpApiHandler`) + `wrangler.jsonc` were re-applied
+onto current main (branch `feature/mcp-oauth-prod`). Typecheck clean, **375 tests
+pass**, `worker/test/oauth.test.ts` added. Deployed to test and confirmed: OAuth
+discovery 200, DCR 201, all 9 MCP tools over the flow, bearer `/mcp` preserved, and
+`/health` returns 200 (see the phantom note below). **Remaining before prod:**
+Access-as-IdP, `OAUTH_KV` in provisioning, then the prod deploy + live retest.
+
+- [x] **~~Fix the `/health` 404 regression~~ — PHANTOM, no fix needed.** The 404 was
+      only ever the 78-commits-stale spike deploy *lacking* the `/health` route (added
+      later, ADR-010/#48). On current `main`, `/health` lives in the router
+      (`defaultHandler`), survives the `OAuthProvider` wrapping, and returns 200 on the
+      test deploy. The durable non-OAuth-route audit still lives in **#76**.
 - [ ] **Cloudflare Access as the upstream IdP.** Replace the spike's paste-the-
       `PAGEVAULT_API_TOKEN` consent screen (`worker/src/oauth.ts` `consentPage`) with
       real operator login. OAuth authenticates the **operator** to *their own* MCP
@@ -149,16 +157,16 @@ cheapest → riskiest.
       or mis-bind. For the test deploy this was wired by hand (namespace `7a8fca83…`).
       Fix: teach `provision.mjs` to create `OAUTH_KV` and the generator to substitute
       its id (mirror the `PAGEVAULT` path). Store the id in `.pagevault.json`. (Ties #42.)
-- [ ] **Preserve the Claude Code bearer path.** The entry point shortcuts
-      `/mcp` + valid `PAGEVAULT_API_TOKEN` before OAuth sees it. Verified still 200 on
-      the test deploy — keep it, and add a regression test.
+- [x] **Preserve the Claude Code bearer path — DONE.** The default export shortcuts
+      `/mcp` + valid `PAGEVAULT_API_TOKEN` to `handleMcp` before OAuth sees it. Verified
+      200 on the test deploy (the `verify` smoke drives it). Regression test still owed
+      via #76.
 - [ ] **Make it provably solid — the MCP robustness pair (why tonight slipped
       through: `verify`/`health` never touch `/mcp`):**
-  - [ ] **#75 — live MCP smoke in `verify` + `health`.** Drive `initialize` /
-        `tools/list`, a guarded `publish→read→revoke` round-trip, and OAuth discovery
-        (`/.well-known/*`, `/register`) against the live deploy. Makes `make verify`
-        mean "MCP actually works," and would have caught the `/health` 404. Highest ROI
-        — land it early in Phase 2 so every subsequent deploy is guarded.
+  - [x] **#75 — live MCP smoke in `verify` + `health` — DONE, committed.** Drives
+        `initialize` / `tools/list` (asserts all 9) / a `publish→read→revoke` round-trip
+        / OAuth-discovery mode against the live deploy. `mcpCall` helper in `context.mjs`.
+        Validated live. Every deploy from here is guarded.
   - [ ] **#76 — comprehensive MCP test coverage** at the `auth.test.ts` incident tier:
         per-tool happy/error paths, **cross-portal isolation** (prime directive #5),
         the OAuth flow (302→303, CSP), the non-OAuth-route audit, and the #74 / #63
@@ -166,8 +174,10 @@ cheapest → riskiest.
 - [ ] **Watch `static_headers` GA.** If it lands, a ~50-line static-bearer endpoint
       deletes most of this. Don't gold-plate the OAuth code.
 - [ ] **Deploy to prod** (`danjamkuhn.com`) once Access-login + provisioning + tests
-      land: merge `feature/22-oauth-spike` → `main`, create prod's `OAUTH_KV`, deploy.
-      Then re-run the live claude.ai connector test against prod.
+      land: **re-apply the OAuth changes onto current `main`** (do NOT merge the spike —
+      it's 78 commits stale; port `oauth.ts` + the `index.ts` wiring + `env.ts` +
+      `wrangler.jsonc` OAUTH_KV + the `package.json` dep by hand against today's code),
+      create prod's `OAUTH_KV`, deploy. Then re-run the live claude.ai test against prod.
 - [ ] **Revert the test env** to `main` when done validating (test currently runs the
       spike), and tear down the throwaway worktree.
 
@@ -288,8 +298,10 @@ correctness bug in the shared publish path; fix independent of the above.
 Four branches, ~5 PRs, ordered **1 → 2 → 3 → 4**. Kept deliberately few: grouped by
 functional release, not per-ticket.
 
-**Group 1 — `feature/mcp-oauth-prod` · OAuth live on prod, provably solid** *(build on
-`feature/22-oauth-spike`; likely 2 PRs — feature, then tests)*
+**Group 1 — `feature/mcp-oauth-prod` · OAuth live on prod, provably solid** *(branch
+off `main`. #22 **re-applies** the OAuth pattern from the spike — which is 78 commits
+stale (branched at PR #26), a validated *reference*, not a merge base. Likely 2 PRs —
+tests/verify first, then the OAuth port.)*
 1. #75 — Live MCP smoke in verify + health *(first — the guardrail)*
 2. #22 — Add OAuth 2.1 to the remote MCP server *(harden: Access IdP, OAUTH_KV provisioning, /health fix, bearer preserved → prod)*
 3. #76 — Comprehensive MCP test coverage *(incident tier → `make check`)*
