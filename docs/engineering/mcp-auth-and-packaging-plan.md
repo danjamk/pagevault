@@ -3,8 +3,9 @@
 **Drafted:** 2026-07-19 · **Start:** 2026-07-20 · **Owner:** Dan
 
 Two objectives that are really one npm package finishing its job. The MCP-auth
-half is now **validated** — active work is hardening it for prod (Phase 2) and the
-packaging track. Kept below in resolved form so the reasoning trail survives.
+half is **shipped to prod** (OAuth 2.1, **v0.9.0**, 2026-07-20) — remaining there is
+just **#76** (comprehensive tests). Active work now is the packaging track (Groups 2–4).
+Kept below in resolved form so the reasoning trail survives.
 
 ---
 
@@ -125,20 +126,17 @@ order of what #430 flagged as *observed client behavior*:
 
 ---
 
-## Phase 2 — Harden #22 to production ← **ACTIVE PATH**
+## Phase 2 — Harden #22 to production ✅ **SHIPPED (v0.9.0, prod, 2026-07-20)**
 
-The flow is **validated** (see RESOLVED, above). This is now the whole MCP job:
-turn the proven spike into shippable code and get it onto prod. Ordered roughly
-cheapest → riskiest.
+The flow is validated (see RESOLVED, above) and the whole MCP-auth job is done:
+the proven spike became shippable code and is live on prod.
 
-**Status 2026-07-20 — the OAuth port onto current `main` is DONE and validated on
-test.** `oauth.ts` + the `index.ts` OAuthProvider wiring + `env.ts` (`OAUTH_KV`,
-`OAUTH_PROVIDER`) + `mcp.ts` (`mcpApiHandler`) + `wrangler.jsonc` were re-applied
-onto current main (branch `feature/mcp-oauth-prod`). Typecheck clean, **375 tests
-pass**, `worker/test/oauth.test.ts` added. Deployed to test and confirmed: OAuth
-discovery 200, DCR 201, all 9 MCP tools over the flow, bearer `/mcp` preserved, and
-`/health` returns 200 (see the phantom note below). **Remaining before prod:**
-Access-as-IdP, `OAUTH_KV` in provisioning, then the prod deploy + live retest.
+**Status 2026-07-20 — #22 is SHIPPED to prod as v0.9.0.** OAuth 2.1 is live on
+`pagevault.danjamkuhn.com` (`0.9.0+747199e`): OAuth discovery + DCR + Access-gated
+`/admin/authorize` all confirmed, and a fresh claude.ai connector completed the full
+handshake on prod — Cloudflare Access login → tokenless consent → tools. Shipped via
+two PRs: **#77** (OAuth port + `OAUTH_KV` provisioning + **#75** MCP smoke) and the
+Access-IdP PR (**ADR-012**). Typecheck clean, **378 tests pass**. Tagged **v0.9.0**.
 
 - [x] **~~Fix the `/health` 404 regression~~ — PHANTOM, no fix needed.** The 404 was
       only ever the 78-commits-stale spike deploy *lacking* the `/health` route (added
@@ -173,20 +171,26 @@ Access-as-IdP, `OAUTH_KV` in provisioning, then the prod deploy + live retest.
         regressions. Wire into `make check` (pre-PR gate).
 - [ ] **Watch `static_headers` GA.** If it lands, a ~50-line static-bearer endpoint
       deletes most of this. Don't gold-plate the OAuth code.
-- [ ] **Deploy to prod** (`danjamkuhn.com`) once Access-login + provisioning + tests
-      land: **re-apply the OAuth changes onto current `main`** (do NOT merge the spike —
-      it's 78 commits stale; port `oauth.ts` + the `index.ts` wiring + `env.ts` +
-      `wrangler.jsonc` OAUTH_KV + the `package.json` dep by hand against today's code),
-      create prod's `OAUTH_KV`, deploy. Then re-run the live claude.ai test against prod.
-- [ ] **Revert the test env** to `main` when done validating (test currently runs the
-      spike), and tear down the throwaway worktree.
+- [x] **Deploy to prod — DONE.** The OAuth changes were re-applied onto current `main`
+      (the spike was 78 commits stale — a reference, not a merge base), merged via PR #77 +
+      the Access-IdP PR, and shipped to `danjamkuhn.com` via the manual `deploy-prod` action.
+      (A transient CF-API blip on `provision`'s account check failed the first run; the
+      re-run went green.) Prod runs `0.9.0+747199e`; a fresh claude.ai connector completed
+      the full Access-login → consent → tools flow on prod.
+- [ ] **Cleanup + hardening (follow-ups, non-blocking):** revert the test env to a clean
+      `main` build; remove the `feature/22-oauth-spike` worktree; delete the duplicate test
+      `OAUTH_KV` namespace (title mismatch — `provision` reconciles `pagevault-oauth`, the
+      ad-hoc test one was titled `OAUTH_KV`); `Cache-Control: no-store` on the OAuth metadata
+      (edge-cached briefly across an `authorizeEndpoint` change); harden `provision`'s account
+      check so a transient CF-API blip can't fail a prod deploy (reuse deploy's verified account).
 
 **Note:** #74 (overwrite-guard KV race) surfaced during this validation but is a
 `track: core` bug, not #22 hardening — fix on its own track.
 
-**Exit:** #22 merged to `main` and live on prod; claude.ai / Desktop / mobile reach
-the operator's own PageVault with real Access login; **#75 verify-smoke and #76
-test suite green** so the surface is provably solid, not just working-once.
+**Exit:** ✅ **MET.** #22 merged, released as **v0.9.0**, and **live on prod** — claude.ai /
+Desktop / mobile reach the operator's own PageVault with real Access login. #75 verify-smoke
+shipped. The one remaining item to make the surface *provably* solid is **#76** (comprehensive
+tests), tracked on its own — not a blocker to "shipped."
 
 ---
 
@@ -298,13 +302,12 @@ correctness bug in the shared publish path; fix independent of the above.
 Four branches, ~5 PRs, ordered **1 → 2 → 3 → 4**. Kept deliberately few: grouped by
 functional release, not per-ticket.
 
-**Group 1 — `feature/mcp-oauth-prod` · OAuth live on prod, provably solid** *(branch
-off `main`. #22 **re-applies** the OAuth pattern from the spike — which is 78 commits
-stale (branched at PR #26), a validated *reference*, not a merge base. Likely 2 PRs —
-tests/verify first, then the OAuth port.)*
-1. #75 — Live MCP smoke in verify + health *(first — the guardrail)*
-2. #22 — Add OAuth 2.1 to the remote MCP server *(harden: Access IdP, OAUTH_KV provisioning, /health fix, bearer preserved → prod)*
-3. #76 — Comprehensive MCP test coverage *(incident tier → `make check`)*
+**Group 1 · OAuth live on prod — ✅ SHIPPED (v0.9.0)** *(landed as two PRs off `main`:
+#77 = OAuth port + provisioning + #75 smoke, then the Access-IdP PR. The spike was a
+78-commit-stale reference, re-applied by hand, not merged.)*
+1. ✅ #75 — Live MCP smoke in verify + health *(the guardrail)*
+2. ✅ #22 — OAuth 2.1 on the remote MCP server *(Access-IdP/ADR-012, OAUTH_KV provisioning, bearer preserved → **prod, v0.9.0**)*
+3. ⏳ #76 — Comprehensive MCP test coverage *(incident tier → `make check`) — the one open item*
 
 **Group 2 — `feature/publish-path` · Publish engine: correct + more formats** *(both in
 `documents.ts`; independent, can run parallel to Group 1)*
