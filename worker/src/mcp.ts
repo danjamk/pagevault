@@ -104,7 +104,7 @@ function buildServer(env: Env, origin: string): McpServer {
   server.tool(
     "publish_document",
     [
-      "Publish a self-contained HTML document to a PageVault portal and return its URL.",
+      "Publish a self-contained HTML or Markdown document to a PageVault portal and return its URL.",
       "",
       "Portals are per-client collections. If the user has exactly one portal, it is used",
       "automatically — do not ask. If several exist and none is the default, this tool will",
@@ -120,7 +120,7 @@ function buildServer(env: Env, origin: string): McpServer {
       html: z
         .string()
         .describe(
-          "The complete, self-contained HTML document. Inline all CSS and JS, and embed " +
+          "The complete, self-contained document body (HTML, or Markdown if sourceKind is markdown). Inline all CSS and JS, and embed " +
             "images as data: URIs — PageVault stores only this one HTML blob and hosts no " +
             "separate assets. An external https:// image loads, but it adds a live dependency " +
             "and phones home: for a private document the third-party host learns who opened it " +
@@ -138,6 +138,14 @@ function buildServer(env: Env, origin: string): McpServer {
         .boolean()
         .optional()
         .describe("Required to overwrite an existing document with the same title."),
+      sourceKind: z
+        .enum(["html", "markdown"])
+        .optional()
+        .describe(
+          "Format of the document body (default html). Set markdown to publish a Markdown " +
+            "document — it is rendered to HTML at publish. Same single-file rule: images must be " +
+            "absolute https:// or data: URIs; there are no separate assets.",
+        ),
     },
     async (args) => {
       try {
@@ -150,6 +158,7 @@ function buildServer(env: Env, origin: string): McpServer {
           ownerOnly: args.ownerOnly,
           extraEmails: args.emails,
           confirm: args.confirm,
+          sourceKind: args.sourceKind,
         });
 
         // publishDocument admits any newly granted emails to the viewer group itself (#27) —

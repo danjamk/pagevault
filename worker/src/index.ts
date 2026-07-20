@@ -5,7 +5,7 @@ import { handleConsole } from "./console.js";
 import type { Env } from "./env.js";
 import { handleMcp, mcpApiHandler } from "./mcp.js";
 import { handleAuthorize } from "./oauth.js";
-import { rootLanding } from "./pages.js";
+import { favicon, rootLanding } from "./pages.js";
 import { handlePortalRoute, handlePublicPortalRoute } from "./portal.js";
 import { getMeta, getPublicTokenTarget } from "./store.js";
 import { handleRender, renderShell } from "./viewer.js";
@@ -51,6 +51,13 @@ const router = {
         version: env.PAGEVAULT_VERSION || "unknown",
         deployedAt: env.PAGEVAULT_DEPLOYED_AT || null,
       });
+    }
+
+    // Our own favicon, public and static — so a remote MCP client (claude.ai) shows the
+    // PageVault mark for the connector, not the parent domain's icon it would otherwise fall
+    // back to on a `pagevault.<yourdomain>` deployment. See pages.ts.
+    if (pathname === "/favicon.ico" || pathname === "/favicon.svg") {
+      return favicon();
     }
 
     // The OAuth consent screen at /admin/authorize (ADR-012). Living under /admin means the

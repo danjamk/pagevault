@@ -2,7 +2,7 @@ import { emailsMatch } from "./access.js";
 import { identify } from "./auth.js";
 import { SORA_WORDMARK_WOFF2 } from "./console-font.js";
 import type { Env } from "./env.js";
-import { consoleForbidden } from "./pages.js";
+import { FAVICON_SVG, consoleForbidden } from "./pages.js";
 import { mintSession } from "./session.js";
 
 /**
@@ -1221,12 +1221,6 @@ ${ICON_DEFS}
 }
 
 // ── Brand + icon assets (inline SVG; CSP-safe) ─────────────────────────────────
-
-// Favicon: the leaning-v knocked out of a blue rounded square. Inlined as a data: URI in <link>.
-const FAVICON_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
-  '<rect x="2" y="2" width="28" height="28" rx="8" fill="#2F6FED"/>' +
-  '<path d="M9.5 10 L16 22.5 L22.5 10" transform="translate(2.5 0) skewX(-7)" stroke="#fff" stroke-width="4.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 // The dark token set, shared by the prefers-color-scheme default and the explicit override.
 const DARK_TOKENS = `color-scheme:dark;

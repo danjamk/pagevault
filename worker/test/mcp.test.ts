@@ -170,6 +170,22 @@ describe("publish_document", () => {
     });
     expect(out).toContain("The client cannot see this");
   });
+
+  it("publishes markdown via sourceKind and reads the markdown source back (#63)", async () => {
+    const out = await callTool("publish_document", {
+      title: "Notes",
+      html: "# Heading\n\nSome **markdown** body.",
+      sourceKind: "markdown",
+    });
+    expect(out).toContain("Published");
+    const id = /\/v\/default\/([a-z2-9]{12})/.exec(out)?.[1];
+    expect(id).toBeTruthy();
+
+    // read_document returns the ORIGINAL source — the .md the author wrote, not the rendered HTML.
+    const doc = await callTool("read_document", { id: id! });
+    expect(doc).toContain("# Heading");
+    expect(doc).toContain("**markdown**");
+  });
 });
 
 describe("⭐ publish_document — an agent must not clobber a deliverable in one tool call", () => {

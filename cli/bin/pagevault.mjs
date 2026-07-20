@@ -11,7 +11,7 @@ import { dirname } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { api, requireConfig, waitReadable, CONFIG_PATH, PvError } from "../lib/client.mjs";
-import { parseArgs, splitList, deriveTitle, truncate, table } from "../lib/format.mjs";
+import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "../lib/format.mjs";
 import { buildExport } from "../lib/export.mjs";
 
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
@@ -50,7 +50,7 @@ async function main() {
 
 async function publish(pos, flags) {
   const file = pos[0];
-  if (!file) throw new PvError("Usage: pagevault publish <file.html> [--portal s] [--title t] [--public] …");
+  if (!file) throw new PvError("Usage: pagevault publish <file.html|.md> [--portal s] [--title t] [--public] …");
   if (!existsSync(file)) throw new PvError(`No such file: ${file}`);
 
   const cfg = requireConfig();
@@ -59,6 +59,7 @@ async function publish(pos, flags) {
   const res = await api(cfg, "POST", "/docs", {
     title: typeof flags.title === "string" ? flags.title : deriveTitle(html, file),
     html,
+    sourceKind: sourceKindFor(file, flags["source-kind"]),
     portal: typeof flags.portal === "string" ? flags.portal : undefined,
     summary: typeof flags.summary === "string" ? flags.summary : undefined,
     tags: splitList(flags.tags),
@@ -183,12 +184,12 @@ async function login(flags) {
 }
 
 function usage() {
-  note(`pagevault ${VERSION} — publish HTML to your PageVault deployment
+  note(`pagevault ${VERSION} — publish HTML or Markdown to your PageVault deployment
 
 Usage:
   pagevault login --url <url> --token <token>
-  pagevault publish <file.html> [--portal s] [--title t] [--summary s]
-                                [--tags a,b] [--emails a@b,c@d]
+  pagevault publish <file.html|.md> [--portal s] [--title t] [--summary s]
+                                [--tags a,b] [--emails a@b,c@d] [--source-kind html|markdown]
                                 [--public] [--owner-only] [--confirm]
   pagevault list [--portal s] [--tag t] [--json]
   pagevault share <portal> <email> [email …]

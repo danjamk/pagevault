@@ -47,8 +47,22 @@ export function splitList(value) {
 export function deriveTitle(html, filename) {
   const m = /<title[^>]*>([^<]*)<\/title>/i.exec(html);
   if (m && m[1].trim()) return m[1].trim();
+  // Markdown has no <title>; use its first ATX heading (`# ...`) when there is one.
+  const h1 = /^\s{0,3}#\s+(.+?)\s*#*\s*$/m.exec(html);
+  if (h1 && h1[1].trim()) return h1[1].trim();
   const base = String(filename).split(/[/\\]/).pop() || "document";
   return base.replace(/\.[^.]+$/, "") || base;
+}
+
+/**
+ * The document format for `pagevault publish`. An explicit `--source-kind` wins; otherwise infer
+ * from the extension — `.md`/`.markdown` → markdown, everything else → html. The Worker renders
+ * markdown to HTML at publish (#46) and keeps the original `.md` as the raw source, so
+ * `pagevault publish report.md` just works — prime directive #3.
+ */
+export function sourceKindFor(filename, override) {
+  if (override === "markdown" || override === "html") return override;
+  return /\.(md|markdown)$/i.test(String(filename)) ? "markdown" : "html";
 }
 
 /** Truncate to `n` chars with an ellipsis, so a table column stays aligned. */

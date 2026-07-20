@@ -28,12 +28,37 @@ const APERTURE = `<svg viewBox="0 0 100 100" width="30" height="30" aria-hidden=
   </g>
 </svg>`;
 
+// The PageVault mark: the leaning-v knocked out of a blue rounded square (the current brand;
+// APERTURE above is the retired amber aperture, still on the landing body until that's refreshed).
+// Shared so the console <link>, the landing <link>, and the /favicon.ico route all draw from one
+// source — which is what a remote MCP client (claude.ai) fetches for the connector's icon.
+export const FAVICON_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+  '<rect x="2" y="2" width="28" height="28" rx="8" fill="#2F6FED"/>' +
+  '<path d="M9.5 10 L16 22.5 L22.5 10" transform="translate(2.5 0) skewX(-7)" stroke="#fff" stroke-width="4.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/**
+ * `/favicon.ico` and `/favicon.svg` — served from our own origin so a remote MCP client shows
+ * the PageVault mark instead of falling back to the parent domain's favicon (which, on a
+ * `pagevault.<yourdomain>` deployment, is *your* site's icon). SVG content-type; modern clients
+ * accept it at either path. Long-cached — the mark is static.
+ */
+export function favicon(): Response {
+  return new Response(FAVICON_SVG, {
+    headers: {
+      "Content-Type": "image/svg+xml; charset=utf-8",
+      "Cache-Control": "public, max-age=86400",
+    },
+  });
+}
+
 function shell(title: string, inner: string, status: number): Response {
   const nonce = crypto.randomUUID();
   const html = `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
+<link rel="icon" href="data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}">
 <style nonce="${nonce}">
   :root {
     --bg:#14110c; --ink:#efe7d6; --muted:#a99c82; --amber:#e0a24a; --amber-dim:#b9822f;

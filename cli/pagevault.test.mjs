@@ -5,7 +5,7 @@
 //
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseArgs, splitList, deriveTitle, truncate, table } from "./lib/format.mjs";
+import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "./lib/format.mjs";
 import { loadConfig } from "./lib/client.mjs";
 
 test("parseArgs separates positionals, value flags, and boolean flags", () => {
@@ -32,6 +32,20 @@ test("deriveTitle prefers the HTML <title>, else the filename stem", () => {
   assert.equal(deriveTitle("<html><head><title> Q3 Review </title></head>", "x.html"), "Q3 Review");
   assert.equal(deriveTitle("<html>no title here</html>", "reports/2026-q3.html"), "2026-q3");
   assert.equal(deriveTitle("<title></title>", "plain.html"), "plain"); // empty title falls through
+});
+
+test("deriveTitle uses a markdown H1 when there is no <title>", () => {
+  assert.equal(deriveTitle("# Q3 Review\n\nbody", "notes.md"), "Q3 Review");
+  assert.equal(deriveTitle("no heading here", "reports/plan.md"), "plan"); // falls back to the stem
+});
+
+test("sourceKindFor infers from the extension; an explicit override wins", () => {
+  assert.equal(sourceKindFor("report.md", undefined), "markdown");
+  assert.equal(sourceKindFor("report.markdown", undefined), "markdown");
+  assert.equal(sourceKindFor("report.html", undefined), "html");
+  assert.equal(sourceKindFor("report.txt", undefined), "html"); // default is html
+  assert.equal(sourceKindFor("report.md", "html"), "html"); // override beats the extension
+  assert.equal(sourceKindFor("report.html", "markdown"), "markdown");
 });
 
 test("truncate adds an ellipsis only past the limit", () => {

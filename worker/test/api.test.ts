@@ -107,6 +107,34 @@ describe("🔴 /api — console session tokens (ADR-004)", () => {
   });
 });
 
+describe("deterministic ids — republish is update-in-place, not a duplicate (#74, ADR-013)", () => {
+  it("republishing the same title keeps one document with the same id", async () => {
+    const first = await publish(aDoc({ title: "CDC on V2", html: "<h1>v1</h1>" }));
+    expect(first.status).toBe(201); // created
+    const id1 = ((await first.json()) as { id: string }).id;
+
+    // Same title, no confirm → the overwrite guard fires. It used to be a racy findByTitle
+    // list() (which forked a duplicate); it's now a direct getMeta on the deterministic id.
+    const second = await publish(aDoc({ title: "CDC on V2", html: "<h1>v2</h1>" }));
+    expect(second.status).toBe(409);
+
+    // With confirm → overwrites in place: the SAME id (same URL), never a fork.
+    const third = await publish(aDoc({ title: "CDC on V2", html: "<h1>v2</h1>", confirm: true }));
+    expect(third.status).toBe(200); // updated in place
+    expect(((await third.json()) as { id: string }).id).toBe(id1);
+  });
+
+  it("case- and whitespace-variant titles resolve to the same document", async () => {
+    const a = await publish(aDoc({ title: "Roadmap Q4", html: "<h1>a</h1>" }));
+    const idA = ((await a.json()) as { id: string }).id;
+    // A cosmetic title variant collides to the same id, so the guard fires without confirm...
+    expect((await publish(aDoc({ title: "  roadmap q4 ", html: "<h1>b</h1>" }))).status).toBe(409);
+    // ...and confirming overwrites that same document.
+    const c = await publish(aDoc({ title: "  roadmap q4 ", html: "<h1>b</h1>", confirm: true }));
+    expect(((await c.json()) as { id: string }).id).toBe(idA);
+  });
+});
+
 describe("PATCH /api/docs/{id} — the console visibility toggle (#5)", () => {
   async function createDoc(): Promise<string> {
     const res = await publish(aDoc());
