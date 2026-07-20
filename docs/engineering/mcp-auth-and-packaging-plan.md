@@ -324,15 +324,28 @@ functional release, not per-ticket.
 1. ✅ #56 — Guard CLI publishes with a pack-and-install smoke test: `cli/smoke.mjs` packs the
    tarball, installs it into a throwaway dir, and runs the binary; wired as `prepublishOnly`
    (a broken package can't publish), plus a CI step and `make publish-cli`.
-2. 🔨 #73 — CLI ↔ MCP surface parity (IN PROGRESS). **Scope smaller than filed:** `read` uses
-   existing `GET /api/docs/{id}`; `revoke`/`rotate` use existing `PATCH {makePublic}`; only
-   `search` was a new endpoint. **Worker half DONE** (in `feature/cli-mcp-reach`): `GET /api/search`
-   endpoint + test (`worker/src/api.ts`, `worker/test/api.test.ts`) — hits are `{doc, matched}`.
-   **Remaining — 4 CLI commands** (thin `/api` wrappers in `cli/bin/pagevault.mjs`) + unit tests
-   (`cli/pagevault.test.mjs`) + usage: `read <id> [--source]` (GET /docs/{id} or /raw);
-   `search <portal> <query> [--json]` (GET /api/search); `revoke <id>` (PATCH `{makePublic:false}`,
-   kill a leaked public link — NOT delete; that's `rm`); `rotate <id>` (PATCH false→true, print the
-   fresh `/p/` URL). Then commit + PR (closes #73). Note: #56 also lives on this branch, done.
+2. ✅ #73 — CLI ↔ MCP surface parity (CODE-COMPLETE on `feature/cli-mcp-reach`). Reading the code
+   changed the scope in **two** directions from the filed guess:
+   - **The naming trap (decided 2026-07-20):** MCP `revoke_document` *deletes the document* — it is
+     the mirror of CLI `rm`, **not** "kill a leaked link." And nothing on either surface could
+     un-public a doc while keeping it. So the honest public-link lifecycle is four verbs —
+     **mint · revoke-link · rotate · delete** — and *revoke-link + rotate were missing from the MCP
+     too*. Dan chose **full parity, both surfaces**, so this touched `mcp.ts`, not just the CLI.
+   - **Atomic rotate:** `rotate` as two client PATCHes (`false` then `true`) races KV's eventual
+     consistency (the second read can see the pre-revoke meta at another edge and mint nothing).
+     Fixed with a single `rotatePublic` field on `patchDocument` — one write, drop-old + mint-new.
+   - **Delivered:**
+     - Worker: `GET /api/search` (hits are `{doc, matched}`); `patchDocument` gains `rotatePublic`;
+       `patchDocHandler` accepts it and returns `publicUrl` when a token is present (the host comes
+       from `PUBLIC_HOST`, which only the Worker knows).
+     - MCP: `revoke_public_link` + `rotate_public_link` tools (both on the shared `patchDocument`);
+       `revoke_document` stays = delete.
+     - CLI: `read <id> [--source|--json]`, `search <portal> <query…> [--limit N] [--json]`,
+       `mint <id>`, `revoke <id>` (kill link, not the doc), `rotate <id>` — all thin `/api` wrappers.
+     - Tests: worker `api.test.ts` (mint/revoke/rotate + publicUrl), `mcp.test.ts` (tool list + the
+       two new tools), CLI `pagevault.test.mjs` (subprocess arg-guard dispatch). Full suite green:
+       389 worker, 37 script+CLI, smoke passes.
+   - Then commit + PR (closes #73). Note: #56 also lives on this branch, done.
 3. #21 — *(re-evaluate — likely closes)* stdio proxy shim for Claude Desktop
    — #22-on-prod reaches Desktop via the claude.ai account connector, undercutting the shim's rationale.
 

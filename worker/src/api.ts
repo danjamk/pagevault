@@ -251,6 +251,11 @@ async function patchDocHandler(request: Request, env: Env, id: string): Promise<
     patch.makePublic = body["makePublic"];
     any = true;
   }
+  if ("rotatePublic" in body) {
+    if (typeof body["rotatePublic"] !== "boolean") return fail(400, "invalid_field", `"rotatePublic" must be a boolean`);
+    patch.rotatePublic = body["rotatePublic"];
+    any = true;
+  }
   if ("addEmails" in body) {
     patch.addEmails = parseEmails(body["addEmails"], "addEmails") ?? [];
     any = true;
@@ -260,15 +265,21 @@ async function patchDocHandler(request: Request, env: Env, id: string): Promise<
     any = true;
   }
   if (!any) {
-    return fail(400, "invalid_field", `PATCH expects one of: ownerOnly, makePublic, addEmails, removeEmails`);
+    return fail(400, "invalid_field", `PATCH expects one of: ownerOnly, makePublic, rotatePublic, addEmails, removeEmails`);
   }
 
   const result = await patchDocument(env, id, patch);
   if (!result) return fail(404, "not_found", `No such document: ${id}`);
 
+  // The public link is a different URL, not a meta field the caller can build reliably — the
+  // host comes from PUBLIC_HOST, which only the Worker knows. Hand back the /p/ URL whenever a
+  // token is present so `pagevault mint`/`rotate` can print it verbatim, matching publish.
+  const out: Record<string, unknown> = { ...result.meta };
+  if (result.meta.publicToken) out["publicUrl"] = `${baseUrl(request, env)}/p/${result.meta.publicToken}`;
   // Surface the group-sync outcome so a grant that landed in KV but that Access still blocks
   // is never silent (ADR-002). Absent when the patch granted no new email.
-  return json(result.sync ? { ...result.meta, sync: result.sync.status } : result.meta);
+  if (result.sync) out["sync"] = result.sync.status;
+  return json(out);
 }
 
 // ---------------------------------------------------------------------------

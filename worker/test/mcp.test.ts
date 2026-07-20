@@ -95,6 +95,8 @@ describe("/mcp — protocol", () => {
       "publish_document",
       "read_document",
       "revoke_document",
+      "revoke_public_link",
+      "rotate_public_link",
       "search_portal",
       "update_portal_members",
     ]);
@@ -403,6 +405,34 @@ describe("portal and member tools", () => {
 
     expect(out).toContain("cannot be undone");
     expect(await env.PAGEVAULT.get(`doc:${id}`)).toBeNull();
+  });
+
+  it("revoke_public_link kills the /p/ link but keeps the document (#73)", async () => {
+    const pub = await callTool("publish_document", { title: "Memo", html: "<h1>x</h1>" });
+    const id = /\/v\/default\/([a-z2-9]{12})/.exec(pub)![1]!;
+    const minted = /\/p\/([a-z2-9]{22})/.exec(await callTool("mint_public_link", { id }))![1]!;
+
+    const out = await callTool("revoke_public_link", { id });
+
+    expect(out).toContain("revoked");
+    // The link is dead...
+    expect(await env.PAGEVAULT.get(`pub:${minted}`)).toBeNull();
+    // ...but the document is not — revoke_public_link is not revoke_document.
+    expect(await env.PAGEVAULT.get(`doc:${id}`)).not.toBeNull();
+  });
+
+  it("rotate_public_link swaps the link for a fresh one and warns it is a capability URL (#73)", async () => {
+    const pub = await callTool("publish_document", { title: "Memo", html: "<h1>x</h1>" });
+    const id = /\/v\/default\/([a-z2-9]{12})/.exec(pub)![1]!;
+    const old = /\/p\/([a-z2-9]{22})/.exec(await callTool("mint_public_link", { id }))![1]!;
+
+    const out = await callTool("rotate_public_link", { id });
+    const fresh = /\/p\/([a-z2-9]{22})/.exec(out)![1]!;
+
+    expect(fresh).not.toBe(old);
+    expect(out).toContain("capability URL");
+    expect(await env.PAGEVAULT.get(`pub:${old}`)).toBeNull(); // old link dead
+    expect(await env.PAGEVAULT.get(`pub:${fresh}`)).toBe(id); // new link live
   });
 });
 

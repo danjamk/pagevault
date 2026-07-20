@@ -223,6 +223,38 @@ describe("PATCH /api/docs/{id} — the console visibility toggle (#5)", () => {
     expect((await after.json()) as Record<string, unknown>).toMatchObject({ id });
   });
 
+  it("mint and rotate hand back the /p/ URL so the CLI can print it verbatim (#73)", async () => {
+    const id = await createDoc();
+    const minted = (await (await patch(id, { makePublic: true })).json()) as { publicToken: string; publicUrl: string };
+    expect(minted.publicUrl).toBe(`${HOST}/p/${minted.publicToken}`);
+  });
+
+  it("rotatePublic replaces the token with a fresh one — old link dead, new link live (#73)", async () => {
+    const id = await createDoc();
+    const first = (await (await patch(id, { makePublic: true })).json()) as { publicToken: string };
+
+    const res = await patch(id, { rotatePublic: true });
+    expect(res.status).toBe(200);
+    const rolled = (await res.json()) as { publicToken: string; publicUrl: string };
+
+    // A genuinely different token...
+    expect(rolled.publicToken).not.toBe(first.publicToken);
+    expect(rolled.publicUrl).toBe(`${HOST}/p/${rolled.publicToken}`);
+    // ...the old capability URL is dead...
+    expect(await env.PAGEVAULT.get(`pub:${first.publicToken}`)).toBeNull();
+    // ...and the new one resolves to the same document.
+    expect(await env.PAGEVAULT.get(`pub:${rolled.publicToken}`)).toBe(id);
+  });
+
+  it("rotatePublic on a doc that was never public just mints one", async () => {
+    const id = await createDoc();
+    const res = await patch(id, { rotatePublic: true });
+    expect(res.status).toBe(200);
+    const rolled = (await res.json()) as { publicToken: string };
+    expect(rolled.publicToken).toMatch(/^[a-z2-9]{22}$/);
+    expect(await env.PAGEVAULT.get(`pub:${rolled.publicToken}`)).toBe(id);
+  });
+
   it("rejects a PATCH carrying neither ownerOnly nor makePublic", async () => {
     const id = await createDoc();
     expect((await patch(id, { nope: true })).status).toBe(400);
@@ -231,6 +263,11 @@ describe("PATCH /api/docs/{id} — the console visibility toggle (#5)", () => {
   it("rejects a non-boolean makePublic with 400", async () => {
     const id = await createDoc();
     expect((await patch(id, { makePublic: "yes" })).status).toBe(400);
+  });
+
+  it("rejects a non-boolean rotatePublic with 400", async () => {
+    const id = await createDoc();
+    expect((await patch(id, { rotatePublic: "yes" })).status).toBe(400);
   });
 
   it("adds a per-document email grant, normalized, and reports the Access-group sync", async () => {
