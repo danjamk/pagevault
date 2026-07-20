@@ -75,6 +75,31 @@ export async function api(cfg, method, path, body) {
   return data ?? {};
 }
 
+/**
+ * One API call that returns the raw response body as text, not JSON — for `/raw`, whose body is
+ * the stored HTML or markdown, not an envelope. Same auth and error handling as `api`; the error
+ * path still tries to read a JSON {error, code} off a non-2xx so failures read the same.
+ */
+export async function apiText(cfg, method, path) {
+  let res;
+  try {
+    res = await fetch(`${cfg.url}/api${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${cfg.token}` },
+    });
+  } catch (err) {
+    throw new PvError(`Could not reach ${cfg.url} — ${err.message}`);
+  }
+
+  const text = await res.text();
+  if (!res.ok) {
+    const data = text ? safeJson(text) : null;
+    const msg = data?.error || text || res.statusText;
+    throw new PvError(`${msg} (HTTP ${res.status}${data?.code ? `, ${data.code}` : ""})`);
+  }
+  return text;
+}
+
 const safeJson = (t) => {
   try {
     return JSON.parse(t);

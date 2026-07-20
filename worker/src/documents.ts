@@ -220,6 +220,13 @@ export interface DocPatch {
   ownerOnly?: boolean | undefined;
   /** `true` mints a public capability link (if absent); `false` revokes it. */
   makePublic?: boolean | undefined;
+  /**
+   * `true` replaces the public link with a fresh one in a single write: the old token is
+   * deleted and a new one minted, whether or not a link already existed. One atomic PATCH,
+   * never a revoke-then-mint pair — two sequential PATCHes race KV's eventual consistency
+   * (the second can read the pre-revoke meta at another edge and mint nothing).
+   */
+  rotatePublic?: boolean | undefined;
   /** Per-document email grants to add / remove (extraEmails). */
   addEmails?: string[] | undefined;
   removeEmails?: string[] | undefined;
@@ -257,7 +264,13 @@ export async function patchDocument(env: Env, id: string, patch: DocPatch): Prom
   // pub: key. Mint mirrors mint_public_link; revoke removes only the link, never the doc.
   let mintedToken: string | null = null;
   let revokedToken: string | null = null;
-  if (patch.makePublic === true && !next.publicToken) {
+  if (patch.rotatePublic === true) {
+    // Replace: drop whatever token exists (if any) and always mint a fresh one, in this one
+    // write. This is why rotate is a single field, not a false-then-true pair from the client.
+    if (next.publicToken) revokedToken = next.publicToken;
+    mintedToken = mintPublicToken();
+    next.publicToken = mintedToken;
+  } else if (patch.makePublic === true && !next.publicToken) {
     mintedToken = mintPublicToken();
     next.publicToken = mintedToken;
   } else if (patch.makePublic === false && next.publicToken) {

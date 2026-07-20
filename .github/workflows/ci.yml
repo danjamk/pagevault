@@ -32,3 +32,8 @@ jobs:
       # KV backup, bearer policy, CLI parsing). `pnpm test` is vitest only, so run these too or
       # they guard nothing in CI.
       - run: node --test scripts/*.test.mjs cli/*.test.mjs
+
+      # Pack-and-install smoke (#56): exercise the PUBLISHED tarball — the files allowlist, the bin
+      # path, the shebang — which the in-repo unit tests never touch. Catches a broken package at PR
+      # time, not at the permanent `npm publish`.
+      - run: node cli/smoke.mjs

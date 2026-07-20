@@ -8,6 +8,7 @@ import {
   Conflict,
   Misconfigured,
   documentPath,
+  patchDocument,
   publishDocument,
   readDocument,
   resolvePortal,
@@ -302,6 +303,61 @@ function buildServer(env: Env, origin: string): McpServer {
           [
             `Public link for "${meta.title}":`,
             `  ${baseUrl(env, origin)}/p/${token}`,
+            ``,
+            `This is a capability URL. Anyone it is forwarded to can open it.`,
+          ].join("\n"),
+        );
+      } catch (err) {
+        return toolError(err);
+      }
+    },
+  );
+
+  server.tool(
+    "revoke_public_link",
+    [
+      "Kill a document's public link. The document itself is kept — only the unguessable",
+      "/p/ URL stops working, immediately and permanently.",
+      "",
+      "This is the move when a public link leaked or was forwarded further than intended.",
+      "To hand out a working link again afterwards, mint a new one (it will be a different",
+      "URL) or use rotate_public_link to do both in one step.",
+    ].join("\n"),
+    { id: z.string() },
+    async (args) => {
+      try {
+        const result = await patchDocument(env, args.id, { makePublic: false });
+        if (!result) throw new BadRequest("not_found", `No such document: ${args.id}`);
+        if (result.meta.publicToken) {
+          // patchDocument only revokes when a token exists; a lingering token here is impossible.
+          return text(`Could not revoke the link for "${result.meta.title}".`, true);
+        }
+        return text(`Public link revoked for "${result.meta.title}". The old /p/ URL is now dead.`);
+      } catch (err) {
+        return toolError(err);
+      }
+    },
+  );
+
+  server.tool(
+    "rotate_public_link",
+    [
+      "⚠️ WIDENING. Replace a document's public link with a fresh one in a single step: the",
+      "old /p/ URL dies and a new unguessable URL is minted, whether or not a link existed.",
+      "",
+      "Use this to invalidate a link that spread too far while keeping the document publicly",
+      "reachable at a new URL you hand out again. Like mint_public_link, the result is a",
+      "capability URL — anyone it reaches can open the document with no login.",
+    ].join("\n"),
+    { id: z.string() },
+    async (args) => {
+      try {
+        const result = await patchDocument(env, args.id, { rotatePublic: true });
+        if (!result?.meta.publicToken) throw new BadRequest("not_found", `No such document: ${args.id}`);
+        return text(
+          [
+            `Rotated public link for "${result.meta.title}". Any previous /p/ URL is now dead.`,
+            `  ${baseUrl(env, origin)}/p/${result.meta.publicToken}`,
             ``,
             `This is a capability URL. Anyone it is forwarded to can open it.`,
           ].join("\n"),

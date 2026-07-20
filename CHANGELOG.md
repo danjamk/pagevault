@@ -7,6 +7,34 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-07-20
+
+Brings the terminal up to the MCP tool surface and closes a real gap in the public-link
+lifecycle on both — plus a hard net against shipping a broken CLI package.
+
+### Added
+- **CLI ↔ MCP surface parity (#73).** The `pagevault` CLI gains `read`, `search`, `mint`,
+  `revoke`, and `rotate`, mirroring the MCP tools so the terminal is never a lesser surface
+  than an agent. `read <id> [--source]` reads a document back (metadata, or the stored body
+  for redirect-free export); `search <portal> <query…>` is keyword search scoped to one
+  client; `mint`/`revoke`/`rotate` manage a document's public `/p/` link.
+- **Public-link lifecycle on the MCP server (#73).** New `revoke_public_link` (kill the link,
+  keep the document) and `rotate_public_link` (replace a leaked link with a fresh one). These
+  existed on neither surface before; `revoke_document` still deletes the document (the mirror
+  of the CLI's `rm`), which is why the link-only operations needed their own verbs.
+- **Pack-and-install smoke test for the CLI (#56).** `cli/smoke.mjs` packs the tarball,
+  installs it into a throwaway directory, and runs the binary — exercising the `files`
+  allowlist, `bin` path, and shebang that in-repo tests never touch. Wired as
+  `prepublishOnly` (a broken package can't publish), a CI step, and `make publish-cli`.
+- **MCP best-practices doctrine (`docs/engineering/mcp-best-practices.md`).** The standard the
+  remote MCP server is held to, with an honest conformance scorecard.
+
+### Fixed
+- **Rotating a public link is now a single atomic write.** Replacing a link as a client-side
+  revoke-then-mint pair raced KV's eventual consistency — the second call could read the
+  pre-revoke metadata at another edge and mint nothing, handing back the token it just
+  revoked. A `rotatePublic` field on the document patch does the swap in one write.
+
 ## [0.10.0] — 2026-07-20
 
 Fixes the publish race that could fork a client's link, plus Markdown publishing and a proper
