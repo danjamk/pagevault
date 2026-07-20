@@ -36,8 +36,12 @@ model, and the sandboxed iframe. Credit them in the README.
 
 1. **Single-operator infrastructure.** Not a SaaS, not multi-tenant. If someone
    wants that, they fork it.
-2. **Small enough to read in one sitting.** That is the entire value proposition.
-   A dependency someone forking this repo has to install is a cost.
+2. **Installed, not cloned.** The `pagevault` npm package is the product:
+   `npm install -g pagevault` stands PageVault up on your own Cloudflare account
+   with no repo checkout. That install experience is the value proposition. The
+   source stays readable — a forker should be able to follow it, and "small enough
+   to read in one sitting" is a quality worth keeping — but it is no longer the
+   pitch, and it does not veto the machinery an install needs. See ADR-014.
 3. **Portals are invisible until needed.** `pagevault publish report.html` must
    work without the user learning what a portal is. If the quickstart needs the
    word "portal," it is built wrong. See ADR-005.
@@ -50,8 +54,10 @@ model, and the sandboxed iframe. Credit them in the README.
 6. **The Worker verifies the JWT itself.** Never trust
    `Cf-Access-Authenticated-User-Email`, never trust the `CF_Authorization`
    cookie, anywhere. See ADR-004.
-7. **Ask before adding** a database, a frontend framework, a build pipeline, or
-   any dependency beyond `jose`, the `agents` SDK, and the MCP SDK.
+7. **Ask before adding** a database, a frontend framework, or any dependency
+   beyond `jose`, the `agents` SDK, and the MCP SDK. A publish-time build that
+   bundles the Worker for distribution is sanctioned (ADR-014); any *other* build
+   pipeline still needs a conversation.
 
 ## Layout
 
@@ -65,7 +71,9 @@ worker/          the Worker — the whole product
   src/mcp.ts       /mcp — remote MCP, Streamable HTTP
   src/viewer.ts    the trusted shell, /render
   src/console.ts   /admin
-cli/             `pagevault` — thin HTTP client of /api  (Layer 1)
+cli/             `pagevault` — the installed product. Document commands are a thin
+                 HTTP client of /api; provisioning/deploy ships a prebuilt Worker
+                 bundle (ADR-014). Provisioning commands (#42) not built yet.
 docs/
   README.md            the docs map — start here
   architecture.md      the design

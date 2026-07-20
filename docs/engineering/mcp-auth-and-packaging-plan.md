@@ -259,16 +259,20 @@ modes (clone-to-deploy, npm-to-operate). Close the seam.
         Bigger than #63; file as its own GHI on the Roadmap board (`track: packaging`,
         reference #7). `read` can ship first (no Worker change) if you want a quick win.
 - [ ] **#42 — provisioning commands in the binary** (`init` / `upgrade` /
-      `sync-access`). The keystone: makes `pagevault` the single deploy+operate
-      surface. Shell out to `npx --yes wrangler@4` — no wrangler dependency. Keep
-      provisioning logic separate from #7's thin `/api` client. Depends on `provision.mjs`
-      (done) — and now also carries the `OAUTH_KV` creation from Phase 2.
-- [ ] **#28 — Deploy to Cloudflare button.** Zero-terminal Tier-0 on-ramp. **Verify
-      the open question first:** can the button prompt for a *secret* (`PAGEVAULT_API_TOKEN`)
-      or only a plaintext var? If only a var, button deploys secret-unset + README
-      directs a one-line `wrangler secret put`.
-- [ ] **#33 — LLM-legible agent runbook.** Follows #42/#28 (it *drives* them). The
-      on-brand "ask Claude to set this up" path.
+      `sync-access`). The keystone — **re-scoped 2026-07-20 under [ADR-014](../adr/ADR-014-installed-product-not-thin-client.md):**
+      the `pagevault` package is the installed product, not a thin client. `init`/`upgrade`
+      provision Cloudflare and deploy a **prebuilt, self-contained Worker bundle** the package
+      ships (esbuild at publish time), via `npx --yes wrangler@4` — no wrangler dependency.
+      State moves to `~/.pagevault/`; the real work is making `provision.mjs`/`context.mjs`
+      stop assuming a repo cwd. Carries the `OAUTH_KV` creation from Phase 2. `sync-access`
+      reconciles the viewers group from KV (server-side reap route + CLI wrapper — the reconcile
+      does not exist yet; today's group sync is additive-only).
+- [ ] **#33 — LLM-legible agent runbook.** Follows #42. The on-brand "ask Claude to set this
+      up" path.
+- ⏸️ **#28 — Deploy to Cloudflare button — DEFERRED 2026-07-20.** A repo-based one-click deploy
+      and the ADR-014 npm installer are two different on-ramps that can undercut each other;
+      choosing/sequencing them is deliberate work, pulled out of the packaging group until the
+      installed-product model is real. Not scheduled.
 
 ---
 
@@ -353,9 +357,14 @@ functional release, not per-ticket.
    code. The `mcp/` directory was never built and was removed from the CLAUDE.md layout.
 
 **Group 4 — `feature/packaging-lifecycle` · npm install → deploy → operate**
-1. #42 — pagevault CLI: init / upgrade / sync-access (provisioning commands) *(keystone)*
-2. #28 — Add a Deploy to Cloudflare button for one-click Tier-0 deploy
-3. #33 — LLM-legible setup: agent runbook + drivable tools *(last — drives #42/#28)*
+
+Re-scoped 2026-07-20 under [ADR-014](../adr/ADR-014-installed-product-not-thin-client.md):
+the `pagevault` package becomes the installed product (prebuilt Worker bundle, `~/.pagevault/`
+state), not a thin client.
+
+1. #42 — pagevault CLI: init / upgrade / sync-access, deploying the bundled Worker *(keystone)*
+2. #33 — LLM-legible setup: agent runbook + drivable tools *(last — drives #42)*
+- ⏸️ #28 — Deploy to Cloudflare button — **deferred** (repo one-click vs. npm installer; decide later).
 
 **Cross-group dependencies:**
 - #76 (G1) carries regression tests for #74 and #63 (G2) — those trail in when G2 lands.
