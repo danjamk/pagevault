@@ -145,11 +145,12 @@ Access-as-IdP, `OAUTH_KV` in provisioning, then the prod deploy + live retest.
       later, ADR-010/#48). On current `main`, `/health` lives in the router
       (`defaultHandler`), survives the `OAuthProvider` wrapping, and returns 200 on the
       test deploy. The durable non-OAuth-route audit still lives in **#76**.
-- [ ] **Cloudflare Access as the upstream IdP.** Replace the spike's paste-the-
-      `PAGEVAULT_API_TOKEN` consent screen (`worker/src/oauth.ts` `consentPage`) with
-      real operator login. OAuth authenticates the **operator** to *their own* MCP
-      server; `canView()` still owns document authorization (prime directives #5/#6).
-      This is the one "do not ship as-is" item from the spike.
+- [x] **Cloudflare Access as the upstream IdP — DONE (ADR-012).** Consent moved to
+      `/admin/authorize`, gated by the existing `pagevault-owner` Access app: at Tier 3 the
+      operator logs in through Access, the handler verifies the owner JWT (`identify` admin),
+      and grants tokenlessly. Paste-token stays as the Tier 0/1 fallback. **Validated live**
+      on the test deploy — a fresh claude.ai connector completed Access login → tokenless
+      consent → token → tools, all in the edge logs. Resolves the spike's "do not ship as-is."
 - [x] **`OAUTH_KV` in provisioning — DONE.** Both `provision.mjs` (rung 3) and
       `tier0.mjs` (rung 0/1 — the OAuthProvider wraps the Worker at *every* tier, so the
       binding is universal) now create-or-reconcile a `pagevault-oauth` KV namespace,
