@@ -15,6 +15,7 @@ import {
   patchDocument,
   publishDocument,
   requireString,
+  searchPortal,
   updatePortalMembers,
 } from "./documents.js";
 import type { Env } from "./env.js";
@@ -104,6 +105,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       return fail(405, "method_not_allowed", `${request.method} not allowed on ${pathname}`);
     }
 
+    if (rest === "/search") {
+      if (request.method === "GET") return await searchHandler(request, env);
+      return fail(405, "method_not_allowed", `${request.method} not allowed on /api/search`);
+    }
+
     if (rest === "/portals") {
       if (request.method === "POST") return await createPortal(request, env);
       if (request.method === "GET") return json({ portals: await listPortals(env) });
@@ -131,6 +137,22 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 // ---------------------------------------------------------------------------
 // Documents
 // ---------------------------------------------------------------------------
+
+/**
+ * `GET /api/search?portal={slug}&q={query}[&limit=N]` — keyword search within one client's
+ * documents (#73). Mirrors the `search_portal` MCP tool over the same `searchPortal` service. The
+ * portal is REQUIRED: searching across every client at once is how one client's material ends up
+ * in another's report (prime directive #5). A blank/whitespace query throws BadRequest → 400.
+ */
+async function searchHandler(request: Request, env: Env): Promise<Response> {
+  const params = new URL(request.url).searchParams;
+  const portal = params.get("portal");
+  const q = params.get("q") ?? params.get("query");
+  if (!portal) return fail(400, "invalid_field", `"portal" is required`);
+  if (!q) return fail(400, "invalid_field", `"q" is required`);
+  const limit = Math.max(1, Math.min(50, Number(params.get("limit")) || 10));
+  return json({ hits: await searchPortal(env, portal, q, limit) });
+}
 
 async function createDoc(request: Request, env: Env): Promise<Response> {
   const declared = Number(request.headers.get("Content-Length") ?? 0);

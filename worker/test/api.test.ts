@@ -135,6 +135,22 @@ describe("deterministic ids — republish is update-in-place, not a duplicate (#
   });
 });
 
+describe("GET /api/search — keyword search within a portal (#73)", () => {
+  it("finds a document by a term, and requires a portal + query", async () => {
+    await putPortal(env, portal("acme"));
+    await publish(aDoc({ title: "CDC Migration Plan", portal: "acme" }));
+
+    const res = await SELF.fetch(`${HOST}/api/search?portal=acme&q=migration`, { headers: auth() });
+    expect(res.status).toBe(200);
+    const { hits } = (await res.json()) as { hits: { doc: { title: string }; matched: string[] }[] };
+    expect(hits.some((h) => h.doc.title === "CDC Migration Plan")).toBe(true);
+
+    // Portal is required (cross-client search is how material leaks), and so is a query.
+    expect((await SELF.fetch(`${HOST}/api/search?q=x`, { headers: auth() })).status).toBe(400);
+    expect((await SELF.fetch(`${HOST}/api/search?portal=acme`, { headers: auth() })).status).toBe(400);
+  });
+});
+
 describe("PATCH /api/docs/{id} — the console visibility toggle (#5)", () => {
   async function createDoc(): Promise<string> {
     const res = await publish(aDoc());
