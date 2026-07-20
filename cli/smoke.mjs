@@ -11,7 +11,7 @@
 // broken package cannot be published.
 
 import { execSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,7 +50,20 @@ try {
     throw new Error("`help` ran but did not mention `publish` — the wrong file shipped, or a broken entrypoint");
   }
 
-  console.log(`✓ packed, installed, and ran pagevault@${version} from the tarball`);
+  // 4. The prebuilt Worker bundle must ship — `pagevault init`/`upgrade` deploy it, so a package
+  // without it can't stand PageVault up (ADR-014, #86). `npm pack` ran `prepack` → `build`, so it
+  // should be here; a missing or truncated file means the build didn't run or the allowlist is wrong.
+  let bundleBytes = 0;
+  try {
+    bundleBytes = statSync(join(temp, "node_modules", "pagevault", "dist", "worker.js")).size;
+  } catch {
+    throw new Error("dist/worker.js is missing from the installed package — the bundle didn't ship (prepack/files)");
+  }
+  if (bundleBytes < 500_000) {
+    throw new Error(`dist/worker.js shipped but is only ${bundleBytes} bytes — the bundle looks truncated or broken`);
+  }
+
+  console.log(`✓ packed, installed, and ran pagevault@${version} (+${(bundleBytes / 1024 / 1024).toFixed(1)}MB Worker bundle) from the tarball`);
 } catch (err) {
   failure = err?.message ?? String(err);
 } finally {
