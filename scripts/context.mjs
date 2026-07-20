@@ -190,6 +190,77 @@ export async function cfAccounts() {
 /** Cloudflare's error list, flattened to a line. */
 export const cfErr = (errors = []) => errors.map((e) => `[${e.code}] ${e.message}`).join("; ");
 
+// --- MCP smoke helpers ------------------------------------------------------
+//
+// `verify` and `health` both drive the live `/mcp` endpoint, so the one JSON-RPC
+// caller lives here. The MCP server is the reason the project exists (ADR-006) — a
+// deploy that serves docs but not `/mcp` is broken, and nothing used to catch that.
+
+/** The tools `/mcp` must expose. A missing one means a registration regression (#75). */
+export const EXPECTED_MCP_TOOLS = [
+  "publish_document",
+  "read_document",
+  "list_documents",
+  "list_portals",
+  "search_portal",
+  "create_portal",
+  "update_portal_members",
+  "mint_public_link",
+  "revoke_document",
+];
+
+/**
+ * Streamable HTTP answers a POST as either a single JSON body or an SSE stream of
+ * `data:` frames (the transport's choice). Read whichever we got and return the
+ * JSON-RPC message carrying a `result`/`error`.
+ */
+function parseJsonRpc(text) {
+  const t = (text ?? "").trim();
+  if (!t) return null;
+  if (t.startsWith("{")) {
+    try {
+      return JSON.parse(t);
+    } catch {
+      return null;
+    }
+  }
+  for (const line of t.split("\n").reverse()) {
+    const m = line.match(/^data:\s*(.*)$/);
+    if (!m) continue;
+    try {
+      const o = JSON.parse(m[1]);
+      if (o && (o.result !== undefined || o.error !== undefined)) return o;
+    } catch {
+      /* not this frame */
+    }
+  }
+  return null;
+}
+
+/**
+ * One JSON-RPC call to the remote MCP server over the bearer. Never throws;
+ * returns { ok, status, result, error }. `ok` is true only on a 2xx that carried a
+ * `result` and no JSON-RPC `error`. The server is stateless (ADR-006), so each call
+ * stands alone — no session id to thread.
+ */
+export async function mcpCall(base, bearer, method, params = {}, id = 1) {
+  try {
+    const res = await fetch(`${base}/mcp`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${bearer}`,
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+    });
+    const msg = parseJsonRpc(await res.text());
+    return { ok: res.ok && Boolean(msg) && msg.error === undefined, status: res.status, result: msg?.result, error: msg?.error };
+  } catch (err) {
+    return { ok: false, status: 0, result: undefined, error: { message: String(err) } };
+  }
+}
+
 /** A Cloudflare-safe slug: lowercase, alphanumerics and single hyphens. */
 export const slug = (s) =>
   String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 54) || "pagevault";

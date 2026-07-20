@@ -8,7 +8,7 @@
 // Exits non-zero on a mismatch or an unreachable /health, so a CI prod deploy (#38) fails loudly
 // instead of going green on a rollout that silently didn't take.
 //
-import { c, ok, die, loadContext, releaseTag, banner } from "./context.mjs";
+import { c, ok, warn, die, loadContext, releaseTag, banner, fromEnv, mcpCall } from "./context.mjs";
 
 const ctx = loadContext();
 const base = (ctx.deployedUrl ?? (ctx.host ? `https://${ctx.host}` : "")).replace(/\/$/, "");
@@ -46,6 +46,28 @@ if (!matches(last)) {
 
 if (matches(last)) {
   ok(`/health reports ${c.bold(last.version)} — matches the shipped build.`);
+
+  // The build string matches. But a version-correct deploy with a dead /mcp is still a
+  // broken deploy (#75) — health should say so, not trust the string alone. Assert the MCP
+  // surface answers when we have a bearer; skip (don't fail) when we don't, e.g. a CI
+  // context without the token.
+  const bearer = fromEnv("PAGEVAULT_API_TOKEN");
+  if (bearer) {
+    const r = await mcpCall(base, bearer, "initialize", {
+      protocolVersion: "2025-06-18",
+      capabilities: {},
+      clientInfo: { name: "pagevault-health", version: "1" },
+    });
+    if (!r.ok || r.result?.serverInfo?.name !== "pagevault") {
+      die(
+        `/health matches ${c.bold(last.version)}, but /mcp did not answer (HTTP ${r.status}).`,
+        "The build is up but the MCP surface is down — do not call this deploy healthy.",
+      );
+    }
+    ok("/mcp answers — the MCP surface is up.");
+  } else {
+    warn("No PAGEVAULT_API_TOKEN — skipped the /mcp reachability check.");
+  }
   process.exit(0);
 }
 
