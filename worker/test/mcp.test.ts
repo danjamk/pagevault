@@ -110,7 +110,7 @@ describe("/mcp — protocol", () => {
     const mint = tools.find((t) => t.name === "mint_public_link")!;
 
     expect(mint.description).toContain("WIDENING");
-    expect(mint.description).toContain("Unguessable is NOT private");
+    expect(mint.description).toContain("capability link"); // the guardrail wording, per-tool
   });
 
   it("⭐ tells the model never to infer the portal from conversation", async () => {
@@ -118,8 +118,51 @@ describe("/mcp — protocol", () => {
     const tools = payload["tools"] as { name: string; description: string }[];
     const publish = tools.find((t) => t.name === "publish_document")!;
 
-    expect(publish.description).toContain("Never infer the portal");
+    // The canonical rule now lives in server instructions (#80); the tool still carries the
+    // operative instruction so trimming the description never drops the guardrail.
     expect(publish.description).toContain("ASK THE USER");
+    expect(publish.description).toContain("never guess");
+  });
+
+  it("⭐ states the cross-cutting rules once, in server instructions (#80)", async () => {
+    // De-duplicated out of the individual tool descriptions and into the server's instructions,
+    // which a host surfaces as standing context for every tool.
+    const init = await result(
+      await rpc("initialize", {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "test", version: "0" },
+      }),
+    );
+    const instructions = init["instructions"] as string;
+
+    expect(instructions).toContain("Never infer the portal"); // rule 1 — the client boundary (#5)
+    expect(instructions).toContain("capability URL"); // rule 2 — public links
+    expect(instructions).toContain("REPLACES it in place"); // rule 3 — publish overwrite
+  });
+
+  it("⭐ carries tool annotations so a host can gate calls (#80)", async () => {
+    const payload = await result(await rpc("tools/list"));
+    const tools = payload["tools"] as { name: string; title?: string; annotations?: Record<string, unknown> }[];
+    const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
+
+    // The four read tools are auto-runnable.
+    for (const name of ["list_portals", "list_documents", "read_document", "search_portal"]) {
+      expect(byName[name]!.annotations?.["readOnlyHint"], name).toBe(true);
+    }
+
+    // The destructive ones are flagged so a host prompts before running them.
+    for (const name of ["revoke_document", "revoke_public_link", "rotate_public_link", "publish_document"]) {
+      expect(byName[name]!.annotations?.["readOnlyHint"], name).toBe(false);
+      expect(byName[name]!.annotations?.["destructiveHint"], name).toBe(true);
+    }
+
+    // mint is widening but not destructive (no data loss), and idempotent.
+    expect(byName["mint_public_link"]!.annotations?.["destructiveHint"]).toBe(false);
+    expect(byName["mint_public_link"]!.annotations?.["idempotentHint"]).toBe(true);
+
+    // Every tool has a human-readable title.
+    for (const t of tools) expect(typeof t.title, t.name).toBe("string");
   });
 });
 

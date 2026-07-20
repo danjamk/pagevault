@@ -22,6 +22,7 @@ Start with the question you came here to answer.
 
 - [Quick Start](../README.md#quick-start) — rung 1, public links, no card.
 - [`setup/prerequisites.md`](setup/prerequisites.md) — what you need before you start.
+- [`setup/connect-mcp.md`](setup/connect-mcp.md) — point Claude (web, Desktop, Code) at your MCP server.
 - [`setup/backup-and-restore.md`](setup/backup-and-restore.md) — export your state and put it back.
 
 ## How it was built and shipped
