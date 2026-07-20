@@ -2,44 +2,57 @@
 
 **Drafted:** 2026-07-19 · **Start:** 2026-07-20 · **Owner:** Dan
 
-Two objectives that are really one npm package finishing its job. The near-term
-bet is **MCP OAuth on claude.ai**, reframed by a new asset: a *working* custom
-remote MCP OAuth connector on Dan's own account (**RealPlus**) to diff against.
+Two objectives that are really one npm package finishing its job. The MCP-auth
+half is now **validated** — active work is hardening it for prod (Phase 2) and the
+packaging track. Kept below in resolved form so the reasoning trail survives.
 
 ---
 
-## The bet (read this first)
+## RESOLVED (2026-07-20): #22 OAuth works end-to-end on claude.ai web
 
-The 2026-07-16 spike (#22) proved PageVault's OAuth 2.1 flow completes end-to-end
-against claude.ai, then concluded the failure was **Anthropic's** connector
-regression ([claude-ai-mcp #430](https://github.com/anthropics/claude-ai-mcp/issues/430),
-[#476](https://github.com/anthropics/claude-ai-mcp/issues/476)) and recommended
-**hold**.
+**It was never a code bug or a platform regression. It was a deployment gap:
+prod (`danjamkuhn.com`) runs `main`, which is bearer-only — the OAuth server lives
+on the unmerged `feature/22-oauth-spike` branch. Every "custom-connector OAuth is
+broken" test was hitting a prod endpoint that has no OAuth.**
 
-That conclusion no longer fits the evidence:
+Proven by deploying the spike to the **test** env (`pagevault.fractional5-labs.com`)
+and driving it from a fresh claude.ai **web** custom connector:
 
-| Fact | Date | Implication |
-|---|---|---|
-| Regression window (last-working bind → first failures) | 2026-05-25 → 2026-06-08 | Real bug existed |
-| #430 filed, closed *not planned* | 2026-06-11 | Anthropic won't fix the old report |
-| #476 still open | as of 2026-07-19 | Some connectors still fail |
-| **RealPlus custom OAuth connector built + connected** | ~2026-07-12 | **A custom connector CAN work post-regression** |
-| **PageVault spike failed** | 2026-07-16 | On the same account, same week RealPlus worked |
+- OAuth discovery 200, protected-resource metadata correct, **DCR `POST /register` → 201**
+  (the exact step that 404'd on prod and produced the "Couldn't register" error).
+- All read/write tools executed: `list_portals`, `list_documents`, `read_document`,
+  `search_portal`, `publish_document`, `revoke_document`.
+- The Claude Code **bearer** path still works alongside OAuth (`POST /mcp` init → 200).
 
-**If a custom remote MCP OAuth connector works on Dan's claude.ai (RealPlus) but
-PageVault's doesn't, the difference is our implementation, not the platform.**
-The spike attributed the token-binding drop to Anthropic via a control experiment
-against *its own* endpoint. RealPlus is a stronger control: a *different, working*
-endpoint on the *same* account. Prove the delta is ours, fix it, ship it.
+**How the earlier theories died** (each was an artifact of testing against no-OAuth prod):
 
-**Unknowns to close before assuming it's us (Phase 0 does this):**
-- Was RealPlus added as a *personal custom connector*, or an *org/enterprise-managed*
-  one? Enterprise-managed connectors may route differently and dodge the regression.
-- Exact add-date of RealPlus (before vs after 2026-05-25 changes the story).
-- Does re-adding RealPlus *today* still bind, or did it bind once and coast on
-  refresh tokens?
+| Theory (chronological) | Verdict |
+|---|---|
+| "It's us — RealPlus (custom connector) works, ours doesn't" | Moot. Ours was never deployed with OAuth. |
+| "Anthropic custom-connector regression, host-agnostic" ([#430](https://github.com/anthropics/claude-ai-mcp/issues/430)/[#476](https://github.com/anthropics/claude-ai-mcp/issues/476)) | Not our failure. Cloudflare's own + directory connectors work on web. |
+| "Our stateless transport hangs the `GET /mcp` SSE stream" | Red herring — that 10-min keepalive'd GET is *normal* Streamable-HTTP behavior. |
+| **"Prod has no OAuth server deployed"** | **Correct.** `/register`, `/.well-known/oauth-*` all 404 on prod; 200/201 on the spike. |
+
+**Two real defects surfaced during validation** (tracked, not blocking):
+- **#74** — `publish_document` overwrite guard fails on KV eventual consistency
+  (`findByTitle` → `list()` reads a stale index → silent duplicate + stale link).
+- **`/health` 404 on the spike** — wrapping the router in `OAuthProvider` regressed it
+  (works on prod/main). Folded into Phase 2; check other non-OAuth routes too.
+
+**Test env now runs the spike** (not `main`). Revert with `make deploy` from the main
+checkout. Left in place for continued testing: worktree `~/yukon/pagevault-oauth-spike`,
+and a new `OAUTH_KV` namespace (`7a8fca83…`) in the test account.
 
 ---
+
+## Phase 0 & 1 — RESOLVED, superseded by the deployment finding
+
+Phases 0 (RealPlus diff experiment) and 1 (diff-and-fix against a working reference)
+were built on the premise that the failure was our *implementation*. It wasn't — it
+was *deployment*. Both are moot; skip to Phase 2. Original text kept below for the
+record.
+
+<details><summary>Original Phase 0 / Phase 1 (obsolete)</summary>
 
 ## Phase 0 — Ground truth (the decisive experiment)
 
@@ -108,31 +121,62 @@ order of what #430 flagged as *observed client behavior*:
 
 **Exit:** a PageVault tool call executes from a claude.ai web conversation.
 
+</details>
+
 ---
 
-## Phase 2 — Harden #22 to production
+## Phase 2 — Harden #22 to production ← **ACTIVE PATH**
 
-Once the flow works (via Phase 1 fix, or because the regression cleared). Turns the
-spike into shippable code. These are the spike's own documented carry-overs.
+The flow is **validated** (see RESOLVED, above). This is now the whole MCP job:
+turn the proven spike into shippable code and get it onto prod. Ordered roughly
+cheapest → riskiest.
 
+- [ ] **Fix the `/health` 404 regression.** Wrapping the router in `OAuthProvider`
+      (spike `worker/src/index.ts`) made `/health` return 404 (works on `main`).
+      Confirmed on the test deploy. Check other non-OAuth routes (`/admin`, `/api`,
+      `/`, `/v`, `/p`, `/render`) for the same — the wrapping changed the entry point,
+      so nothing routed through `defaultHandler` is guaranteed until tested. The
+      durable regression test for this lives in **#76** (non-OAuth-route audit).
 - [ ] **Cloudflare Access as the upstream IdP.** Replace the spike's paste-the-
       `PAGEVAULT_API_TOKEN` consent screen (`worker/src/oauth.ts` `consentPage`) with
       real operator login. OAuth authenticates the **operator** to *their own* MCP
       server; `canView()` still owns document authorization (prime directives #5/#6).
-- [ ] **`OAUTH_KV` in provisioning.** `worker/src/wrangler.jsonc` gains the `OAUTH_KV`
-      binding on the spike; `scripts/provision.mjs` must create that namespace or a
-      future `make provision` wipes the binding. (Ties into #42.)
+      This is the one "do not ship as-is" item from the spike.
+- [ ] **`OAUTH_KV` in provisioning — this is a real pipeline gap, now confirmed.**
+      The deploy path (`context.mjs` generator + `scripts/deploy.mjs`) substitutes only
+      the `PAGEVAULT` KV id; the spike's `OAUTH_KV` binding stays a
+      `REPLACE_WITH_OAUTH_KV_ID` placeholder, so `make deploy` from the spike would fail
+      or mis-bind. For the test deploy this was wired by hand (namespace `7a8fca83…`).
+      Fix: teach `provision.mjs` to create `OAUTH_KV` and the generator to substitute
+      its id (mirror the `PAGEVAULT` path). Store the id in `.pagevault.json`. (Ties #42.)
 - [ ] **Preserve the Claude Code bearer path.** The entry point shortcuts
-      `/mcp` + valid `PAGEVAULT_API_TOKEN` before OAuth sees it. Keep that; it's the
-      one surface that works today. Regression-test it.
-- [ ] **Tests over the real OAuth flow**, in the spirit of `worker/test/auth.test.ts`
-      (extend `worker/test/oauth.test.ts`). The 302→303 and CSP bugs were invisible to
-      unit tests — add flow-level coverage where feasible.
+      `/mcp` + valid `PAGEVAULT_API_TOKEN` before OAuth sees it. Verified still 200 on
+      the test deploy — keep it, and add a regression test.
+- [ ] **Make it provably solid — the MCP robustness pair (why tonight slipped
+      through: `verify`/`health` never touch `/mcp`):**
+  - [ ] **#75 — live MCP smoke in `verify` + `health`.** Drive `initialize` /
+        `tools/list`, a guarded `publish→read→revoke` round-trip, and OAuth discovery
+        (`/.well-known/*`, `/register`) against the live deploy. Makes `make verify`
+        mean "MCP actually works," and would have caught the `/health` 404. Highest ROI
+        — land it early in Phase 2 so every subsequent deploy is guarded.
+  - [ ] **#76 — comprehensive MCP test coverage** at the `auth.test.ts` incident tier:
+        per-tool happy/error paths, **cross-portal isolation** (prime directive #5),
+        the OAuth flow (302→303, CSP), the non-OAuth-route audit, and the #74 / #63
+        regressions. Wire into `make check` (pre-PR gate).
 - [ ] **Watch `static_headers` GA.** If it lands, a ~50-line static-bearer endpoint
       deletes most of this. Don't gold-plate the OAuth code.
+- [ ] **Deploy to prod** (`danjamkuhn.com`) once Access-login + provisioning + tests
+      land: merge `feature/22-oauth-spike` → `main`, create prod's `OAUTH_KV`, deploy.
+      Then re-run the live claude.ai connector test against prod.
+- [ ] **Revert the test env** to `main` when done validating (test currently runs the
+      spike), and tear down the throwaway worktree.
 
-**Exit:** #22 merged to `main`; claude.ai / Desktop / mobile reach the operator's
-own PageVault with real login.
+**Note:** #74 (overwrite-guard KV race) surfaced during this validation but is a
+`track: core` bug, not #22 hardening — fix on its own track.
+
+**Exit:** #22 merged to `main` and live on prod; claude.ai / Desktop / mobile reach
+the operator's own PageVault with real Access login; **#75 verify-smoke and #76
+test suite green** so the surface is provably solid, not just working-once.
 
 ---
 
@@ -216,24 +260,26 @@ modes (clone-to-deploy, npm-to-operate). Close the seam.
 
 ## Recommended sequencing
 
-**Tomorrow, in order:**
-1. **Phase 0** — the decisive experiment (RealPlus re-add + PageVault spike re-drive). ~2 hrs.
-2. Branch on the gate. Expected path: **Phase 1** (diff & fix).
-3. In parallel from the start, whoever/whenever: **#56**, then **#21** (Phase 3),
-   then **#63**, then **#73's `read` slice** (mirrors `read_document`, no Worker
-   change — the quick parity win). These don't wait on OAuth.
+Phases 0 & 1 are **resolved** (OAuth validated — it was a deployment gap). The
+sequence is now Phase 2 + the packaging track.
 
-**After OAuth reaches claude.ai (Phase 1/2 done):**
-4. **Phase 2** harden + merge #22.
-5. **#42** (folds in `OAUTH_KV` provisioning), **#28**, **#33**.
-6. **#73's Worker-touching slice** — the new `/api` search + public-link
-   lifecycle endpoints, then the `search` / `revoke` / `rotate` CLI commands.
-   Group with #42 (both touch the Worker) rather than the pure-CLI cluster.
+**MCP track — Phase 2 (harden #22 → prod):**
+1. **#75** live MCP smoke in `verify`/`health` (land early — guards every deploy below).
+2. `/health` 404 fix + non-OAuth route audit.
+3. `OAUTH_KV` in `provision.mjs` + the config generator (the confirmed pipeline gap).
+4. Cloudflare Access as the real IdP (replaces the paste-token consent screen).
+5. **#76** comprehensive MCP tests + OAuth flow + cross-portal isolation → into `make check`.
+6. Merge → prod deploy → live claude.ai retest against prod → revert test env.
 
-**If Phase 0 says the regression is still live for personal connectors:**
-- Ship #21 + the packaging track. Park #22 on the spike branch. Re-run Phase 0 on a
-  cadence (the spike is the ready-made test rig). Don't build more OAuth into an
-  inert surface.
+**Packaging track (parallel, unblocked by MCP):**
+- **#56** (pack-and-install test) first, then **#21** (Desktop shim), **#63**
+  (markdown), **#73's `read` slice** (no Worker change — the quick parity win).
+- Then **#42** (provisioning-in-the-binary, folds in `OAUTH_KV` creation), **#28**
+  (deploy button), **#73's Worker-touching slice** (`/api` search + link lifecycle,
+  then the `search`/`revoke`/`rotate` CLI commands), **#33** (agent runbook).
+
+**Also on its own track:** **#74** (overwrite-guard KV race) — `track: core`, a
+correctness bug in the shared publish path; fix independent of the above.
 
 ---
 
