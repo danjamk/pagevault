@@ -45,6 +45,8 @@ async function main() {
       return revoke(positional, flags);
     case "rotate":
       return rotate(positional, flags);
+    case "sync-access":
+      return syncAccess(flags);
     case "share":
       return share(positional, flags);
     case "rm":
@@ -216,6 +218,37 @@ async function rotate(pos) {
   out(res.publicUrl || `${cfg.url}/p/${res.publicToken}`);
 }
 
+// Reconcile the Access viewer group with KV (#85). A thin /api call — the reconcile itself runs
+// server-side, so the CLI never holds a Cloudflare token or the group id.
+async function syncAccess(flags) {
+  const reap = flags.reap === true;
+
+  // Reaping removes people from Cloudflare Access (reclaiming seats). It only removes those KV no
+  // longer authorizes and is recoverable by re-granting, but it is a real revocation — confirm the
+  // intent before we even look at config.
+  if (reap && flags.yes !== true) {
+    if (!stdin.isTTY) throw new PvError("Refusing to --reap non-interactively without --yes.");
+    const rl = createInterface({ input: stdin, output: stderr });
+    const ans = (await rl.question("Reap Access seats for anyone KV no longer authorizes? [y/N] ")).trim().toLowerCase();
+    rl.close();
+    if (ans !== "y") return note("Cancelled.");
+  }
+
+  const cfg = requireConfig();
+  const res = await api(cfg, "POST", `/access/sync${reap ? "?reap=true" : ""}`);
+
+  if (flags.json) return out(JSON.stringify(res, null, 2));
+
+  const a = res.added?.length ?? 0;
+  const r = res.removed?.length ?? 0;
+  note(`Viewer group reconciled${reap ? " (reap)" : ""}: +${a} added, −${r} removed, ${res.kept?.length ?? 0} kept — ${res.groupSize} total.`);
+  if (a) note(`  added:   ${res.added.join(", ")}`);
+  if (r) note(`  removed: ${res.removed.join(", ")}`);
+  if (!reap && res.groupSize !== undefined) {
+    note("Run with --reap to also remove members KV no longer authorizes.");
+  }
+}
+
 async function share(pos, flags) {
   const [portal, ...rest] = pos;
   const emails = [...rest, ...(splitList(flags.emails) ?? [])];
@@ -307,6 +340,7 @@ Usage:
   pagevault revoke <id>               kill a document's public link (keeps the document)
   pagevault rotate <id>               replace the public link with a fresh one
   pagevault share <portal> <email> [email …]
+  pagevault sync-access [--reap] [--yes] [--json]  reconcile the Access viewer group with KV
   pagevault rm <id> [--yes]           delete the document (there is no undo)
   pagevault export [dir] [--portal s] [--include-drafts] [--zip]
 

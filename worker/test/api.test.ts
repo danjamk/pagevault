@@ -1,5 +1,6 @@
 import { SELF, createExecutionContext, env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { computeDesiredViewers } from "../src/documents.js";
 import worker from "../src/index.js";
 import { mintSession } from "../src/session.js";
 import { type Portal, putMembers, putPortal } from "../src/store.js";
@@ -148,6 +149,83 @@ describe("GET /api/search — keyword search within a portal (#73)", () => {
     // Portal is required (cross-client search is how material leaks), and so is a query.
     expect((await SELF.fetch(`${HOST}/api/search?q=x`, { headers: auth() })).status).toBe(400);
     expect((await SELF.fetch(`${HOST}/api/search?portal=acme`, { headers: auth() })).status).toBe(400);
+  });
+});
+
+describe("POST /api/access/sync — reconcile the viewer group (#85)", () => {
+  const sync = (qs = "", headers = auth()) =>
+    SELF.fetch(`${HOST}/api/access/sync${qs}`, { method: "POST", headers });
+
+  it("401s without a bearer token — reconcile is owner-only", async () => {
+    expect((await SELF.fetch(`${HOST}/api/access/sync`, { method: "POST" })).status).toBe(401);
+  });
+
+  it("405s on GET", async () => {
+    expect((await SELF.fetch(`${HOST}/api/access/sync`, { headers: auth() })).status).toBe(405);
+  });
+
+  it("400 not_configured at Tier 0 — the test env has no Access group", async () => {
+    // No CF ids in the test env, so there is no group to reconcile. It must say so, not pretend.
+    const res = await sync();
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ code: "not_configured" });
+  });
+
+  it("still 400 not_configured with ?reap=true — reaping nothing is not a success", async () => {
+    expect((await sync("?reap=true")).status).toBe(400);
+  });
+
+  it("502s when Access is configured but the Cloudflare API call fails", async () => {
+    // Give the Worker CF ids so the reconcile actually calls Access, then make that call fail.
+    // The desired-set read (KV) succeeds; the group read (fetch) does not → failed → 502.
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ success: false, errors: [{ code: 1000, message: "boom" }] }), { status: 500 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const req = new Request(`${HOST}/api/access/sync`, { method: "POST", headers: { ...auth(), Origin: HOST } });
+      const res = await worker.fetch(
+        req,
+        { ...env, CF_API_TOKEN: "t", CF_ACCOUNT_ID: "a", CF_ACCESS_GROUP_ID: "g" },
+        createExecutionContext(),
+      );
+      expect(res.status).toBe(502);
+      expect(await res.json()).toMatchObject({ code: "sync_failed" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("computeDesiredViewers — the set KV says should have Access (#85)", () => {
+  it("unions portal members (every portal), per-document extraEmails, and the owner", async () => {
+    await putPortal(env, portal("acme"));
+    await putMembers(env, "acme", ["cto@acme.com", "cfo@acme.com"]);
+    await putPortal(env, portal("beta"));
+    await putMembers(env, "beta", ["lead@beta.com"]);
+    // A per-document grant (extraEmails) — deliberately off the listing, so this exercises the
+    // meta: read that the reconcile depends on to not miss doc-level shares.
+    await publish(aDoc({ title: "Memo", portal: "acme", emails: ["board@acme.com"] }));
+
+    const desired = new Set(await computeDesiredViewers(env));
+
+    expect(desired).toContain("cto@acme.com");
+    expect(desired).toContain("cfo@acme.com");
+    expect(desired).toContain("lead@beta.com");
+    expect(desired).toContain("board@acme.com"); // the document-level grant
+    expect(desired).toContain("owner@example.com"); // OWNER_EMAIL, always
+  });
+
+  it("normalizes and dedups, and never yields an empty string", async () => {
+    await putPortal(env, portal("acme"));
+    await putMembers(env, "acme", ["cfo@acme.com"]);
+    await publish(aDoc({ title: "Memo", portal: "acme", emails: ["  CFO@Acme.com "] }));
+
+    const desired = await computeDesiredViewers(env);
+
+    expect(desired.filter((e) => e === "cfo@acme.com")).toHaveLength(1); // case variant deduped
+    expect(desired.every((e) => e.length > 0)).toBe(true);
   });
 });
 
