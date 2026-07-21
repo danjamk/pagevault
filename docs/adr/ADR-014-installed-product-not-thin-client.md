@@ -96,7 +96,14 @@ account; there is no multi-tenant service to host.
 - **#28 (Deploy-to-Cloudflare button) is deferred.** A repo-based one-click deploy
   and an npm installer are two different on-ramps that can undercut each other;
   choosing between (or sequencing) them is deliberate work, and it is pulled out of
-  the packaging group until this model is real.
+  the packaging group until this model is real. A 2026-07-21 review
+  ([#28 comment](https://github.com/danjamk/pagevault/issues/28#issuecomment-5033942931))
+  settled the technical question — the button now prompts for secrets, so rung-1 via
+  button is feasible — but sharpened the model tension this ADR raises: the button
+  *clones* (a fork in the visitor's GitHub, redeployed by Workers Builds from source),
+  which is exactly the maintenance model this decision walks away from. The proposed
+  resolution is to scope the button as a demo/"try it live" on-ramp, never the install
+  path, so it serves the tourist while the installed package serves the operator.
 - **What does not change:** the MCP server stays remote and inside the Worker
   (ADR-006); `canView()` stays the one authorization function (#5); the Worker still
   verifies its own JWT (#6); the source stays readable — a forker should still be
