@@ -14,10 +14,13 @@ import { execSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const cliDir = dirname(fileURLToPath(import.meta.url));
 const expected = JSON.parse(readFileSync(join(cliDir, "package.json"), "utf8")).version;
+// The PRODUCT version (root package.json) — what an installed deploy should report, distinct from
+// the npm package's own version above. build-bundle stamps it into dist/version.txt (#87).
+const productVersion = JSON.parse(readFileSync(join(cliDir, "..", "package.json"), "utf8")).version;
 
 // Run the installed binary and return its combined output. `help` prints to stderr (the CLI
 // keeps stdout a clean URL channel), so we merge the streams — and a non-zero exit is itself a
@@ -63,7 +66,28 @@ try {
     throw new Error(`dist/worker.js shipped but is only ${bundleBytes} bytes — the bundle looks truncated or broken`);
   }
 
-  console.log(`✓ packed, installed, and ran pagevault@${version} (+${(bundleBytes / 1024 / 1024).toFixed(1)}MB Worker bundle) from the tarball`);
+  // 5. The lifecycle commands ship and dispatch. `--help` short-circuits to usage before any
+  // provisioning runs, so this stays a no-deploy check. `help` must document them.
+  if (!/\binit\b/.test(run(bin, ["help"]))) {
+    throw new Error("`help` does not mention `init` — the init/upgrade lifecycle commands didn't ship");
+  }
+  run(bin, ["init", "--help"]);
+  run(bin, ["upgrade", "--help"]);
+
+  // 6. The installed package reports the PRODUCT version (from the stamped dist/version.txt), not
+  // its own npm version — the #87 version stamp, exercised from an actual install (RUNNING_FROM_REPO
+  // is false under node_modules, which the in-repo tests can't reach).
+  const ctxUrl = pathToFileURL(join(temp, "node_modules", "pagevault", "lib", "provision", "context.mjs")).href;
+  const reported = execSync(`node -e "import(process.argv[1]).then(m=>process.stdout.write(m.VERSION))" "${ctxUrl}"`, {
+    encoding: "utf8",
+  }).trim();
+  if (reported !== productVersion) {
+    throw new Error(`installed context VERSION is "${reported}", expected the stamped product version "${productVersion}"`);
+  }
+
+  console.log(
+    `✓ packed, installed, and ran pagevault@${version} (init/upgrade + ${productVersion} bundle) from the tarball`,
+  );
 } catch (err) {
   failure = err?.message ?? String(err);
 } finally {
