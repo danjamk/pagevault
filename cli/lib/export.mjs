@@ -6,7 +6,7 @@
 // Intentionally lossy and NOT a restore format (that's #34): document ids and public tokens are
 // omitted — id stability only matters when restoring, and if you're leaving, your URLs change.
 //
-// Assembly is CLI-side over existing /api GETs (see docs/engineering/implementation/EXPORT_PLAN.md
+// Assembly is CLI-side over existing /api GETs (see docs/engineering/implementation/complete/EXPORT_PLAN.md
 // for why not a console button): it keeps the Worker thin, streams doc-by-doc to disk, and honors
 // canView() for free since every byte comes through /api under the bearer token. Zero dependencies.
 //

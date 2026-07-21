@@ -73,7 +73,7 @@ worker/          the Worker — the whole product
   src/console.ts   /admin
 cli/             `pagevault` — the installed product. Document commands are a thin
                  HTTP client of /api; provisioning/deploy ships a prebuilt Worker
-                 bundle (ADR-014). Provisioning commands (#42) not built yet.
+                 bundle (ADR-014). `sync-access` ships; `init`/`upgrade` (#87) do not yet.
 docs/
   README.md            the docs map — start here
   architecture.md      the design

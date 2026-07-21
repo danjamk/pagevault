@@ -259,7 +259,7 @@ modes (clone-to-deploy, npm-to-operate). Close the seam.
         Bigger than #63; file as its own GHI on the Roadmap board (`track: packaging`,
         reference #7). `read` can ship first (no Worker change) if you want a quick win.
 - [ ] **#42 — provisioning commands in the binary** (`init` / `upgrade` /
-      `sync-access`). The keystone — **re-scoped 2026-07-20 under [ADR-014](../adr/ADR-014-installed-product-not-thin-client.md):**
+      `sync-access`). The keystone — **re-scoped 2026-07-20 under [ADR-014](../../../adr/ADR-014-installed-product-not-thin-client.md):**
       the `pagevault` package is the installed product, not a thin client. `init`/`upgrade`
       provision Cloudflare and deploy a **prebuilt, self-contained Worker bundle** the package
       ships (esbuild at publish time), via `npx --yes wrangler@4` — no wrangler dependency.
@@ -358,7 +358,7 @@ functional release, not per-ticket.
 
 **Group 4 — `feature/packaging-lifecycle` · npm install → deploy → operate**
 
-Re-scoped 2026-07-20 under [ADR-014](../adr/ADR-014-installed-product-not-thin-client.md):
+Re-scoped 2026-07-20 under [ADR-014](../../../adr/ADR-014-installed-product-not-thin-client.md):
 the `pagevault` package becomes the installed product (prebuilt Worker bundle, `~/.pagevault/`
 state), not a thin client.
 

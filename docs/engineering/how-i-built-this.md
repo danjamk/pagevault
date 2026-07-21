@@ -24,7 +24,8 @@ The build ran off written plans in [`implementation/`](implementation/) — each
 sequenced, and pressure-tested on paper before a line was written. The plans are still here, not
 deleted after the fact, because they show the shape of the work: what order things had to happen
 in, what was deferred, and what turned out to be wrong. A plan that got revised mid-build is more
-honest than one that pretends the path was straight.
+honest than one that pretends the path was straight. Plans whose work has shipped move down into
+[`implementation/complete/`](implementation/complete/), so what's left at the top is what's live.
 
 ## The agent typed; the rules did the thinking
 

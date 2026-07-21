@@ -250,7 +250,7 @@
         </ul>
       </div>
     </div>
-    <p style="margin-top:22px">Free, MIT-licensed, self-hosted on Cloudflare's free tier. Publishing over MCP works in Claude Code today; the hosted chat surfaces (claude.ai, Desktop, mobile) are in progress. <a href="https://github.com/danjamk/pagevault">github.com/danjamk/pagevault →</a></p>
+    <p style="margin-top:22px">Free, MIT-licensed, self-hosted on Cloudflare's free tier. Publishing over MCP works the same from Claude Code and the hosted chat surfaces — claude.ai, Claude Desktop and mobile all connect over OAuth. <a href="https://danjamk.github.io/pagevault">danjamk.github.io/pagevault →</a> · <a href="https://github.com/danjamk/pagevault">source on GitHub</a></p>
   </section>
 
   <section class="dir">
@@ -266,8 +266,9 @@
       <div class="k">A note on this page</div>
       <p>It's a single self-contained HTML file — inline styles, inline script, no build step, no external assets, no tracking. It happens to be exactly what PageVault serves into its sandbox, so it doubles as a working sample.</p>
       <p>Written in a conversation, not a terminal, and handed over as a link.</p>
+      <p>PageVault is free, MIT-licensed and self-hosted. <a href="https://danjamk.github.io/pagevault">danjamk.github.io/pagevault →</a> · <a href="https://github.com/danjamk/pagevault">source on GitHub</a></p>
     </div>
-    <p class="fine">Landscape researched July 2026, drawing on public product, pricing and docs pages. Categories here move fast — verify current details on each vendor's own site.</p>
+    <p class="fine">Landscape researched July 2026, last verified 21 July 2026, drawing on public product, pricing and docs pages. Categories here move fast — verify current details on each vendor's own site.</p>
   </div>
 </footer>
 
@@ -305,7 +306,7 @@
       blurb:"Free, no signup. Password, expiry, aggregate analytics, and a six-tool MCP server that publishes from inside Claude. It even runs CDN-loaded Chart.js/D3. The frictionless pick for one-off links."},
     {id:"stacktree", name:"Stacktree", url:"https://stacktr.ee", y:64,
       s:{collection:10,artifact:55,privacy:95,collab:5,ownership:62,accountability:28},
-      blurb:"The privacy maximalist: client-side AES-GCM, key in the URL fragment, host sees only ciphertext. MCP-native for coding agents; a $999 one-time self-hosted build exists. No named viewer identity."},
+      blurb:"The privacy maximalist: client-side AES-GCM, key in the URL fragment, host sees only ciphertext. Seven-tool MCP that reaches Claude Code, claude.ai, Cursor and Codex; a $999 one-time self-hosted build exists. No named viewer identity."},
     {id:"peony", name:"Peony", url:"https://peony.ink", y:62,
       s:{collection:58,artifact:60,privacy:78,collab:35,ownership:18,accountability:92},
       blurb:"A data room that renders your artifact live inside an accountability layer: per-viewer watermarks, NDA gates, named who-viewed logs, instant revoke, bidirectional MCP. From ~$30/admin/mo. No encryption, no self-host."},
@@ -370,8 +371,8 @@
   var prof = {
     pv:{who:"Many artifacts for one client, made in chat",
       verdict:"Free, self-hosted per-client portals that render HTML and Markdown, with an MCP server an agent can publish into and read back. No collaboration, no encryption, not a CRM — it keeps the collection, and handles the awkward formats, better than it does anything else.",
-      v:{s_emails:1,s_public:1,s_modes:1,a_html:1,a_md:1,a_export:1,a_sandbox:1,a_noacct:1,w_mcp:1,w_readback:1,c_collection:1,c_overwrite:1,o_selfhost:1,o_oss:1,o_export:1,x_collab:0,x_e2e:0,x_audit:.5,x_crm:0},
-      notes:{a_md:"shipping",a_export:"single-page PDF, shipping",w_mcp:"MCP in Claude Code today; chat surfaces via OAuth in progress",w_readback:"search_portal / read_document across the client's whole corpus",x_audit:"access-decision log; no per-view receipts yet",o_export:"human-readable full export"}},
+      v:{s_emails:1,s_public:1,s_modes:1,a_html:1,a_md:1,a_export:.5,a_sandbox:1,a_noacct:1,w_mcp:1,w_readback:1,c_collection:1,c_overwrite:1,o_selfhost:1,o_oss:1,o_export:1,x_collab:0,x_e2e:0,x_audit:.5,x_crm:0},
+      notes:{a_md:"renders Markdown to styled HTML at publish",a_export:"hands the raw file back (export / read --source); no PDF yet",w_mcp:"Claude Code and the hosted surfaces — claude.ai, Desktop, mobile — over OAuth",w_readback:"search_portal / read_document across the client's whole corpus",x_audit:"access-decision log; no per-view receipts yet",o_export:"human-readable full export"}},
     sharehtml:{who:"Inline feedback, if you live in a terminal",
       verdict:"The closest analog and genuinely good — same Cloudflare design, plus live comments, reactions and presence, and it renders Markdown and code. Its agent skill only works where there's a shell, and link-shared views still burn an Access seat.",
       v:{s_emails:1,s_public:0,s_modes:.5,a_html:1,a_md:1,a_export:.5,a_sandbox:.5,a_noacct:1,w_mcp:0,w_readback:0,c_collection:0,c_overwrite:1,o_selfhost:1,o_oss:1,o_export:.5,x_collab:1,x_e2e:0,x_audit:0,x_crm:0},
@@ -385,9 +386,9 @@
       v:{s_emails:.5,s_public:1,s_modes:.5,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:1,w_mcp:1,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:0,x_e2e:0,x_audit:.5,x_crm:0},
       notes:{s_emails:"one shared password, not per-viewer",w_mcp:"publishes from inside Claude",a_html:"even runs CDN-loaded Chart.js/D3",x_audit:"aggregate open-counts, not named"}},
     stacktree:{who:"The host must never see your plaintext",
-      verdict:"The privacy pick, and it beats everyone here on that axis: client-side AES-GCM, key in the URL fragment, server stores only ciphertext. MCP-native for coding agents; self-hostable for $999 one-time. No named viewer, no collection.",
+      verdict:"The privacy pick, and it beats everyone here on that axis: client-side AES-GCM, key in the URL fragment, server stores only ciphertext. Seven-tool MCP across Claude Code, claude.ai, Cursor and Codex; self-hostable for $999 one-time. No named viewer, no collection.",
       v:{s_emails:.5,s_public:1,s_modes:.5,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:1,w_mcp:1,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:.5,o_oss:0,o_export:0,x_collab:0,x_e2e:1,x_audit:0,x_crm:0},
-      notes:{s_emails:"unguessable link is the credential, not a named allowlist",w_mcp:"installer for Claude Code, Cursor, Codex",o_selfhost:"$999 one-time self-hosted build",x_e2e:"host stores only ciphertext",c_overwrite:"replace content in place, same URL"}},
+      notes:{s_emails:"unguessable link is the credential, not a named allowlist",w_mcp:"seven-tool MCP; Claude Code, claude.ai, Cursor, Codex",o_selfhost:"$999 one-time self-hosted build",x_e2e:"host stores only ciphertext",c_overwrite:"replace content in place, same URL"}},
     peony:{who:"A confidential doc going to named people",
       verdict:"A data room that renders your artifact inside an accountability layer: per-viewer watermarks, NDA gate, named verified page analytics, instant revoke, bidirectional MCP. The most expensive to start, no encryption, no self-host — but nothing here matches it on control after the open.",
       v:{s_emails:1,s_public:1,s_modes:1,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:.5,w_mcp:1,w_readback:.5,c_collection:1,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:.5,x_e2e:0,x_audit:1,x_crm:0},

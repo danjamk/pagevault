@@ -259,4 +259,4 @@ Primary sources, current as of this writing:
 - MCP — 2026-07-28 release candidate: <https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/>
 
 Internal: ADR-004 (console auth), ADR-006 (remote MCP), ADR-012 (OAuth consent / Access IdP),
-`docs/engineering/mcp-auth-and-packaging-plan.md`, prime directives #4–#6 in `CLAUDE.md`.
+`docs/engineering/implementation/complete/mcp-auth-and-packaging-plan.md`, prime directives #4–#6 in `CLAUDE.md`.
