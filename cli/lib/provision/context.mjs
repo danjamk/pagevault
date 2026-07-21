@@ -128,13 +128,14 @@ export function die(message, hint) {
 // version of .pagevault.json — plumbing, so migrations are ordered and deterministic instead of
 // the ad-hoc patching we'd been doing.
 
-/** The PageVault product version (semver), from package.json. Shown in command headers. */
-// TODO(#87): resolve version package-relative for the installed path. Repo mode reads the root
-// package.json via cwd, unchanged; installed, cwd is the user's project — the installed init/upgrade
-// must read the package's own version instead.
+/** The PageVault product version (semver). Shown in command headers, baked into the deploy. */
 export const VERSION = (() => {
   try {
-    return JSON.parse(readFileSync("package.json", "utf8")).version ?? "0.0.0";
+    // Repo: the root package.json (cwd is the repo root when make/CLI run from source). Installed:
+    // there is no root package.json at cwd, so read the version stamped into the shipped bundle dir
+    // by build-bundle.mjs at pack time — the product version, not the npm package's own (#87).
+    if (RUNNING_FROM_REPO) return JSON.parse(readFileSync("package.json", "utf8")).version ?? "0.0.0";
+    return readFileSync(fileURLToPath(new URL("../../dist/version.txt", import.meta.url)), "utf8").trim() || "0.0.0";
   } catch {
     return "0.0.0";
   }

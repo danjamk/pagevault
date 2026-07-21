@@ -12,7 +12,7 @@
 // Runs at pack/publish time (cli `prepack`) and via `make bundle`. Requires the repo (worker source
 // + node_modules); it is maintainer-side, never something a package user runs.
 import { execSync } from "node:child_process";
-import { copyFileSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
@@ -45,6 +45,12 @@ rmSync(tmpDir, { recursive: true, force: true });
 // Ship the wrangler template alongside the bundle. `pagevault init`/`upgrade` (installed, no repo)
 // generate the deploy config from it — `templatePath()` resolves here when not running from source.
 copyFileSync(join(root, "worker", "wrangler.jsonc"), join(distDir, "wrangler.template.jsonc"));
+
+// Stamp the PRODUCT version (root package.json) so an installed deploy reports the right version at
+// /health. The installed package has no root package.json at cwd, and its own cli/package.json
+// version is independent (#87). context.mjs reads this file when not running from source.
+const productVersion = JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version;
+writeFileSync(join(distDir, "version.txt"), `${productVersion}\n`);
 
 const raw = statSync(bundle).size;
 const gzip = gzipSync(readFileSync(bundle)).length;
