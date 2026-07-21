@@ -26,7 +26,7 @@ setup: install ## Decide your rung and get the repo ready (local; nothing create
 		cp worker/.dev.vars.example worker/.dev.vars; \
 		echo "→ created worker/.dev.vars from the example (gitignored)"; \
 	fi
-	@$(NVM) && node scripts/setup.mjs
+	@$(NVM) && node cli/lib/provision/setup.mjs
 
 dev: ## Run the Worker locally against Miniflare KV
 	@if [ ! -f worker/.dev.vars ]; then \
