@@ -125,7 +125,7 @@ export async function setup(opts = {}) {
   const accounts = await cfAccounts();
   if (accounts.length === 0) {
     warn("The token is set, but Cloudflare returns no account for it — check the token and its scopes.");
-    console.log(`\n${c.bold("Next:")} ${c.bold("make preflight")} ${c.dim("— it names the exact problem.")}\n`);
+    console.log(`\n${c.bold("Next:")} ${c.bold(opts.next ?? "make preflight")} ${c.dim("— fix the token, then re-run.")}\n`);
     return { ready: false };
   }
 
