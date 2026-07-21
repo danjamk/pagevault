@@ -4,12 +4,18 @@
 
 # PageVault
 
-**Publish an HTML or Markdown artifact to a URL, and decide who can open it.**
-Self-hosted on Cloudflare's free tier. Whoever you send it to installs nothing.
+**Publish an HTML or Markdown artifact to a URL, and decide who can open it** — straight
+from Claude, ChatGPT, Gemini, Copilot, or any MCP-capable tool, without leaving the chat
+where you made it. Self-hosted on Cloudflare's free tier. Whoever you send it to installs
+nothing and signs up for nothing — no account, on any platform.
 
-[**What it is →**](https://danjamk.github.io/pagevault) &nbsp;·&nbsp;
-[**See it live →**](#) <!-- TODO(#60): showcase URL --> &nbsp;·&nbsp;
-[**How it compares →**](#) <!-- TODO(#60): field-guide URL -->
+<p align="center">
+  <a href="#1--sharing-something"><img alt="Tier 1 — Sharing something" src="docs/images/card-tier-1-sharing.png" width="250"></a>
+  &nbsp;
+  <a href="#2--sharing-it-privately"><img alt="Tier 2 — Sharing it privately" src="docs/images/card-tier-2-private.png" width="250"></a>
+  &nbsp;
+  <a href="#3--running-a-practice"><img alt="Tier 3 — Running a practice" src="docs/images/card-tier-3-practice.png" width="250"></a>
+</p>
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-34507A) &nbsp;
 ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-34507A) &nbsp;
