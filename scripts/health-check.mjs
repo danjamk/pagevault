@@ -8,7 +8,7 @@
 // Exits non-zero on a mismatch or an unreachable /health, so a CI prod deploy (#38) fails loudly
 // instead of going green on a rollout that silently didn't take.
 //
-import { c, ok, warn, die, loadContext, releaseTag, banner, fromEnv, mcpCall } from "./context.mjs";
+import { c, ok, warn, die, loadContext, releaseTag, banner, fromEnv, mcpCall } from "../cli/lib/provision/context.mjs";
 
 const ctx = loadContext();
 const base = (ctx.deployedUrl ?? (ctx.host ? `https://${ctx.host}` : "")).replace(/\/$/, "");

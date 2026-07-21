@@ -42,6 +42,10 @@ mkdirSync(distDir, { recursive: true });
 copyFileSync(join(tmpDir, "index.js"), bundle);
 rmSync(tmpDir, { recursive: true, force: true });
 
+// Ship the wrangler template alongside the bundle. `pagevault init`/`upgrade` (installed, no repo)
+// generate the deploy config from it — `templatePath()` resolves here when not running from source.
+copyFileSync(join(root, "worker", "wrangler.jsonc"), join(distDir, "wrangler.template.jsonc"));
+
 const raw = statSync(bundle).size;
 const gzip = gzipSync(readFileSync(bundle)).length;
 console.error(`Built cli/dist/worker.js — ${(raw / 1024).toFixed(0)} KiB raw, ${(gzip / 1024).toFixed(0)} KiB gzipped.`);

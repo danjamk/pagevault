@@ -390,7 +390,7 @@ state), not a thin client.
   `worker/wrangler.jsonc` (`OAUTH_KV`), `worker/test/oauth.test.ts`.
 - Remote server: `worker/src/mcp.ts` (9 tools). Bearer auth: `worker/src/auth.ts`
   (`isAuthorized`, the Claude Code path to preserve).
-- CLI: `cli/` (published `pagevault` 0.1.0). Provisioning: `scripts/provision.mjs`,
+- CLI: `cli/` (published `pagevault` 0.1.0). Provisioning: `cli/lib/provision/provision.mjs`,
   `Makefile`.
 - ADR-006 (`docs/adr/ADR-006-remote-mcp.md`) — remote, staged auth.
 - Reference implementation: **RealPlus** MCP server (Dan's machine) — the working

@@ -9,14 +9,14 @@
 // Climbing to rung 3 is `deploy` running provision.mjs instead. Auth is the .env.local token,
 // and the KV is created over the Cloudflare API — no wrangler subprocess to go wrong.
 //
-//   node scripts/tier0.mjs            # act on .pagevault.json
-//   node scripts/tier0.mjs --kv <id>  # skip KV creation, use this one
+//   node cli/lib/provision/tier0.mjs            # act on .pagevault.json
+//   node cli/lib/provision/tier0.mjs --kv <id>  # skip KV creation, use this one
 //
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, releaseTag, BUNDLE_PATH, applyBundleMode, generatedConfigPath } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, releaseTag, BUNDLE_PATH, applyBundleMode, generatedConfigPath, templatePath } from "./context.mjs";
 
-const CONFIG_IN = "worker/wrangler.jsonc";
+const CONFIG_IN = templatePath();
 const CONFIG_OUT = generatedConfigPath();
 
 export async function writeTier0Config(opts = {}) {

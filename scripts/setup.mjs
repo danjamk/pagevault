@@ -10,7 +10,7 @@
 //
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, versions } from "node:process";
-import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cfApi, cfAccounts, acct, tokenSetupFlow, banner } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cfApi, cfAccounts, acct, tokenSetupFlow, banner } from "../cli/lib/provision/context.mjs";
 
 console.log(banner("setup", "(configuring — nothing deployed yet)"));
 

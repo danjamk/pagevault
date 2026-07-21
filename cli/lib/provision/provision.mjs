@@ -20,10 +20,10 @@ import { pathToFileURL } from "node:url";
 import {
   c, ok, info, warn, die, loadCloudToken, loadContext, saveContext, cfApi, cfErr, acct, shortId,
   fromEnv, writeEnvLocalVar, isInteractive, banner, releaseTag, BUNDLE_PATH, applyBundleMode,
-  generatedConfigPath,
+  generatedConfigPath, templatePath,
 } from "./context.mjs";
 
-const CONFIG_IN = "worker/wrangler.jsonc";
+const CONFIG_IN = templatePath();
 const CONFIG_OUT = generatedConfigPath();
 const LEGACY_STATE = ".pagevault-provision.json";
 const GROUP_NAME = "pagevault-viewers";

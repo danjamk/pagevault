@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { stateDir, generatedConfigPath, saveContext, loadContext } from "./context.mjs";
+import { stateDir, generatedConfigPath, saveContext, loadContext } from "../cli/lib/provision/context.mjs";
 
 // These tests run from the source tree (not under node_modules), so RUNNING_FROM_REPO is true and
 // the default is the cwd — exactly what `make` sees.

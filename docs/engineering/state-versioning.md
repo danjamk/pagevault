@@ -19,7 +19,7 @@ KV-id self-heal). A version turns those guesses into an **ordered, deterministic
 
 ## The policy
 
-- **Forward-only, ordered.** `MIGRATIONS[i]` in `scripts/context.mjs` migrates a `v(i+1)` file to
+- **Forward-only, ordered.** `MIGRATIONS[i]` in `cli/lib/provision/context.mjs` migrates a `v(i+1)` file to
   `v(i+2)`: index 0 is v1 → v2, index 1 is v2 → v3. `loadContext()` applies them in order until the
   file reaches `SCHEMA_VERSION`.
 - **No version means v1.** Every file written before this landed (and the current shape) *is* v1, so
@@ -36,7 +36,7 @@ KV-id self-heal). A version turns those guesses into an **ordered, deterministic
 When you change the shape of `.pagevault.json`:
 
 1. Write a pure function `(ctx) => nextCtx` that transforms the old shape into the new one.
-2. Append it to `MIGRATIONS` in `scripts/context.mjs` and bump `SCHEMA_VERSION`.
+2. Append it to `MIGRATIONS` in `cli/lib/provision/context.mjs` and bump `SCHEMA_VERSION`.
 3. Add a case to `scripts/migrate.test.mjs`.
 
 The runner is pinned by `scripts/migrate.test.mjs` with synthetic migrations, so the machinery is

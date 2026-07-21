@@ -52,11 +52,21 @@ export function generatedConfigPath() {
   return RUNNING_FROM_REPO ? "worker/wrangler.generated.jsonc" : statePath("wrangler.generated.jsonc");
 }
 
+/**
+ * The wrangler template the generated config is built from. In the repo it's the committed
+ * `worker/wrangler.jsonc` (what tests and `make deploy` read). Installed, there is no `worker/`
+ * tree, so it's the copy shipped in the package — built into `cli/dist/` at pack time by
+ * `scripts/build-bundle.mjs`, resolved package-relative from this module.
+ */
+export function templatePath() {
+  return RUNNING_FROM_REPO ? "worker/wrangler.jsonc" : fileURLToPath(new URL("../../dist/wrangler.template.jsonc", import.meta.url));
+}
+
 // The absolute path to the prebuilt Worker bundle the npm package ships (ADR-014, #86). Resolved
 // from THIS module's location, not the cwd, so it is correct whether run from the repo or an
 // installed package — and absolute, because a generated config points `main` at it and wrangler
 // resolves `main` relative to the config file's directory, not the cwd.
-export const BUNDLE_PATH = fileURLToPath(new URL("../cli/dist/worker.js", import.meta.url));
+export const BUNDLE_PATH = fileURLToPath(new URL("../../dist/worker.js", import.meta.url));
 
 /**
  * Switch a generated wrangler config to deploy the PREBUILT bundle: point `main` at the absolute
@@ -119,6 +129,9 @@ export function die(message, hint) {
 // the ad-hoc patching we'd been doing.
 
 /** The PageVault product version (semver), from package.json. Shown in command headers. */
+// TODO(#87): resolve version package-relative for the installed path. Repo mode reads the root
+// package.json via cwd, unchanged; installed, cwd is the user's project — the installed init/upgrade
+// must read the package's own version instead.
 export const VERSION = (() => {
   try {
     return JSON.parse(readFileSync("package.json", "utf8")).version ?? "0.0.0";

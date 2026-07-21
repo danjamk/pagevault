@@ -6,7 +6,7 @@
 //
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { migrate, SCHEMA_VERSION } from "./context.mjs";
+import { migrate, SCHEMA_VERSION } from "../cli/lib/provision/context.mjs";
 
 test("a file with no schemaVersion is assumed v1 and stamped to current", () => {
   const out = migrate({ rung: 1, ownerEmail: "a@b.com" });

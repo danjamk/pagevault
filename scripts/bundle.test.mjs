@@ -6,7 +6,7 @@
 //
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyBundleMode, BUNDLE_PATH } from "./context.mjs";
+import { applyBundleMode, BUNDLE_PATH } from "../cli/lib/provision/context.mjs";
 
 const TEMPLATE = `{
   "name": "pagevault",

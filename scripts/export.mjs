@@ -10,7 +10,7 @@
 // export` CLI is the other front door, for pointing at someone else's deployment; both share the
 // one engine in cli/lib/export.mjs, so the walk + slugify + rendering live in exactly one place.
 //
-import { c, ok, info, die, loadContext, fromEnv, argValue, banner } from "./context.mjs";
+import { c, ok, info, die, loadContext, fromEnv, argValue, banner } from "../cli/lib/provision/context.mjs";
 import { buildExport } from "../cli/lib/export.mjs";
 
 const ctx = loadContext();

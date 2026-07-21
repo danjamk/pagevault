@@ -14,7 +14,7 @@
 // us the body and the keys endpoint gives us the metadata inline.
 //
 import { writeFileSync } from "node:fs";
-import { c, ok, info, warn, die, loadCloudToken, loadContext, cfApi, cfErr, argValue, banner } from "./context.mjs";
+import { c, ok, info, warn, die, loadCloudToken, loadContext, cfApi, cfErr, argValue, banner } from "../cli/lib/provision/context.mjs";
 
 const CF = "https://api.cloudflare.com/client/v4";
 

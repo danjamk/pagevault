@@ -11,7 +11,7 @@ nobody adopts."* Prime directive #3 says the same thing from the product side �
 portals are invisible until needed, and `pagevault publish report.html` must work
 without the user learning what a portal is.
 
-Today it does not. `scripts/provision.mjs` does everything at once — KV namespace,
+Today it does not. `cli/lib/provision/provision.mjs` does everything at once — KV namespace,
 One-time-PIN IdP, the `pagevault-viewers` group, the `/v` and `/admin` Access
 applications, and a custom domain — before the operator can share a single document.
 

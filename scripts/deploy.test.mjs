@@ -6,7 +6,7 @@
 //
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chooseBearer } from "./context.mjs";
+import { chooseBearer } from "../cli/lib/provision/context.mjs";
 
 test("a bearer already on the Worker is reused, never rotated — beats everything", () => {
   // Even with a provided value AND an interactive session, a live bearer wins: rotating it would
