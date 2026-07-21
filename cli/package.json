@@ -1,6 +1,6 @@
 {
   "name": "pagevault",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Publish self-contained HTML to your own PageVault deployment from the terminal.",
   "type": "module",
   "scripts": {

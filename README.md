@@ -4,265 +4,263 @@
 
 # PageVault
 
-Self-hosted, single-file HTML publishing with per-document access control, on
-Cloudflare's free tier. Publish a report you made in a chat and get back a URL —
-open to anyone you send it to, or locked to specific people. Whoever opens it
-installs nothing.
+**Publish an HTML or Markdown artifact to a URL, and decide who can open it.**
+Self-hosted on Cloudflare's free tier. Whoever you send it to installs nothing.
+
+[**What it is →**](https://danjamk.github.io/pagevault) &nbsp;·&nbsp;
+[**See it live →**](#) <!-- TODO(#60): showcase URL --> &nbsp;·&nbsp;
+[**How it compares →**](#) <!-- TODO(#60): field-guide URL -->
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-34507A) &nbsp;
-![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-34507A)
+![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-34507A) &nbsp;
+![Version](https://img.shields.io/badge/version-0.13.0-34507A)
 
-> **Draft.** This README is being written alongside the build. The status section
-> is honest about what works today and what doesn't yet.
+> **Pre-1.0 and honest about it.** [Status](#status) says what works today and what
+> doesn't. This README is the setup guide — the product argument lives on the
+> [product page](https://danjamk.github.io/pagevault).
 
-## What are you here for?
+---
 
-- **Try it** — see it live: the comparison field guide and feature walkthrough are
-  themselves served through PageVault. <!-- TODO(#60): live showcase URLs -->
-- **Run it yourself** — the [Quick Start](#quick-start) is the clone-and-deploy path,
-  rung 1, no card. (An `npm` install ([#7](../../issues/7)), a one-click Deploy button
-  ([#28](../../issues/28)), and an agent-drivable runbook ([#33](../../issues/33)) are on the way.)
-- **Understand it** — [`docs/architecture.md`](docs/architecture.md) and the
-  [ADRs](docs/adr/).
-- **How I built it** — [`docs/engineering/how-i-built-this.md`](docs/engineering/how-i-built-this.md):
-  the workflow and the process behind the repo.
-- **Contribute** — [`CONTRIBUTING.md`](CONTRIBUTING.md).
+## Is this for you?
 
-Everything is indexed in [`docs/README.md`](docs/README.md).
+Three ways people run PageVault. Pick the one that sounds like you — the setup
+sections below follow the same order, and each is a superset of the one above it.
 
-## The link is not the unit. The client is.
-
-The everyday problem first: you made an HTML report — an infographic, a model, a
-write-up — and there is no good way to hand it to someone. Drive won't render it,
-email mangles it, and a public link is all-or-nothing. PageVault publishes it to a
-clean URL and lets you choose who can open it. That alone is most of the point.
-
-Then it goes one step further. Most tools that share an artifact treat the link as
-the unit: one document, one URL, one email. Over a nine-month engagement with one
-client that becomes fourteen links in fourteen emails — and the client digging
-through Gmail in March for the architecture doc you sent in January.
-
-PageVault makes the **client** the unit. Documents are grouped into a portal, and
-permissions live on the portal, not each document — so adding someone to a client's
-team is one change, not fourteen. And the collection reads back: six months in,
-*"what did we decide about the migration?"* is a question the portal can answer,
-over the same MCP server you published through. Publishing and remembering become
-the same act.
-
-And portals stay invisible until you want them. Your first publish is a public
-link with no account, no domain, and no Cloudflare Access — you add your domain, and
-then clients, only when you have a reason to.
-
-## Features
-
-### Today
-
-- **Finally, a good way to share HTML and Markdown.** The formats that are
-  miserable to share anywhere else — Drive won't render an HTML file, and
-  Markdown shows up as raw text — served as proper, live documents at a clean URL.
-- **Markdown renders at VS Code parity.** Publish `.md` and it comes out styled,
-  not as source: GFM tables, task lists, footnotes, emoji, server-rendered math
-  (KaTeX), and mermaid diagrams with syntax highlighting. The original `.md` is
-  what downloads and what the agent reads back. Being single-file has a cost, said
-  plainly: images must be `https:` or data URIs, and a PDF export drops mermaid and
-  math (the PDF renderer blocks the network by design) — the live view is full fidelity.
-- **Your readers register nowhere.** Whoever opens your document installs nothing,
-  creates no account, signs into no third-party app. They click a link and read.
-- **Start free, climb when you need to.** Publish public links with nothing bought;
-  add your own domain, then email-secured client portals, as separate opt-in steps.
-  See [the ladder](#the-ladder).
-- **Two ways to share, per document.** A public capability link — an unguessable
-  URL, no login, no account — or a link locked to named email addresses, who prove
-  they own their email with a one-time code.
-- **Every artifact is treated as hostile.** It is LLM-generated and it runs
-  JavaScript, so it renders inside a sandboxed iframe with no access to the trusted
-  page around it, behind a strict CSP — enforced by a build-failing test, not a
-  convention.
-- **One portal per client, not one link per document.** Permissions live on the
-  portal, so adding someone to a client's team is one change, not fourteen.
-- **The collection reads back.** `read_document` and `search_portal` over MCP make
-  the portal a memory you can query, not just an outbox — the part nothing else quite does.
-- **Publish from a chat.** A remote MCP server runs inside the Worker, so you
-  publish from the conversation where you made the artifact (Claude Code today).
-
-### Coming
-
-Tracked and designed; not live yet. See [Status](#status).
-
-- **Single-page PDF and raw download** ([#50](../../issues/50), [#49](../../issues/49)) — a long infographic exports as one continuous page, no pagination cutting a chart in half.
-- **Full-system export** ([#35](../../issues/35)) — a human-readable folder tree of every portal and document. (This is backup; a *restore* round-trip isn't built yet.)
-- **Browser upload** ([#6](../../issues/6)) and **publishing from hosted chat surfaces** over OAuth ([#22](../../issues/22), blocked upstream).
-
-## How it compares
-
-The honest version — including the rows where the other tools win. This section is for
-deciding whether PageVault fits you, so it starts by pointing you *away*.
-
-### Use something else if…
-
-- **You want comments and reactions on the document** →
-  [`jonesphillip/sharehtml`](https://github.com/jonesphillip/sharehtml) — same Cloudflare
-  design, plus live collaboration. PageVault has none.
-- **The host must never see your plaintext** → an end-to-end-encrypted tool that stores
-  only ciphertext. PageVault's Worker can read what it serves.
-- **The document needs watermarks, an NDA gate, or a named audit trail** → a deal-room product.
-- **You need a CRM, invoicing, and e-sign around client work** → a client-portal SaaS. That's a
-  different and much larger product; PageVault is deliberately none of it.
-- **You just want one link, right now, with zero setup** → Claude's own Publish button, or any
-  quick link-sharer.
-- **You have fewer than ~5 clients** → a shared folder per client is genuinely simpler. The portal
-  earns its keep once the artifacts pile up. That's the honest limit, said plainly.
-
-### The short table
-
-One representative per category, not ten names. The [full field guide](#) covers ten tools across
-six capability groups — and it's served through PageVault, so it doubles as a live sample.
-<!-- TODO(#60): field-guide live URL; verify competitor rows against docs source before merge -->
-
-| | PageVault | sharehtml | Link tool | Client-portal SaaS |
-|---|---|---|---|---|
-| Free, self-hosted, your own domain | ✅ | ✅ | ❌ | ❌ |
-| Renders HTML and Markdown | ✅ | ✅ | ~ | ~ |
-| Per-document access control | ✅ | ❌ link is public | ~ | ✅ |
-| Per-client collection | ✅ | ❌ the link is the unit | ❌ | ✅ |
-| Agent read-back of the collection | ✅ | ❌ | ❌ | ~ rare |
-| Live comments · collaboration | ❌ | ✅ | ❌ | ✅ |
-| CRM · invoicing · e-sign | ❌ by design | ❌ | ❌ | ✅ |
-
-None of these rows is unique on its own — plenty of tools render HTML, publish from a chat, or hold
-a per-client collection. What's rare is the **combination**: free, self-hosted, renders the
-artifact, holds the collection, and lets an agent read it back. That's the claim, not any single row.
-
-## The ladder
-
-Three rungs. Climb only as far as you need — each one is additive, and your
-documents carry across untouched.
-
-| Rung | You get | It needs |
-|---|---|---|
-| **1 · Publish** | Deploy, publish HTML, share public `/p/` links | a Cloudflare account (**no card**), Node, an API token |
-| **2 · Your domain** | The same, on `pagevault.you.com` | a domain in that Cloudflare account |
-| **3 · Portals** | Client collections, email-secured access, the owner console | Cloudflare Zero Trust (**needs a card on file**) |
-
-Rungs 1 and 2 cost nothing and undo cleanly. Only rung 3 is a commitment, and it's
-the only rung a client ever authenticates against (with a six-digit email code — no
-account, no password).
-
-## Quick start
-
-Rung 1 — publish public links, no domain, no card. Two things: a Cloudflare account,
-and an API token.
-
-### 1. Clone it
-
-```bash
-git clone https://github.com/danjamk/pagevault && cd pagevault
-```
-
-### 2. Create your Cloudflare API token
-
-PageVault reaches your account with an API token, kept in `.env.local` — explicit and
-per-clone, so a deploy can never land in the wrong account, and setup does everything over
-the API (KV, your workers.dev subdomain, your bearer secret) with no interactive prompts.
-
-Open **[Cloudflare → API Tokens](https://dash.cloudflare.com/profile/api-tokens)** →
-**Create Custom Token**, name it **`pagevault`**, and grant all of these now — so climbing
-the ladder never means editing the token:
-
-| Type | Permission | Access | For |
+| | You are | You get | It costs |
 |---|---|---|---|
-| Account | Workers Scripts | Edit | rung 1 · deploy |
-| Account | Workers KV Storage | Edit | rung 1 · documents |
-| Account | Account Settings | Read | rung 1 · identify the account |
-| Zone | Workers Routes | Edit | rung 2 · custom domain |
-| Zone | DNS | Edit | rung 2 · the custom-domain record |
-| Account | Access: Apps and Policies | Edit | rung 3 · portals |
-| Account | Access: Organizations, Identity Providers, and Groups | Edit | rung 3 · the viewer group lives here — easy to miss |
+| **1** | **Sharing something** — you made a report in a chat and need to hand it to someone | Deploy, publish, share unguessable `/p/` links that anyone can open | free · **no card** |
+| **2** | **Sharing it privately** — your own work, your own domain, only named people | The same, on `you.com`, with documents gated to specific email addresses | a domain · **a card on file** |
+| **3** | **Running a practice** — a consultant or solo operator with recurring clients | Per-client portals, permissions on the client not the document, and an agent that can search the collection back | same as 2 |
 
-Copy the value and save it into the clone (gitignored):
+Two honest notes on that table:
 
-```bash
-echo 'CLOUDFLARE_API_TOKEN=<paste-your-token>' > .env.local
-```
+- **The real jump is 1 → 2, not 2 → 3.** Private sharing needs Cloudflare Zero
+  Trust, and Cloudflare wants a card on file before it will turn that on — even
+  though the free plan is free and you won't be billed. That's the seam, and
+  pretending otherwise would waste your time. Portals, on top of it, are just a
+  data model.
+- **Under ~5 clients, tier 3 is probably not worth it.** A shared folder per client
+  is genuinely simpler. Portals earn their keep once the artifacts pile up.
 
-This is your **deployment** token — broad, on your machine, used only when you run `make`.
-**Rungs 1 and 2 need nothing else — skip ahead to the ladder.**
+You can start at 1 and climb later. Every rung is additive, your documents carry
+across untouched, and rungs 1–2 undo cleanly.
 
-#### Rung 3 only: a second, runtime token
+---
 
-Client portals need one more — a **runtime** token that lives *inside the Worker* (as its
-`CF_API_TOKEN` secret) to keep the viewer group in sync as you add and remove members. It's
-separate from the deployment token above and deliberately narrow: a single permission, so a
-compromised Worker can edit one Access group and nothing else — never your KV or Workers.
+## 1 · Sharing something
 
-Create another Custom Token, name it **`pagevault-runtime`**, with just:
+Public links, `workers.dev`, no domain, no Zero Trust, no card. ~10 minutes.
 
-| Type | Permission | Access | For |
+**You need:** a [Cloudflare account](https://dash.cloudflare.com/sign-up) ·
+Node 22+ · a Cloudflare API token.
+Full detail in [`docs/setup/prerequisites.md`](docs/setup/prerequisites.md).
+
+### Create your Cloudflare API token
+
+Either path below reaches your account with an API token — explicit, so a deploy can
+never land in the wrong account. Create it once, with room to climb.
+
+**[Cloudflare → API Tokens](https://dash.cloudflare.com/profile/api-tokens)** →
+*Create Custom Token*, name it `pagevault`. Grant **all** of these now, so climbing
+the ladder never means re-scoping:
+
+| Type | Permission | Access | Needed for |
 |---|---|---|---|
-| Account | Access: Organizations, Identity Providers, and Groups | Edit | keep the viewer group in sync |
+| Account | Workers Scripts | Edit | tier 1 · deploy |
+| Account | Workers KV Storage | Edit | tier 1 · documents |
+| Account | Account Settings | Read | tier 1 · identify the account |
+| Zone | Workers Routes | Edit | tier 2 · custom domain |
+| Zone | DNS | Edit | tier 2 · the domain record |
+| Account | Access: Apps and Policies | Edit | tier 2 · gated access |
+| Account | Access: Organizations, Identity Providers, and Groups | Edit | tier 2 · **the viewer group lives here — easy to miss** |
 
-`make deploy` prompts you for it during rung-3 provisioning and saves it as `CF_RUNTIME_TOKEN`
-— or add it yourself:
-
-```bash
-echo 'CF_RUNTIME_TOKEN=<paste-your-token>' >> .env.local
-```
-
-You can skip it and add it later: the owner still logs in, and only member-sync waits on it.
-
-### 3. Run the ladder
+### Install and deploy
 
 ```bash
-make setup       # install deps, pick your rung, check your environment
-make preflight   # verify the token, name the account it will deploy to
-make deploy      # creates KV + a workers.dev subdomain, deploys, sets your bearer secret
-make verify      # smoke-test the live deployment
+npm install -g pagevault
+pagevault init          # pastes your token, picks a tier, provisions and deploys — no clone
 ```
 
-Then publish from a chat over MCP (or the CLI), and share the `/p/` link — anyone opens
-it, no login. Locally, `make dev` runs the Worker against Miniflare and `make demo` seeds
-a sample engagement.
+`pagevault init` walks you through the token, the tier, and your account, then ships
+the Worker to Cloudflare and remembers where it landed in `~/.pagevault/`. Later,
+`pagevault upgrade` redeploys after `npm update -g pagevault`. Nothing is cloned;
+the package carries the Worker.
 
-**Climbing the ladder:** to add your domain (rung 2) or turn on portals (rung 3),
-re-run `make setup`, pick the higher rung, then `make preflight` and `make deploy`
-again. Your documents carry across. `make help` lists every target.
+<sub>**Prefer to run from source** — to read the code, or contribute? `git clone`, then
+`make setup && make preflight && make deploy && make verify` does the same, from the
+repo. That path is the one every rung below is also tested on.</sub>
+
+### Publish something
+
+```bash
+pagevault login --url https://<your-worker>.workers.dev --token <PAGEVAULT_API_TOKEN>
+pagevault publish report.html --public
+```
+
+`init` prints both values when it finishes. Or publish straight from the conversation
+where you made the artifact — see [Connect an agent](#connect-an-agent).
+
+`/v/` and `/admin` fail closed at this tier. That's correct: you aren't using them
+yet. When you want them, climb.
+
+---
+
+## 2 · Sharing it privately
+
+Your own domain, and documents that only named people can open. They get a
+six-digit code by email — no account, no password, nothing installed.
+
+**Adds:** a domain [in the same Cloudflare account](docs/setup/prerequisites.md#a-domain-in-the-same-cloudflare-account)
+· Cloudflare Zero Trust enabled (**a card on file; nothing is charged**) · a second,
+narrow runtime token.
+
+The domain and the gating are separate upgrades. You can put PageVault on your own
+domain without turning on Zero Trust at all. Re-run the setup to climb a rung — it
+shows your current choices and asks only for what the new rung needs:
+
+```bash
+pagevault init          # re-run: pick tier 2, give it your hostname, redeploy
+```
+
+Once Access is on:
+
+```bash
+pagevault publish report.html --emails cfo@acme.com,ceo@acme.com
+```
+
+That grant is **additive** — it can admit a viewer, never silently revoke one — and
+it invents no portal for two people.
+
+### The two tokens, and why
+
+The runtime token lives *inside* the Worker as its `CF_API_TOKEN` secret and keeps
+the viewer group in sync as you add and remove people. It is scoped to a single
+permission on purpose: a compromised Worker can edit one Access group and nothing
+else — never your KV, never your other Workers.
+See [ADR-002](docs/adr/ADR-002-seat-bounding.md).
+
+---
+
+## 3 · Running a practice
+
+Permissions move from the document to the **client**. A portal is one durable URL
+per client; every artifact lands there, gated to their people. Adding someone to a
+client's team is one write, not fourteen.
+
+```bash
+pagevault publish q3-review.html --portal acme
+pagevault share acme cfo@acme.com
+pagevault search acme "migration decision"
+```
+
+And the collection reads back. The MCP server exposes `search_portal` and
+`read_document`, so six months in, *"what did we decide about the migration?"* is a
+question the portal can answer — over the same connection you published through.
+Publishing and remembering become the same act.
+
+Portals are invisible until you ask for them. Nothing above this section required
+knowing what one is.
+
+### Connect an agent
+
+The MCP server runs inside your Worker — there is nothing extra to host.
+
+Add your Worker as a connector on claude.ai, Desktop, or mobile — OAuth 2.1, and you
+sign in with your own Access identity. Claude Code uses a bearer token. Same server,
+same eleven tools, every surface.
+
+Tools carry annotations, so a host knows which are safe to auto-run and which need a
+confirmation first. Full walkthrough:
+[`docs/setup/connect-mcp.md`](docs/setup/connect-mcp.md).
+
+---
 
 ## Status
 
-- **Works today:** the full deploy ladder — publish on `*.workers.dev` (rung 1),
-  your own domain (rung 2), client portals with Cloudflare Access (rung 3) — plus
-  publishing over MCP (Claude Code), public-link and email-secured sharing, and the
-  owner console. End to end on a live deployment.
-- **In progress:** the `pagevault` CLI ([#7](../../issues/7)), creating a portal from
-  the console ([#43](../../issues/43)), and documentation.
-- **Parked:** OAuth for the hosted surfaces (claude.ai / Desktop / mobile) is built
-  and proven end to end, but blocked upstream by a current claude.ai-side connector
-  regression that drops token binding for newly added connectors
-  ([#22](../../issues/22)).
+Pre-1.0. `1.0.0` is reserved for "a stranger can rely on this."
 
-## How it works
+**Working today**
 
-- **The Worker is the whole product.** A router, `canView()`, the KV store, the
-  `/api` handlers, the remote MCP server, and the viewer shell — small enough to
-  read in one sitting.
-- **The Worker verifies the JWT itself.** It never trusts a Cloudflare header or the
-  `CF_Authorization` cookie. Access proves identity; the Worker decides access.
-- **The MCP server is remote, not stdio.** A stdio server can't run in a browser or
-  on a phone, which is where artifacts actually get made.
+- **`npm install -g pagevault && pagevault init`** — provision and deploy your own
+  PageVault with no clone; `pagevault upgrade` redeploys later. The package ships the
+  Worker itself ([ADR-014](docs/adr/ADR-014-installed-product-not-thin-client.md))
+- Publish HTML and Markdown; both render, and the original source reads back
+- Three visibility modes: owner-only · email-gated · unguessable public link
+- Per-client portals, with permissions on the portal
+- Owner console (light and dark), CLI, and remote MCP server — the CLI and MCP
+  server are held at feature parity with each other
+- MCP over OAuth 2.1 from claude.ai, Desktop and mobile; bearer from Claude Code
+- Every artifact renders in a sandboxed iframe; `allow-same-origin` is banned by a
+  test that fails the build ([ADR-007](docs/adr/ADR-007-viewer-shell.md))
+- Idempotent provisioning with a real teardown — `make destroy` puts the account back
 
-More, by audience, in [`docs/README.md`](docs/README.md):
+**Not yet**
 
-- [`docs/architecture.md`](docs/architecture.md) — the design
-- [`docs/adr/`](docs/adr/) — the decision records, including the contested ones
-- [`docs/design/onboarding-experience.md`](docs/design/onboarding-experience.md) — the setup ladder, in full
-- [`docs/engineering/how-i-built-this.md`](docs/engineering/how-i-built-this.md) — the workflow behind the repo
+- **PDF export and raw download** ([#50](../../issues/50), [#49](../../issues/49)) — a
+  long infographic as one continuous page, no pagination cutting a chart in half
+- **Full-system export** ([#35](../../issues/35)) — backup works; a restore round-trip doesn't
+- **Browser upload** ([#6](../../issues/6)) — publishing is CLI/MCP only
+- **Read receipts, expiry, email-on-publish, portal branding** — designed, not built
 
-## Credits
+---
 
-PageVault owes [`jonesphillip/sharehtml`](https://github.com/jonesphillip/sharehtml)
-(Apache-2.0) three ideas: the Cloudflare Access provisioning script, the
-capability-token model, and the sandboxed iframe.
+## How it compares
 
-## License
+The honest version, including the rows where the alternatives win. The
+[full field guide](#) <!-- TODO(#60) --> puts ten tools across six capability
+groups on an interactive map — and it's served through PageVault, so it doubles as
+a live sample.
 
-MIT. Fork it, steal it, run your own.
+### Use something else if…
+
+| If you need | Go to |
+|---|---|
+| Comments, reactions, live collaboration on the document | [`jonesphillip/sharehtml`](https://github.com/jonesphillip/sharehtml) — same Cloudflare design, plus collaboration. PageVault has none of it, on purpose. |
+| The host to never see your plaintext | An end-to-end-encrypted tool. PageVault's Worker can read what it serves; that's an honestly weaker guarantee. |
+| Per-viewer watermarks, an NDA gate, a named audit trail | A deal-room product. PageVault logs access decisions but has no per-view receipts. |
+| CRM, invoicing, e-sign around the client relationship | A client-portal SaaS. A much larger product; PageVault is deliberately none of it. |
+| One link, right now, zero setup | Claude's own Publish button, or any quick link-sharer. |
+| Fewer than ~5 clients | A shared folder per client. Said plainly because it's true. |
+
+### The short table
+
+One representative per category, not ten names.
+
+| | PageVault | sharehtml | Link tool | Portal SaaS |
+|---|:---:|:---:|:---:|:---:|
+| **Per-client collection** — the unit is the client, not the link | ✅ | ❌ | ❌ | ✅ |
+| **Agent read-back** — search the collection back, months later | ✅ | ❌ | ❌ | ~ rare |
+| **Publish from a chat** (MCP) | ✅ | ❌ | ~ some | ❌ |
+| **Renders HTML *and* Markdown**, hands the source back | ✅ | ~ HTML | ~ | ❌ file host |
+| **Free, self-hosted, your own domain** | ✅ | ✅ | ❌ | ❌ |
+| **Privacy** — can the host read it? | reads it | reads it | varies | reads it |
+| **Collaboration** — comments, presence | ❌ | ✅ | ❌ | ✅ |
+| **Accountability** — per-view receipts, watermarks | ❌ | ❌ | ~ opens | ✅ |
+
+No single row is unique. Plenty of tools render HTML, several publish from a chat,
+and portal suites have held collections for years. What's rare is the
+**combination**: free, self-hosted, renders the artifact, holds the collection, and
+lets an agent read it back. That's the claim — not any one row.
+
+---
+
+## Docs
+
+| I want to… | Start here |
+|---|---|
+| Understand the design | [`docs/architecture.md`](docs/architecture.md), then the [ADRs](docs/adr/) |
+| Work through setup properly | [`docs/setup/prerequisites.md`](docs/setup/prerequisites.md) |
+| Connect Claude to it | [`docs/setup/connect-mcp.md`](docs/setup/connect-mcp.md) |
+| Back it up | [`docs/setup/backup-and-restore.md`](docs/setup/backup-and-restore.md) |
+| See how it was built with an agent | [`docs/engineering/how-i-built-this.md`](docs/engineering/how-i-built-this.md) |
+| Contribute | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+
+Everything is indexed in [`docs/README.md`](docs/README.md).
+Release history: [`CHANGELOG.md`](CHANGELOG.md).
+
+---
+
+<sub>MIT · built by [@danjamk](https://github.com/danjamk) · PageVault owes
+[`jonesphillip/sharehtml`](https://github.com/jonesphillip/sharehtml) three ideas —
+the Access-provisioning script, the capability-token model, and the sandboxed
+iframe. They got there first.</sub>
