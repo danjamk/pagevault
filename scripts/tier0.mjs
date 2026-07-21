@@ -14,10 +14,10 @@
 //
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, releaseTag, BUNDLE_PATH, applyBundleMode } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, releaseTag, BUNDLE_PATH, applyBundleMode, generatedConfigPath } from "./context.mjs";
 
 const CONFIG_IN = "worker/wrangler.jsonc";
-const CONFIG_OUT = "worker/wrangler.generated.jsonc";
+const CONFIG_OUT = generatedConfigPath();
 
 export async function writeTier0Config(opts = {}) {
   if (!existsSync(CONFIG_IN)) die(`Can't find ${CONFIG_IN}. Run this from the repo root.`);

@@ -12,12 +12,12 @@ import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import {
   c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, isInteractive, cfApi, cfAccounts, cfErr, slug,
-  writeEnvLocalVar, fromEnv, acct, shortId, banner, chooseBearer,
+  writeEnvLocalVar, fromEnv, acct, shortId, banner, chooseBearer, generatedConfigPath,
 } from "./context.mjs";
 import { provisionAccess } from "./provision.mjs";
 import { writeTier0Config } from "./tier0.mjs";
 
-const CONFIG_OUT = "worker/wrangler.generated.jsonc";
+const CONFIG_OUT = generatedConfigPath();
 
 export async function deploy(opts = {}) {
   loadCloudToken();

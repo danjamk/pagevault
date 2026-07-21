@@ -9,12 +9,48 @@
 // Zero dependencies beyond Node built-ins, on purpose — this is what a stranger runs.
 
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, sep } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { fileURLToPath } from "node:url";
 
 export const CONTEXT_FILE = ".pagevault.json";
+
+// Where operator state lives — `.pagevault.json`, `.env.local`, the generated wrangler config.
+//
+// From the repo (running the source tree) that's the cwd, exactly as it has always been, so
+// `make deploy`, `make setup`, and prod CI are byte-for-byte unchanged. From an installed npm
+// package (ADR-014, #86) there is no repo cwd, so state lives in `~/.pagevault/`. `PAGEVAULT_HOME`
+// overrides both (tests; an operator who wants state elsewhere).
+//
+// "Installed" = this module lives under node_modules. That signal survives the later move of these
+// scripts into the package (#87) and is never true when running from source — so no existing user's
+// repo-root state is stranded, and no migration is needed: a clone keeps using its cwd files.
+const RUNNING_FROM_REPO = !fileURLToPath(import.meta.url).includes(`${sep}node_modules${sep}`);
+
+/** The directory holding operator state. See the note above. */
+export function stateDir() {
+  if (process.env.PAGEVAULT_HOME) return process.env.PAGEVAULT_HOME;
+  return RUNNING_FROM_REPO ? process.cwd() : join(homedir(), ".pagevault");
+}
+
+/** A path inside the state dir. Creates the dir when it isn't the cwd (which always exists). */
+function statePath(name) {
+  const dir = stateDir();
+  if (dir !== process.cwd()) mkdirSync(dir, { recursive: true });
+  return join(dir, name);
+}
+
+/**
+ * Where the generated wrangler config is written and deployed from. In the repo it stays
+ * `worker/wrangler.generated.jsonc` (gitignored, as today); installed, it lives in the state dir
+ * — there is no `worker/` tree to write into.
+ */
+export function generatedConfigPath() {
+  return RUNNING_FROM_REPO ? "worker/wrangler.generated.jsonc" : statePath("wrangler.generated.jsonc");
+}
 
 // The absolute path to the prebuilt Worker bundle the npm package ships (ADR-014, #86). Resolved
 // from THIS module's location, not the cwd, so it is correct whether run from the repo or an
@@ -146,9 +182,10 @@ export function migrate(ctx, migrations = MIGRATIONS, target = SCHEMA_VERSION) {
 
 /** The context — migrated to the current schema — or an empty object if there is none yet. */
 export function loadContext() {
-  if (!existsSync(CONTEXT_FILE)) return {};
+  const file = statePath(CONTEXT_FILE);
+  if (!existsSync(file)) return {};
   try {
-    return migrate(JSON.parse(readFileSync(CONTEXT_FILE, "utf8")));
+    return migrate(JSON.parse(readFileSync(file, "utf8")));
   } catch (err) {
     die(err.message, "`git pull` to update the code, or delete .pagevault.json and re-run `make setup`.");
   }
@@ -156,7 +193,7 @@ export function loadContext() {
 
 /** Persist the context, stamped with the current schema version. */
 export const saveContext = (ctx) =>
-  writeFileSync(CONTEXT_FILE, `${JSON.stringify({ ...ctx, schemaVersion: SCHEMA_VERSION }, null, 2)}\n`);
+  writeFileSync(statePath(CONTEXT_FILE), `${JSON.stringify({ ...ctx, schemaVersion: SCHEMA_VERSION }, null, 2)}\n`);
 
 /**
  * Put a Cloudflare API token from .env.local (or the environment) where wrangler will see
@@ -320,7 +357,7 @@ export function printTokenSetup() {
 
 /** Update-or-append `KEY=value` in .env.local, leaving any other lines intact. */
 export function writeEnvLocalVar(key, value) {
-  const path = ".env.local";
+  const path = statePath(".env.local");
   const lines = existsSync(path) ? readFileSync(path, "utf8").split("\n").filter((l) => l.trim() !== "") : [];
   const kept = lines.filter((l) => !l.trim().startsWith(`${key}=`));
   kept.push(`${key}=${value}`);
@@ -353,8 +390,9 @@ export async function tokenSetupFlow() {
 /** A value from the environment, or from gitignored .env.local. */
 export function fromEnv(key) {
   if (process.env[key]) return process.env[key];
-  if (!existsSync(".env.local")) return undefined;
-  const line = readFileSync(".env.local", "utf8")
+  const envFile = statePath(".env.local");
+  if (!existsSync(envFile)) return undefined;
+  const line = readFileSync(envFile, "utf8")
     .split("\n")
     .find((l) => l.trim().startsWith(`${key}=`));
   return line ? line.slice(line.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "") : undefined;
