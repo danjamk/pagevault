@@ -2,6 +2,11 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "pagevault",
   "main": "src/index.ts",
+  // Repo default: wrangler bundles from `src` (this is what `make deploy` and prod CI use, and
+  // what tests read). `pagevault init`/`upgrade` and `make deploy-bundle` flip this to `true` and
+  // repoint `main` at the prebuilt `cli/dist/worker.js`, so an installed package deploys the
+  // shipped bundle with no source or deps on the user's machine (ADR-014).
+  "no_bundle": false,
   "compatibility_date": "2026-07-01",
 
   // Required by the `agents` SDK, which reaches for node:path / node:os / node:buffer

@@ -4,7 +4,7 @@
 // calls. Shows both versions: the PageVault product version (what code you're running) and the
 // .pagevault.json schema version (internal state format).
 //
-import { c, banner, loadContext, VERSION, SCHEMA_VERSION } from "./context.mjs";
+import { c, banner, loadContext, VERSION, SCHEMA_VERSION } from "../cli/lib/provision/context.mjs";
 
 const ctx = loadContext();
 console.log(banner("status"));

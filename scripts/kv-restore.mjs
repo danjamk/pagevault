@@ -12,7 +12,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { c, ok, info, warn, die, loadCloudToken, loadContext, cfApi, cfErr, argValue, isInteractive, banner } from "./context.mjs";
+import { c, ok, info, warn, die, loadCloudToken, loadContext, cfApi, cfErr, argValue, isInteractive, banner } from "../cli/lib/provision/context.mjs";
 
 // KV bulk write caps: 10,000 keys and 100 MB per request. Stay well under both.
 const MAX_KEYS_PER_CALL = 1000;

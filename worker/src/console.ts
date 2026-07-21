@@ -85,7 +85,9 @@ function page(session: string, nonce: string, owner: string, version: string, de
   // Footer identity: the baked version links to the changelog; the deploy date (baked at deploy,
   // ADR-010) answers "how fresh is this?". Both degrade gracefully before a redeploy sets them.
   const changelogUrl = "https://github.com/danjamk/pagevault/blob/main/CHANGELOG.md";
-  const deployDate = deployedAt ? esc(deployedAt.slice(0, 10)) : "";
+  // Date + time (UTC) — a day is too coarse to tell one day's redeploys apart. "2026-07-21T11:11"
+  // → "2026-07-21 11:11 UTC". Labeled UTC because the stamp is, and the console renders anywhere.
+  const deployDate = deployedAt ? esc(`${deployedAt.slice(0, 16).replace("T", " ")} UTC`) : "";
   return `<!doctype html>
 <html lang="en">
 <head>

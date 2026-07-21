@@ -7,6 +7,35 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-07-21
+
+The npm package becomes the installed product ([ADR-014](docs/adr/ADR-014-installed-product-not-thin-client.md)):
+`npm install -g pagevault && pagevault init` stands PageVault up on your own Cloudflare account with
+no clone. Published as `pagevault@0.2.0` on npm.
+
+### Added
+- **`pagevault init` / `pagevault upgrade` (#87).** `init` walks you through the Cloudflare token,
+  tier, owner, and account, then provisions and deploys the Worker; `upgrade` redeploys after
+  `npm update -g pagevault`, keeping KV, config, and secrets. No repo checkout.
+- **A prebuilt, self-contained Worker bundle the package ships (#86).** `build-bundle` compiles
+  `worker/src` to a single ~792 KiB-gzipped `cli/dist/worker.js` (jose/agents/MCP inlined) at pack
+  time and stamps the product version; `init`/`upgrade` deploy it verbatim with `no_bundle`, so a
+  user's machine needs no source, no Worker dependencies, and no TypeScript build. `make
+  deploy-bundle` validates the same path from a checkout.
+- **The provisioning code and wrangler template now ship in the package.** `provision`, `deploy`,
+  `tier0`, `setup`, and `context` moved to `cli/lib/provision/` as importable functions; operator
+  state resolves to `~/.pagevault/` when installed, the repo cwd when run from source
+  (`PAGEVAULT_HOME` overrides).
+- **The owner console footer shows the deploy time to the minute** (UTC), not just the date.
+
+### Changed
+- The README leads with the installed product; `git clone && make` is now the from-source /
+  contributor path. Prime directives #2 and #7 and the CLI's framing updated for ADR-014.
+
+### Notes
+- The `pagevault` npm package version (`0.2.0`) is independent of this product version by design;
+  the product version is stamped into the deployed Worker and reported at `/health`.
+
 ## [0.13.0] — 2026-07-20
 
 Adds the Access-group reconciler — the first slice of the packaging lifecycle (#42, ADR-014).

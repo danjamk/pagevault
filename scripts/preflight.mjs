@@ -11,7 +11,7 @@
 // preflight just points there.
 //
 import { versions } from "node:process";
-import { c, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, acct, shortId, slug, banner } from "./context.mjs";
+import { c, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, acct, shortId, slug, banner } from "../cli/lib/provision/context.mjs";
 
 const ctx = loadContext();
 const rung = ctx.rung ?? 1;

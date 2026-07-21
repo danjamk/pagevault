@@ -19,7 +19,7 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { c, ok, warn, die, loadCloudToken, cfApi, cfAccounts, isInteractive, printTokenSetup, banner } from "./context.mjs";
+import { c, ok, warn, die, loadCloudToken, cfApi, cfAccounts, isInteractive, printTokenSetup, banner } from "../cli/lib/provision/context.mjs";
 
 const WORKER_NAME = "pagevault";
 const GROUP_NAME = "pagevault-viewers";

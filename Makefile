@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install setup dev demo status test test-security check-sandbox check login logout preflight provision deploy verify health logs destroy backup restore export publish-cli
+.PHONY: help install setup dev demo status test test-security check-sandbox check login logout preflight provision deploy verify health logs destroy backup restore export bundle deploy-bundle publish-cli
 
 # Written by `make provision`. Gitignored — it holds your email, team name, AUD tags and
 # KV id, and this is a public repo.
@@ -26,7 +26,7 @@ setup: install ## Decide your rung and get the repo ready (local; nothing create
 		cp worker/.dev.vars.example worker/.dev.vars; \
 		echo "→ created worker/.dev.vars from the example (gitignored)"; \
 	fi
-	@$(NVM) && node scripts/setup.mjs
+	@$(NVM) && node cli/lib/provision/setup.mjs
 
 dev: ## Run the Worker locally against Miniflare KV
 	@if [ ! -f worker/.dev.vars ]; then \
@@ -81,10 +81,10 @@ preflight: ## Check your Cloudflare account is ready for your rung (read-only)
 
 ##@ Deploy & operate
 provision: ## Rung 3: create the KV namespace, Access group, and two Access apps
-	@$(NVM) && node scripts/provision.mjs
+	@$(NVM) && node cli/lib/provision/provision.mjs
 
 deploy: ## Deploy the Worker — rung-aware (Tier 0, or provision at rung 3)
-	@$(NVM) && node scripts/deploy.mjs
+	@$(NVM) && node cli/lib/provision/deploy.mjs
 
 verify: ## Smoke-test the live deployment (run after deploy)
 	@$(NVM) && node scripts/verify.mjs
@@ -113,6 +113,12 @@ export: ## Walk away with everything: a zipped, browsable dump of your deploymen
 		$(if $(PORTAL),--portal $(PORTAL),) $(if $(DRAFTS),--include-drafts,) $(if $(NOZIP),--no-zip,)
 
 ##@ Distribution
+bundle: ## Build the self-contained Worker bundle the npm package ships (cli/dist/worker.js) — ADR-014
+	@$(NVM) && node scripts/build-bundle.mjs
+
+deploy-bundle: bundle ## Deploy the PREBUILT bundle (the installed-product path) — for validating the no_bundle deploy on a test host
+	@$(NVM) && PAGEVAULT_BUNDLE=1 node cli/lib/provision/deploy.mjs
+
 publish-cli: ## Publish the pagevault CLI to npm — prepublishOnly runs the unit tests + a pack/install smoke first (#56)
 # The guard is in cli/package.json: `prepublishOnly` runs the node --test suites and smoke.mjs,
 # which packs the tarball and runs the installed binary. A broken package can't reach npm.

@@ -11,7 +11,7 @@
 // confirm:true and updates the same document in place.
 //
 import { readFileSync, existsSync } from "node:fs";
-import { c, ok, warn, die, loadContext, fromEnv, banner, mcpCall, EXPECTED_MCP_TOOLS } from "./context.mjs";
+import { c, ok, warn, die, loadContext, fromEnv, banner, mcpCall, EXPECTED_MCP_TOOLS } from "../cli/lib/provision/context.mjs";
 
 const ctx = loadContext();
 const base = (ctx.deployedUrl ?? (ctx.host ? `https://${ctx.host}` : "")).replace(/\/$/, "");

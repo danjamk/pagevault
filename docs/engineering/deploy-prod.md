@@ -70,7 +70,7 @@ What the job does, in order:
 1. **Reconstructs `.pagevault.json`** from `PAGEVAULT_PROD_CONFIG`.
 2. **Backs up prod KV** (`scripts/kv-backup.mjs`) and uploads it as the `prod-kv-backup`
    artifact — your restore point, kept 30 days.
-3. **Deploys** via `scripts/deploy.mjs` — the same script `make deploy` runs, no forked logic. Its
+3. **Deploys** via `cli/lib/provision/deploy.mjs` — the same script `make deploy` runs, no forked logic. Its
    prompts auto-skip when stdin isn't a TTY. The bearer is reused from the Worker; only a
    first-ever prod deploy sets it from the secret.
 4. **Verifies the build** (`scripts/health-check.mjs`): asserts `/health` reports the exact

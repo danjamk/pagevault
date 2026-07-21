@@ -74,7 +74,7 @@ jobs:
       # from the PAGEVAULT_API_TOKEN secret. CF_RUNTIME_TOKEN becomes the Worker's scoped runtime
       # secret (ADR-002 group sync).
       - name: Deploy the Worker
-        run: node scripts/deploy.mjs
+        run: node cli/lib/provision/deploy.mjs
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_RUNTIME_TOKEN: ${{ secrets.CF_RUNTIME_TOKEN }}

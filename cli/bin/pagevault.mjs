@@ -31,6 +31,10 @@ async function main() {
   if (!cmd || cmd === "help" || cmd === "--help" || flags.help) return usage();
 
   switch (cmd) {
+    case "init":
+      return init(flags);
+    case "upgrade":
+      return upgrade(flags);
     case "publish":
       return publish(positional, flags);
     case "list":
@@ -325,10 +329,37 @@ async function login(flags) {
   }
 }
 
+// The installed-product lifecycle (ADR-014): stand PageVault up on your own Cloudflare account,
+// and redeploy it later — no repo clone. The provisioning code is dynamic-imported so the document
+// commands above load none of it and stay a lean HTTP client. Both deploy the prebuilt Worker
+// bundle the package ships. `--yes` (read from argv by the flow) makes them non-interactive.
+
+async function init() {
+  const { setup } = await import("../lib/provision/setup.mjs");
+  const { deploy } = await import("../lib/provision/deploy.mjs");
+
+  // setup walks the operator through the Cloudflare token, rung, owner, host, and account, writing
+  // ~/.pagevault/. It returns ready:false (and prints what to do next) when it stopped early — a
+  // missing token, or a token that reaches no account — in which case we do NOT deploy.
+  const { ready } = await setup({ next: "pagevault init" });
+  if (!ready) return;
+
+  await deploy({ bundle: true });
+}
+
+async function upgrade() {
+  // Redeploy the bundle that shipped with this installed package, keeping KV, config, and secrets.
+  // Pairs with `npm update -g pagevault`: update the package for new code, then `pagevault upgrade`.
+  const { deploy } = await import("../lib/provision/deploy.mjs");
+  await deploy({ bundle: true });
+}
+
 function usage() {
   note(`pagevault ${VERSION} — publish HTML or Markdown to your PageVault deployment
 
 Usage:
+  pagevault init [--yes]              stand PageVault up on your own Cloudflare account (no repo)
+  pagevault upgrade [--yes]           redeploy the bundled Worker (after 'npm update -g pagevault')
   pagevault login --url <url> --token <token>
   pagevault publish <file.html|.md> [--portal s] [--title t] [--summary s]
                                 [--tags a,b] [--emails a@b,c@d] [--source-kind html|markdown]
