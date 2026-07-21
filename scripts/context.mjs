@@ -12,8 +12,33 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
+import { fileURLToPath } from "node:url";
 
 export const CONTEXT_FILE = ".pagevault.json";
+
+// The absolute path to the prebuilt Worker bundle the npm package ships (ADR-014, #86). Resolved
+// from THIS module's location, not the cwd, so it is correct whether run from the repo or an
+// installed package — and absolute, because a generated config points `main` at it and wrangler
+// resolves `main` relative to the config file's directory, not the cwd.
+export const BUNDLE_PATH = fileURLToPath(new URL("../cli/dist/worker.js", import.meta.url));
+
+/**
+ * Switch a generated wrangler config to deploy the PREBUILT bundle: point `main` at the absolute
+ * bundle path and turn `no_bundle` on, so wrangler uploads that file verbatim instead of
+ * re-bundling `src`. The template ships `"main": "src/index.ts"` + `"no_bundle": false` (the repo /
+ * `make deploy` / prod-CI path); this is applied only in bundle mode. Throws if the template's
+ * `main`/`no_bundle` shape drifted, so a silent miss can't ship a Worker that bundles from a `src`
+ * the installed package doesn't have.
+ */
+export function applyBundleMode(config, bundlePath) {
+  const out = config
+    .replace(/"main": "src\/index\.ts"/, `"main": "${bundlePath}"`)
+    .replace(/"no_bundle": false/, '"no_bundle": true');
+  if (!out.includes(`"main": "${bundlePath}"`) || !out.includes('"no_bundle": true')) {
+    throw new Error("Failed to switch the config to bundle mode — did the template's main/no_bundle change?");
+  }
+  return out;
+}
 
 // Terminal styling. The muted tier is a real gray (90m), NOT the "dim" attribute (2m):
 // many dark-mode terminals render 2m as near-invisible, which collapses a bold/normal/dim

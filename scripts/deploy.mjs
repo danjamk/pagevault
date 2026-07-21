@@ -82,12 +82,19 @@ export async function deploy(opts = {}) {
 
   // --- 1. Generate the tier-appropriate config -------------------------------
 
+  // Bundle mode (ADR-014): deploy the prebuilt cli/dist/worker.js instead of bundling from src.
+  // The installed `pagevault init`/`upgrade` pass `{ bundle: true }`; from the repo, opt in with
+  // `PAGEVAULT_BUNDLE=1` (that's what `make deploy-bundle` sets). Default — `make deploy`, prod CI —
+  // bundles from src, unchanged.
+  const bundle = opts.bundle ?? process.env.PAGEVAULT_BUNDLE === "1";
+
   info(ctx.rung >= 3 ? "Provisioning Access (rung 3)…" : "Writing the Tier-0 config…");
+  if (bundle) info("Bundle mode: deploying the prebuilt Worker (no_bundle).");
   try {
     // In-process (was `execSync node scripts/{provision,tier0}.mjs`): same cwd and same
     // process.env — CLOUDFLARE_API_TOKEN is already loaded — so the generated config is identical.
-    if (ctx.rung >= 3) await provisionAccess();
-    else await writeTier0Config();
+    if (ctx.rung >= 3) await provisionAccess({ bundle });
+    else await writeTier0Config({ bundle });
   } catch (err) {
     die("Config generation failed — see the output above.");
   }

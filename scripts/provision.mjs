@@ -19,7 +19,7 @@ import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import {
   c, ok, info, warn, die, loadCloudToken, loadContext, saveContext, cfApi, cfErr, acct, shortId,
-  fromEnv, writeEnvLocalVar, isInteractive, banner, releaseTag,
+  fromEnv, writeEnvLocalVar, isInteractive, banner, releaseTag, BUNDLE_PATH, applyBundleMode,
 } from "./context.mjs";
 
 const CONFIG_IN = "worker/wrangler.jsonc";
@@ -293,7 +293,7 @@ export async function provisionAccess(opts = {}) {
   // an open workers.dev would route around Access.
 
   const template = readFileSync(CONFIG_IN, "utf8");
-  const generated = template
+  let generated = template
     .replace(/"id": "REPLACE_WITH_KV_NAMESPACE_ID"/, `"id": "${kvId}"`)
     .replace(/"id": "REPLACE_WITH_OAUTH_KV_ID"/, `"id": "${oauthKvId}"`)
     .replace(/"PAGEVAULT_VERSION": ""/, `"PAGEVAULT_VERSION": "${releaseTag()}"`)
@@ -315,6 +315,14 @@ export async function provisionAccess(opts = {}) {
   for (const [key, value] of Object.entries({ kv: kvId, oauthKv: oauthKvId, team, host, audDocs, audAdmin, accountId: account.id, groupId: group.id })) {
     if (!generated.includes(value)) die(`Failed to write ${key} into ${CONFIG_OUT}. Did the template change?`);
   }
+
+  // Bundle mode (ADR-014): deploy the shipped prebuilt Worker instead of bundling from src.
+  if (opts.bundle) {
+    if (!existsSync(BUNDLE_PATH)) die("Bundle mode needs the prebuilt Worker.", "Run `make bundle` first.");
+    generated = applyBundleMode(generated, BUNDLE_PATH);
+    ok(`Bundle mode: deploying ${c.dim(BUNDLE_PATH)}`);
+  }
+
   writeFileSync(CONFIG_OUT, generated);
   ok(`Wrote ${CONFIG_OUT} ${c.dim("(rung 3, gitignored)")}`);
 

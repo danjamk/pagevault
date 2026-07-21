@@ -14,7 +14,7 @@
 //
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, releaseTag } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, releaseTag, BUNDLE_PATH, applyBundleMode } from "./context.mjs";
 
 const CONFIG_IN = "worker/wrangler.jsonc";
 const CONFIG_OUT = "worker/wrangler.generated.jsonc";
@@ -148,6 +148,13 @@ export async function writeTier0Config(opts = {}) {
     die(`Failed to write ${CONFIG_OUT}. Did the template change?`);
   }
   if (host && !generated.includes(`"pattern": "${host}"`)) die(`Failed to write the ${host} route.`);
+
+  // Bundle mode (ADR-014): deploy the shipped prebuilt Worker instead of bundling from src.
+  if (opts.bundle) {
+    if (!existsSync(BUNDLE_PATH)) die("Bundle mode needs the prebuilt Worker.", "Run `make bundle` first.");
+    generated = applyBundleMode(generated, BUNDLE_PATH);
+    ok(`Bundle mode: deploying ${c.dim(BUNDLE_PATH)}`);
+  }
 
   writeFileSync(CONFIG_OUT, generated);
   ok(`Wrote ${CONFIG_OUT} ${c.dim(`(rung ${ctx.rung}, gitignored)`)}`);

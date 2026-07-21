@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install setup dev demo status test test-security check-sandbox check login logout preflight provision deploy verify health logs destroy backup restore export bundle publish-cli
+.PHONY: help install setup dev demo status test test-security check-sandbox check login logout preflight provision deploy verify health logs destroy backup restore export bundle deploy-bundle publish-cli
 
 # Written by `make provision`. Gitignored — it holds your email, team name, AUD tags and
 # KV id, and this is a public repo.
@@ -115,6 +115,9 @@ export: ## Walk away with everything: a zipped, browsable dump of your deploymen
 ##@ Distribution
 bundle: ## Build the self-contained Worker bundle the npm package ships (cli/dist/worker.js) — ADR-014
 	@$(NVM) && node scripts/build-bundle.mjs
+
+deploy-bundle: bundle ## Deploy the PREBUILT bundle (the installed-product path) — for validating the no_bundle deploy on a test host
+	@$(NVM) && PAGEVAULT_BUNDLE=1 node scripts/deploy.mjs
 
 publish-cli: ## Publish the pagevault CLI to npm — prepublishOnly runs the unit tests + a pack/install smoke first (#56)
 # The guard is in cli/package.json: `prepublishOnly` runs the node --test suites and smoke.mjs,
