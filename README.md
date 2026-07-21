@@ -13,7 +13,7 @@ Self-hosted on Cloudflare's free tier. Whoever you send it to installs nothing.
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-34507A) &nbsp;
 ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-34507A) &nbsp;
-![Version](https://img.shields.io/badge/version-0.13.0-34507A)
+![Version](https://img.shields.io/badge/version-0.14.0-34507A)
 
 > **Pre-1.0 and honest about it.** [Status](#status) says what works today and what
 > doesn't. This README is the setup guide — the product argument lives on the
