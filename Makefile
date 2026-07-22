@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install setup dev demo status test test-security check-sandbox check login logout preflight provision deploy verify health logs destroy backup restore export bundle deploy-bundle publish-cli
+.PHONY: help install setup dev demo status test test-security check-sandbox check login logout preflight provision deploy verify health logs destroy backup restore views export bundle deploy-bundle publish-cli
 
 # Written by `make provision`. Gitignored — it holds your email, team name, AUD tags and
 # KV id, and this is a public repo.
@@ -80,8 +80,9 @@ preflight: ## Check your Cloudflare account is ready for your rung (read-only)
 	@$(NVM) && node scripts/preflight.mjs
 
 ##@ Deploy & operate
-provision: ## Rung 3: create the KV namespace, Access group, and two Access apps
-	@$(NVM) && node cli/lib/provision/provision.mjs
+provision: ## Rung 3: create the KV namespace, Access group, and two Access apps (ANALYTICS=on|off toggles view tracking)
+	@$(NVM) && node cli/lib/provision/provision.mjs \
+		$(if $(filter on,$(ANALYTICS)),--analytics,) $(if $(filter off,$(ANALYTICS)),--no-analytics,)
 
 deploy: ## Deploy the Worker — rung-aware (Tier 0, or provision at rung 3)
 	@$(NVM) && node cli/lib/provision/deploy.mjs
@@ -104,6 +105,9 @@ backup: ## Snapshot the KV namespace to a JSON file (OUT=path, KV=id optional)
 
 restore: ## Restore a backup into the KV namespace (make restore FILE=backup.json [KV=id] [FORCE=1])
 	@$(NVM) && node scripts/kv-restore.mjs --in "$(FILE)" $(if $(KV),--kv $(KV),) $(if $(FORCE),--force,)
+
+views: ## Which documents your clients actually opened (DAYS=30 PORTAL=slug DOC=id)
+	@$(NVM) && node scripts/views.mjs $(if $(DAYS),--days $(DAYS),) $(if $(PORTAL),--portal $(PORTAL),) $(if $(DOC),--doc $(DOC),)
 
 export: ## Walk away with everything: a zipped, browsable dump of your deployment (PORTAL=slug DRAFTS=1 NOZIP=1 OUT=dir)
 # Auto-targets THIS clone's deployment — URL from .pagevault.json, bearer from .env.local — so
