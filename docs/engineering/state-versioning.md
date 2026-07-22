@@ -41,3 +41,18 @@ When you change the shape of `.pagevault.json`:
 
 The runner is pinned by `scripts/migrate.test.mjs` with synthetic migrations, so the machinery is
 proven even while `MIGRATIONS` is empty at v1.
+
+### When *not* to add one
+
+A purely additive **optional** field, where absent already has a defined meaning, needs no
+migration and no version bump — there is nothing to transform, and a migration that filled in a
+default would destroy the distinction that makes the field optional.
+
+`analytics` (view tracking, #91) is the worked example. Three states, all meaningful:
+`undefined` = never asked, so provisioning asks; `true` = on; `false` = declined, so it stops
+asking. A migration stamping `false` onto old files would read as "the operator declined" and
+the prompt would never appear again. Leaving it absent is not an oversight — it is the only
+correct handling.
+
+The rule: bump when an old file would be *misread* by new code. Not when it is merely missing
+something new.

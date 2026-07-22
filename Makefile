@@ -93,8 +93,12 @@ verify: ## Smoke-test the live deployment (run after deploy)
 health: ## Assert the live /health matches this checkout's build (<version>+<sha>)
 	@$(NVM) && node scripts/health-check.mjs
 
-logs: ## Tail the deployed Worker
-	@$(NVM) && npx wrangler tail --config $(DEPLOY_CONFIG)
+logs: ## Tail the deployed Worker (ERRORS=1 only errors, SEARCH=text filter, JSON=1 raw)
+# A bare tail on a healthy deployment is mostly request lines. Now that the Worker emits named
+# events (architecture.md §12), the useful sessions are filtered: ERRORS=1 is the
+# deployment-is-broken tier, SEARCH= narrows to one event family, JSON=1 pipes to jq.
+	@$(NVM) && npx wrangler tail --config $(DEPLOY_CONFIG) \
+		$(if $(ERRORS),--status error,) $(if $(SEARCH),--search "$(SEARCH)",) $(if $(JSON),--format json,)
 
 destroy: ## Tear the deployment down — Worker, DNS, Access apps, group, and KV data
 	@$(NVM) && node scripts/destroy.mjs

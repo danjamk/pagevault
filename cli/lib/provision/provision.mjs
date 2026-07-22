@@ -189,10 +189,24 @@ export async function provisionAccess(opts = {}) {
       console.log();
       info("View tracking (optional) records which documents each client opens.");
       console.log(`  ${c.dim("Free — a separate quota from KV, so it never competes with publishing. Retention")}`);
-      console.log(`  ${c.dim("is 3 months. It must be enabled once on the account, in the dashboard:")}`);
+      console.log(`  ${c.dim("is 3 months, so it answers \"recently\", never \"ever\".")}`);
+      console.log();
+      console.log(`  ${c.dim("It must be enabled once on the account, in the dashboard:")}`);
       console.log(`  ${c.bold(analyticsUrl)}`);
+      console.log();
+      // The dashboard flow is genuinely confusing: it opens on "Create Dataset", the only choice
+      // is "Create Blank Dataset", and then it asks for a name and a binding as if they were
+      // yours to invent. They are not — they have to match what the Worker config already
+      // declares. Creating the dataset is really just how the UI switches the product on.
+      console.log(`  ${c.dim("It opens on \"Create Dataset\" — choose Create Blank Dataset, then enter EXACTLY:")}`);
+      console.log(`      Dataset Name     ${c.bold("pagevault_views")}`);
+      console.log(`      Dataset Binding  ${c.bold("ANALYTICS")}`);
+      console.log(`  ${c.dim("Those must match what worker/wrangler.jsonc already declares. Ignore the wrangler")}`);
+      console.log(`  ${c.dim("snippet it offers afterward — yours is committed. Creating the dataset is just how")}`);
+      console.log(`  ${c.dim("the dashboard turns the product on.")}`);
+      console.log();
       const rl = createInterface({ input: stdin, output: stdout });
-      const answer = (await rl.question(`  ${c.bold("Enabled it, and want view tracking? [y/N] ")}`)).trim().toLowerCase();
+      const answer = (await rl.question(`  ${c.bold("Done that, and want view tracking? [y/N] ")}`)).trim().toLowerCase();
       rl.close();
       analytics = answer === "y" || answer === "yes";
     } else {

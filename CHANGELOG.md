@@ -21,7 +21,12 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
   `/p/` views record no viewer, no IP and no User-Agent, because those routes never had an
   identity to withhold ([ADR-015](docs/adr/ADR-015-what-a-view-record-contains.md)).
 - **`docs/architecture.md` §12, Operations (#45)** — the event table, what is never logged, the
-  Workers Logs boundary, and what is still dark.
+  Workers Logs boundary, log retention and sampling, the free-tier quotas that actually bind, why
+  an invocation is not a view, and why fail-open cannot serve an unauthorized document. Plus the
+  fact that Cloudflare sends **zero** Workers notifications at any tier, so every guardrail here
+  is one you build.
+- **`make logs` takes filters** — `ERRORS=1`, `SEARCH=<text>`, `JSON=1`. A bare tail was mostly
+  request lines; there are fifteen named events to narrow to now.
 
 ### Fixed
 - 🔴 **Capability tokens no longer reach the log.** `logBlocked` wrote `request.url`, and

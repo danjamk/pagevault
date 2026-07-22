@@ -474,11 +474,73 @@ is strictly wider than the Access-group-scoped credential the Worker holds. Givi
 that token is the blast-radius widening ADR-002 exists to prevent — and the MCP server runs
 inside the Worker. So the Worker writes and the operator reads.
 
+### Retention, sampling, and how to read `make logs`
+
+**Workers Logs keeps 3 days on the free plan, 7 on paid.** No `logpush`, no `tail_consumers` —
+nothing older survives. Post-incident forensics past that window is not hard, it is impossible,
+so anything you need to keep must be copied out while it is still there.
+
+`observability.enabled` is `true` with no `head_sampling_rate`, which defaults to `1` — every
+invocation is logged, nothing is dropped. That is the right setting at this volume and it is the
+thing to revisit first if log volume ever becomes a cost.
+
+```bash
+make logs                       # everything
+make logs ERRORS=1              # only errors — the deployment-is-broken tier
+make logs SEARCH=denied_        # one event family
+make logs SEARCH=jwt_rejected JSON=1 | jq   # machine-readable
+```
+
+🔴 **An invocation is not a view.** Opening one document is *two* Worker invocations: the shell
+(`/v/:portal/:doc`), then the sandboxed iframe fetching `/render/:id`. Request counts in the
+Cloudflare dashboard run about double the human page-opens, and PDF export and raw download add
+more. This is exactly why view tracking hooks `renderShell` and not `/render` — but the
+dashboard's request graph has no such correction, so do not read it as traffic.
+
+### What the free tier does not tell you
+
+**Cloudflare will not notify you about any of this.** There are *zero* Workers notification types
+at any tier — no request-limit alert, no error-rate alert, no KV-quota alert, and no seat alert
+(§10). Every guardrail here is one you build. That is the single most important operational fact
+about running on this stack.
+
+The numbers worth knowing, all daily and all free-plan:
+
+| Resource | Limit |
+|---|---|
+| Worker requests | 100,000/day |
+| KV reads | 100,000/day |
+| KV **writes** | 1,000/day |
+| KV deletes | 1,000/day |
+| KV **lists** | 1,000/day (separate from reads — do not poll `list()` from the console) |
+| Analytics Engine writes | 100,000/day |
+| Analytics Engine queries | 10,000/day |
+
+A publish costs 2–3 KV writes. The write quota is the one that binds first, and it is why view
+tracking lives in Analytics Engine rather than a KV counter.
+
+### On fail-open, and why it is not the hole it looks like
+
+Exceeding the free daily request limit triggers a route-level fail-open/fail-closed toggle, and
+Cloudflare's docs recommend fail closed "for security-critical Workers." Read quickly, that
+sounds like *over quota → Worker bypassed → documents served unauthenticated*.
+
+It cannot do that here. Fail open means "behave as if no Worker is configured" — and on a Custom
+Domain **the Worker is the origin**. KV, the viewer shell and `/render` all live inside it, so
+bypassing the Worker does not skip `canView()` and serve the document; it removes the only thing
+that *has* the document. The result is a 1027 or a 522-class error, never an unauthorized read.
+The Pages analogue is the tell: there, fail open falls back to static assets because a real
+fallback target exists. A custom-domain Worker has no equivalent.
+
+Set the route to fail closed anyway — it costs nothing and the docs recommend it. It is
+dashboard-only (Settings → Domains & Routes); there is no wrangler key and no Routes API field.
+Do not write an ADR premised on fail-open serving unauthorized content, because it cannot.
+
 ### What is still dark
 
-No rejection *rate*: denials are in the log stream and views are in Analytics, so there is no
-shared denominator. No seat-count alerting — see §10, and #44. Free-tier Workers Logs
-retention is short and plan-dependent; treat logs as a debugging surface, not a record.
+No rejection *rate*: denials are in the log stream and views are in Analytics, so the two have no
+shared denominator. No seat-count alerting — see §10 and #44. And the **default** fail mode for a
+quota-exceeded custom domain is undocumented; it is flagged here rather than guessed.
 
 ## 13. Explicit non-goals
 
