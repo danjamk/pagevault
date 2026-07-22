@@ -29,6 +29,19 @@ export interface LogFields extends Record<string, unknown> {
 }
 
 /**
+ * A short, non-reversible handle for a secret, so two rejections of the *same* token are
+ * recognizable as the same token without the token itself ever reaching the log.
+ *
+ * 32 bits of SHA-256. That is ample to correlate events in a single operator's traffic and
+ * useless for recovering the input: a `/p/` token is 110 bits, so ~2^78 candidates survive
+ * knowing this. See ADR-015, decision 2.
+ */
+export async function fingerprint(secret: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  return [...new Uint8Array(digest).slice(0, 4)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
  * Emit one structured event.
  *
  * `error` goes to `console.error` so `wrangler tail --status error` actually surfaces it;
@@ -54,15 +67,19 @@ export function log(level: LogLevel, event: string, fields: LogFields = {}): voi
 /**
  * The subset of a request that reaches the log.
  *
- * 🔴 `url` is a known leak and is removed in the next commit — capability tokens ride in
- * the query string (`?cap=` on `/render`) and in the path itself on `/p/{token}`, so a
- * logged URL is a logged credential. It is preserved verbatim here only so that extracting
- * this module is a provable no-op. See ADR-015, decision 2.
+ * 🔴 **Nothing is derived from the URL. Not the full URL, not the path.** Capability
+ * tokens ride in the query string on `/render?cap=`, and on `/p/{token}` the token *is*
+ * the path — so a logged path is a logged credential just as surely as a logged URL is.
+ * `/p/` tokens have no expiry; they live until rotated. See ADR-015, decision 2.
+ *
+ * This is why the leak is fixed here rather than at the call sites. A route that wants
+ * path detail must pass it explicitly as a field, having decided that route carries no
+ * secret — so leaking one takes a deliberate act, not merely copying an older call site.
+ * The event name already identifies the route better than a path would.
  */
 function requestFields(request: Request): Record<string, unknown> {
   return {
     method: request.method,
-    url: request.url,
     origin: request.headers.get("Origin"),
   };
 }

@@ -1,6 +1,6 @@
 import { mintCapability, verifyCapability } from "./capability.js";
 import type { Env } from "./env.js";
-import { log } from "./log.js";
+import { fingerprint, log } from "./log.js";
 import { renderPdf } from "./pdf.js";
 import type { DocMeta } from "./store.js";
 import { getDoc, getMeta, getRawSource } from "./store.js";
@@ -68,7 +68,15 @@ export async function handleRender(request: Request, env: Env, id: string): Prom
   // capability for this one.
   const capability = await verifyCapability(env, cap, id);
   if (!capability) {
-    log("warn", "blocked_render_invalid_capability", { request, doc: id });
+    // The capability is fingerprinted, never logged. `verifyCapability` refuses a token
+    // that is valid but names a *different* document (capability.ts) — that token is still
+    // live for its own document, and logging it verbatim would make it replayable from the
+    // log. The fingerprint still tells you a retry loop is hammering one dead token.
+    log("warn", "blocked_render_invalid_capability", {
+      request,
+      doc: id,
+      cap: cap ? await fingerprint(cap) : "absent",
+    });
     return new Response("Not found", { status: 404 });
   }
 
