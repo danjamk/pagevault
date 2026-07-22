@@ -1,4 +1,5 @@
 import { canView, canViewPortal, emailsMatch } from "./access.js";
+import type { ViewSurface } from "./analytics.js";
 import { identify } from "./auth.js";
 import { documentPath, portalPath } from "./documents.js";
 import type { Env } from "./env.js";
@@ -61,7 +62,7 @@ export async function handlePortalRoute(
 
   return id === null
     ? portalIndex(env, portal, members, email)
-    : portalDocument(env, portal, members, email, id);
+    : portalDocument(env, portal, members, email, id, "portal");
 }
 
 /**
@@ -102,7 +103,7 @@ export async function handlePublicPortalRoute(
   // a seat. That is an economic property of the route, not an afterthought.
   return id === null
     ? portalIndex(env, portal, [], null)
-    : portalDocument(env, portal, [], null, id);
+    : portalDocument(env, portal, [], null, id, "public");
 }
 
 async function portalIndex(
@@ -133,6 +134,7 @@ async function portalDocument(
   members: string[],
   email: string | null,
   id: string,
+  surface: ViewSurface,
 ): Promise<Response> {
   const meta = await getMeta(env, id);
   if (!meta) return notFound();
@@ -185,6 +187,7 @@ async function portalDocument(
     // the portal; no share affordance there. Keyed off kind, not noindex (they differ).
     shareable: portal.kind === "public",
     pdfEnabled: !!env.BROWSER,
+    surface,
   });
 }
 

@@ -43,6 +43,21 @@
     "binding": "BROWSER"
   },
 
+  // View tracking (#91). Optional in exactly the way the browser binding is: a fork that
+  // does not want it deletes this block and the Worker stops recording, silently and
+  // correctly. Unlike KV there is nothing to provision — the dataset materializes on first
+  // write, so no id is read back and no setup step exists.
+  //
+  // Writes go to a separate quota from KV (100k/day free vs KV's 1000/day), which is the
+  // only reason view tracking is affordable at all: a counter in KV would put the read path
+  // in competition with publishing. Retention is three months — see ADR-015, decision 5.
+  "analytics_engine_datasets": [
+    {
+      "binding": "ANALYTICS",
+      "dataset": "pagevault_views"
+    }
+  ],
+
   "vars": {
     // The code this Worker was built from: <version>+<shortsha>. Baked at deploy from
     // package.json + git; reported by /health, the MCP server, and the console. See ADR-010.

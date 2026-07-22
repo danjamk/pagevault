@@ -1,3 +1,4 @@
+import { type ViewSurface, recordView } from "./analytics.js";
 import { mintCapability, verifyCapability } from "./capability.js";
 import type { Env } from "./env.js";
 import { fingerprint, log } from "./log.js";
@@ -194,6 +195,14 @@ function pdfError(status: number, error: string): Response {
 export interface ShellOptions {
   /** The verified viewer, or null for an unauthenticated public view. */
   email: string | null;
+  /**
+   * Which door this view came through. Passed explicitly rather than inferred from
+   * `portal.kind`: `/v` only ever serves non-public portals today (it redirects public ones
+   * to `/pub`), so the kind *happens* to identify the surface — but that is a property of a
+   * redirect three functions away, and it feeds the one field that decides whether a
+   * viewer's email is recorded. See ADR-015, decision 1.
+   */
+  surface: ViewSurface;
   /** Where "back" goes. Absent on a `/p/` capability link — there is no collection. */
   backHref?: string;
   backLabel?: string;
@@ -231,6 +240,10 @@ export async function renderShell(
   if (!cap) {
     return new Response("Server misconfigured: PAGEVAULT_API_TOKEN is not set", { status: 500 });
   }
+
+  // After the mint, not before: a view that could not be served is not a view. This is the
+  // one place all three surfaces meet, which is why the hook is here and not on the routes.
+  recordView(env, meta, opts.surface, opts.email);
 
   // The shell's own script/style are nonced. A bug in artifact serving must not be able
   // to degrade the page that holds the capability token.
