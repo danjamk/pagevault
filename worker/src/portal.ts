@@ -90,7 +90,13 @@ export async function handlePublicPortalRoute(
 
   // Only public portals are served here. A restricted portal reached through /pub is a
   // 404, not a redirect — a redirect would confirm that a client's portal exists.
-  if (!portal || portal.kind !== "public") return notFound();
+  if (!portal || portal.kind !== "public") {
+    // Both cases are the same 404 outside, and they are very different inside. A miss on a
+    // slug that does not exist is noise; a miss on one that does means someone guessed a
+    // real client's slug and tried the unauthenticated door. `exists` is the whole signal.
+    log("warn", "blocked_public_portal_route", { portal: slug, exists: !!portal, doc: id });
+    return notFound();
+  }
 
   // No identify(), no members, no JWT. Nobody authenticates on this path, so nobody burns
   // a seat. That is an economic property of the route, not an afterthought.
@@ -105,7 +111,10 @@ async function portalIndex(
   members: string[],
   email: string | null,
 ): Promise<Response> {
-  if (!canViewPortal(portal, members, email, env.OWNER_EMAIL)) return notFound();
+  if (!canViewPortal(portal, members, email, env.OWNER_EMAIL)) {
+    log("warn", "denied_portal_index", { portal: portal.slug, kind: portal.kind, email });
+    return notFound();
+  }
 
   const isOwner = email !== null && email === env.OWNER_EMAIL.trim().toLowerCase();
 
@@ -134,9 +143,30 @@ async function portalDocument(
   // the PUBLIC portal and hand over a private client document. It is the cross-portal
   // leak in route form, and it is invisible in a unit test of canView() — which is
   // exactly why it gets its own test here.
-  if (meta.portal !== portal.slug) return notFound();
+  if (meta.portal !== portal.slug) {
+    // 🔴 The loudest event this Worker emits. Someone asked for a document through a portal
+    // that does not own it — the cross-portal leak in route form. It is a 404 either way,
+    // but a *pattern* of these is someone walking ids across portals, and that is the one
+    // thing that ends a consulting business. `error`, so it reaches
+    // `wrangler tail --status error` without a filter.
+    log("error", "denied_cross_portal_document", {
+      portal: portal.slug,
+      doc: meta.id,
+      ownedBy: meta.portal,
+      email,
+    });
+    return notFound();
+  }
 
-  if (!canView(meta, portal, members, email, env.OWNER_EMAIL)) return notFound();
+  if (!canView(meta, portal, members, email, env.OWNER_EMAIL)) {
+    log("warn", "denied_document_view", {
+      portal: portal.slug,
+      doc: meta.id,
+      ownerOnly: meta.ownerOnly,
+      email,
+    });
+    return notFound();
+  }
 
   return renderShell(env, meta, {
     email,

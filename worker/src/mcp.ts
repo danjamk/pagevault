@@ -16,6 +16,7 @@ import {
   updatePortalMembers,
 } from "./documents.js";
 import type { Env } from "./env.js";
+import { log } from "./log.js";
 import {
   type DocMeta,
   type Portal,
@@ -226,7 +227,7 @@ function buildServer(env: Env, origin: string): McpServer {
         // ⭐ The overwrite guard. An agent must not clobber a client deliverable in one
         // tool call — it has to come back and ask a human first.
         if (err instanceof Conflict) return text(err.summary(), true);
-        return toolError(err);
+        return toolError(err, "publish_document");
       }
     },
   );
@@ -272,7 +273,7 @@ function buildServer(env: Env, origin: string): McpServer {
         await putPortal(env, portal);
         return text(`Created portal "${portal.name}" (${portal.slug}, ${portal.kind}).`);
       } catch (err) {
-        return toolError(err);
+        return toolError(err, "create_portal");
       }
     },
   );
@@ -320,7 +321,7 @@ function buildServer(env: Env, origin: string): McpServer {
           ].join("\n"),
         );
       } catch (err) {
-        return toolError(err);
+        return toolError(err, "update_portal_members");
       }
     },
   );
@@ -363,7 +364,7 @@ function buildServer(env: Env, origin: string): McpServer {
           ].join("\n"),
         );
       } catch (err) {
-        return toolError(err);
+        return toolError(err, "mint_public_link");
       }
     },
   );
@@ -395,7 +396,7 @@ function buildServer(env: Env, origin: string): McpServer {
         }
         return text(`Public link revoked for "${result.meta.title}". The old /p/ URL is now dead.`);
       } catch (err) {
-        return toolError(err);
+        return toolError(err, "revoke_public_link");
       }
     },
   );
@@ -429,7 +430,7 @@ function buildServer(env: Env, origin: string): McpServer {
           ].join("\n"),
         );
       } catch (err) {
-        return toolError(err);
+        return toolError(err, "rotate_public_link");
       }
     },
   );
@@ -457,7 +458,7 @@ function buildServer(env: Env, origin: string): McpServer {
 
         return text(`Deleted "${meta.title}" from portal "${meta.portal}". This cannot be undone.`);
       } catch (err) {
-        return toolError(err);
+        return toolError(err, "revoke_document");
       }
     },
   );
@@ -493,7 +494,7 @@ function buildServer(env: Env, origin: string): McpServer {
         );
         return text(`Portals:\n${lines.join("\n")}`);
       } catch (err) {
-        return toolError(err);
+        return toolError(err, "list_portals");
       }
     },
   );
@@ -518,7 +519,7 @@ function buildServer(env: Env, origin: string): McpServer {
         if (docs.length === 0) return text("No documents found.");
         return text(docs.map(describe).join("\n\n"));
       } catch (err) {
-        return toolError(err);
+        return toolError(err, "list_documents");
       }
     },
   );
@@ -553,7 +554,7 @@ function buildServer(env: Env, origin: string): McpServer {
           ].join("\n"),
         );
       } catch (err) {
-        return toolError(err);
+        return toolError(err, "read_document");
       }
     },
   );
@@ -598,7 +599,7 @@ function buildServer(env: Env, origin: string): McpServer {
           ].join("\n"),
         );
       } catch (err) {
-        return toolError(err);
+        return toolError(err, "search_portal");
       }
     },
   );
@@ -643,10 +644,25 @@ const text = (body: string, isError = false) => ({
  * A thrown exception reaches the model as an opaque protocol failure it cannot act on. A
  * text result saying "several portals exist, ask the user which" is something it can.
  */
-function toolError(err: unknown) {
-  if (err instanceof BadRequest) return text(`Error (${err.code}): ${err.message}`, true);
-  if (err instanceof Misconfigured) return text(`Deployment error (${err.code}): ${err.message}`, true);
-  return text(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`, true);
+function toolError(err: unknown, tool: string) {
+  // The model gets the text; without this the operator gets nothing. Every failure funnels
+  // through here, so the tool name is threaded in from the call site rather than guessed.
+  //
+  // The level split is the useful part. A BadRequest is the model asking for something that
+  // does not exist or naming an ambiguous portal — expected traffic, and the tool
+  // description is supposed to steer it. The other two are the operator's problem: a
+  // Misconfigured means the deployment is broken, and an unexpected error means a bug.
+  if (err instanceof BadRequest) {
+    log("warn", "mcp_tool_rejected", { tool, code: err.code, error: err.message });
+    return text(`Error (${err.code}): ${err.message}`, true);
+  }
+  if (err instanceof Misconfigured) {
+    log("error", "mcp_tool_misconfigured", { tool, code: err.code, error: err.message });
+    return text(`Deployment error (${err.code}): ${err.message}`, true);
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  log("error", "mcp_tool_failed", { tool, error: message });
+  return text(`Unexpected error: ${message}`, true);
 }
 
 /**

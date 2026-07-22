@@ -72,6 +72,21 @@ This applies to the log stream regardless of how harmless a given token looks. T
 has to be structural, because the next route added will not remember that `/p/` tokens
 are permanent.
 
+**The rule binds PageVault, not Cloudflare.** Verified against the live deployment: the
+Worker's own log line carries no token, but every event in `wrangler tail` also carries a
+platform-supplied `event.request.url`, and `observability.enabled` is `true`
+(`wrangler.jsonc`), so those URLs persist to Workers Logs. A `/p/{token}` request lands
+there in full, on success as well as rejection. That is outside the Worker's reach — it
+is request metadata Cloudflare records before our code runs, and the only way to stop it
+would be to turn off observability entirely.
+
+The exposure is bounded rather than eliminated, and the bound is the account: anyone who
+can read the Worker's logs can already read its KV, so the marginal disclosure inside a
+single operator's own account is close to nothing. It stops being close to nothing if
+logs are ever Logpushed to a third party or someone is given log-only access. Either of
+those changes the analysis, and neither is true today. Anyone forking this should know
+the boundary is here rather than discover it from a tail session.
+
 **3. Deny events record the decision, not the subject's secrets.**
 
 A denial records what was asked for (portal, document), which rule refused it, and the
@@ -143,6 +158,11 @@ recordable, and the drift would show up as a privacy inconsistency rather than a
 - PageVault structurally cannot answer "who opened this public link." That is a real
   capability gap and it is the correct one — it follows from the routing topology, not
   from a setting someone could flip.
+- Capability URLs still reach Workers Logs via Cloudflare's own request metadata. The
+  Worker writes none, which is the part this project controls; the platform writes them
+  regardless. Turning on Logpush, or granting anyone log-only access, would turn a
+  bounded exposure into a real one and should be treated as a decision, not a config
+  change.
 - The operator holds an account-scoped analytics read token on their own machine. That
   credential is broader than anything the Worker has, and it stays outside the Worker's
   compromise surface.
