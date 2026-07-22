@@ -1,5 +1,6 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import type { Env } from "./env.js";
+import { type LogLevel, log } from "./log.js";
 import { normalizeEmail } from "./store.js";
 
 export interface Identity {
@@ -125,10 +126,20 @@ export async function identify(
   const aud = (audience === "docs" ? env.CF_ACCESS_AUD_DOCS : env.CF_ACCESS_AUD_ADMIN)?.trim();
 
   // Missing config → DENY. Never skip. An unconfigured deployment is a closed one.
-  if (!team || !aud) return null;
+  if (!team || !aud) {
+    log("error", "jwt_rejected", { audience, reason: "config_missing", team: !!team, aud: !!aud });
+    return null;
+  }
 
   const token = request.headers.get("Cf-Access-Jwt-Assertion");
-  if (!token) return null;
+  if (!token) {
+    // Every route that calls this sits behind an Access application, so Access should have
+    // injected the header. Its absence means the request reached the Worker around Access —
+    // a `workers.dev` subdomain left enabled, a preview URL, a bad route. Fails closed, but
+    // it should be loud: this is the shape of an authentication bypass attempt.
+    log("error", "jwt_rejected", { audience, reason: "header_absent" });
+    return null;
+  }
 
   try {
     const { payload } = await jwtVerify(token, getJWKS(team), {
@@ -140,11 +151,76 @@ export async function identify(
     });
 
     const email = typeof payload.email === "string" ? normalizeEmail(payload.email) : "";
-    if (!payload.sub || !email) return null;
+    if (!payload.sub || !email) {
+      log("error", "jwt_rejected", {
+        audience,
+        reason: "claims_incomplete",
+        hasSub: !!payload.sub,
+        hasEmail: !!email,
+      });
+      return null;
+    }
 
     return { email, sub: String(payload.sub) };
-  } catch {
+  } catch (err) {
+    const { reason, level } = classifyJwtFailure(err);
+    log(level, "jwt_rejected", {
+      audience,
+      reason,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
+  }
+}
+
+/**
+ * Why a JWT was refused — and, more usefully, **how many people it affects**.
+ *
+ * That is the whole point of this function. `ERR_JWT_EXPIRED` is one person whose session
+ * aged out; they bounce through Access and carry on, and nobody needs to know. A JWKS
+ * failure is *everyone, at once, until someone intervenes* — Cloudflare Access rotates its
+ * signing keys roughly every six weeks, and if the fetch fails or no `kid` matches, not one
+ * token verifies anywhere.
+ *
+ * Both of those used to be `catch { return null }`, which is how a total outage came to look
+ * exactly like one stale cookie. The level split is what makes `wrangler tail --status error`
+ * mean "your deployment is broken" rather than "someone's session expired."
+ */
+function classifyJwtFailure(err: unknown): { reason: string; level: LogLevel } {
+  const code =
+    typeof err === "object" && err !== null && "code" in err ? String((err as { code: unknown }).code) : "";
+
+  switch (code) {
+    // One user, expected, self-healing. Not an operator event.
+    case "ERR_JWT_EXPIRED":
+      return { reason: "expired", level: "warn" };
+
+    // A malformed assertion is a client or proxy problem, not a key problem.
+    case "ERR_JWT_INVALID":
+    case "ERR_JWS_INVALID":
+      return { reason: "malformed", level: "warn" };
+
+    // 🔴 Total lockout. Key rotation outran us, or the JWKS endpoint is unreachable.
+    case "ERR_JWKS_NO_MATCHING_KEY":
+      return { reason: "jwks_no_matching_key", level: "error" };
+    case "ERR_JWKS_TIMEOUT":
+      return { reason: "jwks_timeout", level: "error" };
+    case "ERR_JWKS_INVALID":
+    case "ERR_JWK_INVALID":
+      return { reason: "jwks_invalid", level: "error" };
+
+    // Wrong team or a forged token. Either way, not routine.
+    case "ERR_JWS_SIGNATURE_VERIFICATION_FAILED":
+      return { reason: "bad_signature", level: "error" };
+
+    // Issuer or audience mismatch — the first deploy of this Worker failed exactly here,
+    // with CF_TEAM_NAME carrying the full domain so the JWKS URL doubled it.
+    case "ERR_JWT_CLAIM_VALIDATION_FAILED":
+      return { reason: "claim_mismatch", level: "error" };
+
+    // Includes the JWKS fetch itself failing, which throws a plain network error.
+    default:
+      return { reason: code || "unknown", level: "error" };
   }
 }
 
