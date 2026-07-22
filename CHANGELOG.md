@@ -7,6 +7,14 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-07-22
+
+The Worker stops keeping secrets from its operator. Fifteen named events replace four, every
+authorization refusal is now visible, and Analytics Engine records which documents a client
+actually opened — governed by
+[ADR-015](docs/adr/ADR-015-what-a-view-record-contains.md), which decides once what either
+stream may contain rather than deciding it twice.
+
 ### Added
 - **Authorization and failure logging (#41).** The Worker emitted four events; it now emits
   fifteen. Every `canView`/`canViewPortal` denial, all four `/p/{token}` refusals, MCP tool
