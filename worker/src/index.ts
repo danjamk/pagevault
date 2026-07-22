@@ -8,6 +8,7 @@ import { handleAuthorize } from "./oauth.js";
 import { favicon, rootLanding } from "./pages.js";
 import { handlePortalRoute, handlePublicPortalRoute } from "./portal.js";
 import { getMeta, getPublicTokenTarget } from "./store.js";
+import { fingerprint, log } from "./log.js";
 import { handleRender, renderShell } from "./viewer.js";
 
 /**
@@ -168,24 +169,54 @@ export default {
  * unsandboxed** — a public artifact is more exposed, not less.
  */
 async function handlePublicToken(env: Env, token: string): Promise<Response> {
+  // All four refusals below are the same 404 to the caller — deliberately, since
+  // distinguishing them would tell a stranger which tokens once existed. But "the link you
+  // sent me doesn't work" is a support question, and until now all four looked identical
+  // from the inside too. They are separate events so the answer takes one tail, not a
+  // reconstruction. The token is fingerprinted, never logged: a /p/ token does not expire,
+  // it lives until rotated (ADR-015, decision 2).
+  const fp = await fingerprint(token);
+
   const id = await getPublicTokenTarget(env, token);
-  if (!id) return notFound();
+  if (!id) {
+    log("warn", "blocked_public_token_unknown", { token: fp });
+    return notFound();
+  }
 
   const meta = await getMeta(env, id);
-  if (!meta) return notFound();
+  if (!meta) {
+    // Not a visitor problem: a pub: key survived the document it points at. That is a KV
+    // inconsistency — a bug or a half-finished delete — and nothing else will report it.
+    log("error", "dangling_public_token", { token: fp, doc: id });
+    return notFound();
+  }
 
   // A rotated or revoked token is dead the moment the pub: key is deleted. But a doc
   // whose token was rotated may still have a *different* live token, so check that this
   // is the current one rather than trusting the lookup alone.
-  if (meta.publicToken !== token) return notFound();
+  if (meta.publicToken !== token) {
+    // The single most likely cause of "the link you gave me stopped working": it was
+    // rotated, and the client is holding the old one.
+    log("warn", "blocked_public_token_superseded", { token: fp, doc: id, portal: meta.portal });
+    return notFound();
+  }
 
   // ownerOnly is the one narrowing rule and it beats every grant, including this one.
   // A draft must not be readable just because a link was minted before it was marked.
-  if (meta.ownerOnly) return notFound();
+  if (meta.ownerOnly) {
+    log("warn", "blocked_public_token_owner_only", { token: fp, doc: id, portal: meta.portal });
+    return notFound();
+  }
 
   // A /p/ capability link is self-authorizing — anyone with the URL can open it — so the
   // share control belongs here.
-  return renderShell(env, meta, { email: null, noindex: true, shareable: true, pdfEnabled: !!env.BROWSER });
+  return renderShell(env, meta, {
+    email: null,
+    noindex: true,
+    shareable: true,
+    pdfEnabled: !!env.BROWSER,
+    surface: "link",
+  });
 }
 
 const notFound = () => new Response("Not found", { status: 404 });

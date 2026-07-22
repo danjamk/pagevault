@@ -24,6 +24,7 @@ Start with the question you came here to answer.
 - [`setup/prerequisites.md`](setup/prerequisites.md) — what you need before you start.
 - [`setup/connect-mcp.md`](setup/connect-mcp.md) — point Claude (web, Desktop, Code) at your MCP server.
 - [`setup/backup-and-restore.md`](setup/backup-and-restore.md) — export your state and put it back.
+- [`architecture.md` §12](architecture.md#12-operations--what-the-deployment-tells-you) — what the deployment logs, what it never logs, and how to read view tracking.
 
 ## How it was built and shipped
 
@@ -36,5 +37,3 @@ Start with the question you came here to answer.
 ## Contribute
 
 - [`../CONTRIBUTING.md`](../CONTRIBUTING.md) — the rules of the road, and the few that are non-negotiable.
-
-> An *operations* section — what's logged, what the free tier does and doesn't tell you, and the seat guardrail — is on the way ([#45](../../issues/45)).

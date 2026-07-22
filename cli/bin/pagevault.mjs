@@ -13,6 +13,7 @@ import { stdin, stdout, stderr } from "node:process";
 import { api, apiText, requireConfig, waitReadable, CONFIG_PATH, PvError } from "../lib/client.mjs";
 import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "../lib/format.mjs";
 import { buildExport } from "../lib/export.mjs";
+import { formatViews, queryViews } from "../lib/views.mjs";
 
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
@@ -57,6 +58,8 @@ async function main() {
       return remove(positional, flags);
     case "export":
       return exportTree(positional, flags);
+    case "views":
+      return views(flags);
     case "login":
       return login(flags);
     default:
@@ -374,11 +377,40 @@ Usage:
   pagevault sync-access [--reap] [--yes] [--json]  reconcile the Access viewer group with KV
   pagevault rm <id> [--yes]           delete the document (there is no undo)
   pagevault export [dir] [--portal s] [--include-drafts] [--zip]
+  pagevault views [--days 30] [--portal s] [--doc id] [--json]  which documents were opened
 
 Config: PAGEVAULT_URL / PAGEVAULT_API_TOKEN, or ~/.pagevault/config.json (via login).
 On success, publish/mint/rotate print only the URL to stdout:  pagevault mint <id> | pbcopy
 read --source prints the stored body to stdout:  pagevault read <id> --source > report.md
 Export writes a browsable folder (index.html + one folder per portal); its path is printed to stdout.`);
+}
+
+/**
+ * `pagevault views` — the one command that talks to Cloudflare rather than to a PageVault
+ * deployment. Analytics Engine's binding is write-only; reading needs an account-scoped token
+ * that the Worker deliberately does not hold (ADR-015, decision 6), which is also why there is
+ * no MCP equivalent. Documented exception to CLI/MCP parity.
+ */
+async function views(flags) {
+  const { loadContext, loadCloudToken } = await import("../lib/provision/context.mjs");
+  const ctx = loadContext();
+
+  let result;
+  try {
+    result = await queryViews(
+      { accountId: flags.account || ctx.accountId, token: process.env.CLOUDFLARE_API_TOKEN || loadCloudToken() },
+      { days: flags.days, portal: flags.portal, doc: flags.doc, limit: flags.limit },
+    );
+  } catch (err) {
+    // ViewsError messages are written to be read, not debugged. Re-wrap so the CLI prints the
+    // message plainly instead of a stack.
+    throw new PvError(err.message);
+  }
+
+  // The table is human output, so it goes to stderr like every other table here. --json is the
+  // pipe: `pagevault views --json | jq` should carry data and nothing else.
+  if (flags.json) return out(JSON.stringify(result, null, 2));
+  note(formatViews(result, null));
 }
 
 main().catch((err) => {

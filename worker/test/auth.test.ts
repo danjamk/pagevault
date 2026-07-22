@@ -270,3 +270,81 @@ describe("timingSafeEqual", () => {
     expect(timingSafeEqual("", "")).toBe(false);
   });
 });
+
+describe("identify — a total lockout must not look like one stale cookie", () => {
+  /**
+   * Access rotates its signing keys roughly every six weeks. If that rotation outruns us,
+   * or the JWKS endpoint is unreachable, *nobody* can log in — and until this split existed
+   * that produced the same silent `return null` as one person's session timing out. The
+   * levels are the alert: `error` means the deployment is broken, `warn` means it isn't.
+   */
+  let out: string[];
+  let err: string[];
+
+  beforeEach(() => {
+    out = [];
+    err = [];
+    vi.spyOn(console, "log").mockImplementation((line: string) => void out.push(line));
+    vi.spyOn(console, "error").mockImplementation((line: string) => void err.push(line));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const reasons = (lines: string[]) =>
+    lines.map((l) => JSON.parse(l)).filter((e) => e.event === "jwt_rejected");
+
+  it("an expired token is a warning — one user, self-healing", async () => {
+    expect(await identify(request(await mintToken({ expiresIn: "-1m" })), testEnv(), "docs")).toBeNull();
+
+    expect(reasons(out)).toMatchObject([{ level: "warn", reason: "expired" }]);
+    expect(err).toHaveLength(0);
+  });
+
+  it("🔴 a kid that matches no key in the JWKS is an error — this is everyone, at once", async () => {
+    const rotated = await mintToken({ key: attackerKey, kid: "rotated-away-kid" });
+
+    expect(await identify(request(rotated), testEnv(), "docs")).toBeNull();
+
+    expect(reasons(err)).toMatchObject([{ level: "error", reason: "jwks_no_matching_key" }]);
+    expect(out).toHaveLength(0);
+  });
+
+  it("🔴 an unreachable JWKS endpoint is an error, not silence", async () => {
+    const token = await mintToken();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("network failure");
+      }),
+    );
+
+    expect(await identify(request(token), testEnv(), "docs")).toBeNull();
+
+    expect(reasons(err)).toHaveLength(1);
+    expect(reasons(err)[0].level).toBe("error");
+  });
+
+  it("a token for another Access team reports a claim mismatch, not a bad signature", async () => {
+    const other = await mintToken({ issuer: "https://someoneelse.cloudflareaccess.com" });
+
+    expect(await identify(request(other), testEnv(), "docs")).toBeNull();
+
+    // The first real deploy of this Worker failed exactly here — CF_TEAM_NAME carried the
+    // full domain, so the JWKS URL doubled it — and presented as a bare "Not found".
+    expect(reasons(err)).toMatchObject([{ level: "error", reason: "claim_mismatch" }]);
+  });
+
+  it("🔴 a missing assertion header is an error — the request came around Access", async () => {
+    expect(await identify(request(), testEnv(), "docs")).toBeNull();
+
+    expect(reasons(err)).toMatchObject([{ level: "error", reason: "header_absent" }]);
+  });
+
+  it("unset Access config reports which half is missing", async () => {
+    expect(await identify(request(await mintToken()), testEnv({ CF_ACCESS_AUD_DOCS: "" }), "docs")).toBeNull();
+
+    expect(reasons(err)).toMatchObject([{ level: "error", reason: "config_missing", team: true, aud: false }]);
+  });
+});

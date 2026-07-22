@@ -75,6 +75,18 @@ export interface Env {
    */
   BROWSER?: Fetcher;
 
+  /**
+   * The Analytics Engine dataset that records document views (#91) — optional, exactly like
+   * BROWSER. Absent means this deployment opted out and `recordView` becomes a no-op; nothing
+   * else changes. There is no provisioning step: unlike a KV namespace there is no id to read
+   * back, because the dataset materializes on first write.
+   *
+   * Write-only from here. Reading requires an account-scoped `Account Analytics Read` token,
+   * which is strictly wider than the Access-group-scoped CF_API_TOKEN below — so it lives on
+   * the operator's machine and never in the Worker. See ADR-015, decision 6.
+   */
+  ANALYTICS?: AnalyticsEngineDataset;
+
   /** Secrets. */
   PAGEVAULT_API_TOKEN: string;
   /** Signs capability and console session tokens. See ADR-007. */

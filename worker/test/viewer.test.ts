@@ -211,7 +211,7 @@ describe("viewer chrome — download + share (#49)", () => {
   it("🔴 an Access-gated (non-shareable) shell hides share but keeps download", async () => {
     // A /v/ URL only opens for people already in the portal, so a share affordance there
     // would hand out a link that dead-ends at the Access wall. Download stays.
-    const secure = await renderShell(env, doc(), { email: "cto@realplus.com", noindex: true, shareable: false });
+    const secure = await renderShell(env, doc(), { email: "cto@realplus.com", noindex: true, shareable: false, surface: "portal" });
     const body = await secure.text();
     expect(body).not.toContain('id="share"');
     expect(body).toContain(">Download<");
@@ -244,14 +244,14 @@ describe("/render?pdf=1 — single-page PDF export (#50)", () => {
 
 describe("viewer chrome — PDF control (#50)", () => {
   it("shows the PDF button and grants connect-src 'self' only when PDF is enabled", async () => {
-    const res = await renderShell(env, doc(), { email: null, noindex: true, pdfEnabled: true });
+    const res = await renderShell(env, doc(), { email: null, noindex: true, pdfEnabled: true, surface: "link" });
     const body = await res.text();
     expect(body).toContain('id="pdf"');
     expect(res.headers.get("Content-Security-Policy")).toContain("connect-src 'self'");
   });
 
   it("🔴 hides the PDF button and keeps the tight CSP when PDF is disabled", async () => {
-    const res = await renderShell(env, doc(), { email: null, noindex: true, pdfEnabled: false });
+    const res = await renderShell(env, doc(), { email: null, noindex: true, pdfEnabled: false, surface: "link" });
     const body = await res.text();
     expect(body).not.toContain('id="pdf"');
     // No fetch means no reason to widen the shell's CSP.

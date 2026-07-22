@@ -1,5 +1,7 @@
+import { type ViewSurface, recordView } from "./analytics.js";
 import { mintCapability, verifyCapability } from "./capability.js";
 import type { Env } from "./env.js";
+import { fingerprint, log } from "./log.js";
 import { renderPdf } from "./pdf.js";
 import type { DocMeta } from "./store.js";
 import { getDoc, getMeta, getRawSource } from "./store.js";
@@ -67,7 +69,15 @@ export async function handleRender(request: Request, env: Env, id: string): Prom
   // capability for this one.
   const capability = await verifyCapability(env, cap, id);
   if (!capability) {
-    logBlocked("blocked_render_invalid_capability", request, { doc: id });
+    // The capability is fingerprinted, never logged. `verifyCapability` refuses a token
+    // that is valid but names a *different* document (capability.ts) — that token is still
+    // live for its own document, and logging it verbatim would make it replayable from the
+    // log. The fingerprint still tells you a retry loop is hammering one dead token.
+    log("warn", "blocked_render_invalid_capability", {
+      request,
+      doc: id,
+      cap: cap ? await fingerprint(cap) : "absent",
+    });
     return new Response("Not found", { status: 404 });
   }
 
@@ -123,7 +133,7 @@ export async function handleRender(request: Request, env: Env, id: string): Prom
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logBlocked("pdf_render_failed", request, { doc: id, error: message });
+      log("error", "pdf_render_failed", { request, doc: id, error: message });
       // Free tier is 10 minutes of browser time per day; a burst returns 429. Surface that as
       // its own status so the button can say "try again later" rather than a generic failure.
       const rateLimited = /\b429\b|rate.?limit|too many|quota|exceeded/i.test(message);
@@ -185,6 +195,14 @@ function pdfError(status: number, error: string): Response {
 export interface ShellOptions {
   /** The verified viewer, or null for an unauthenticated public view. */
   email: string | null;
+  /**
+   * Which door this view came through. Passed explicitly rather than inferred from
+   * `portal.kind`: `/v` only ever serves non-public portals today (it redirects public ones
+   * to `/pub`), so the kind *happens* to identify the surface — but that is a property of a
+   * redirect three functions away, and it feeds the one field that decides whether a
+   * viewer's email is recorded. See ADR-015, decision 1.
+   */
+  surface: ViewSurface;
   /** Where "back" goes. Absent on a `/p/` capability link — there is no collection. */
   backHref?: string;
   backLabel?: string;
@@ -222,6 +240,10 @@ export async function renderShell(
   if (!cap) {
     return new Response("Server misconfigured: PAGEVAULT_API_TOKEN is not set", { status: 500 });
   }
+
+  // After the mint, not before: a view that could not be served is not a view. This is the
+  // one place all three surfaces meet, which is why the hook is here and not on the routes.
+  recordView(env, meta, opts.surface, opts.email);
 
   // The shell's own script/style are nonced. A bug in artifact serving must not be able
   // to degrade the page that holds the capability token.
@@ -367,24 +389,6 @@ ${pdfScript}
   if (opts.noindex) headers["X-Robots-Tag"] = "noindex, nofollow";
 
   return new Response(html, { headers });
-}
-
-/**
- * Structured, named events. Cheap, and the first time something goes wrong you will be
- * glad they are here.
- */
-export function logBlocked(event: string, request: Request, extra: Record<string, unknown> = {}) {
-  console.log(
-    JSON.stringify({
-      level: "warn",
-      event,
-      timestamp: new Date().toISOString(),
-      method: request.method,
-      url: request.url,
-      origin: request.headers.get("Origin"),
-      ...extra,
-    }),
-  );
 }
 
 const esc = (s: string): string =>

@@ -407,7 +407,142 @@ Auth: bearer token today, which works in Claude Code. OAuth 2.1 is required for 
 hosted surfaces (claude.ai, Desktop, mobile) and is a **pre-launch** task, not a
 pre-validation one. See ADR-006.
 
-## 12. Explicit non-goals
+## 12. Operations — what the deployment tells you
+
+Two streams, and they answer different questions. Logs say *what was refused and why*.
+Analytics says *what was opened*. Neither is optional to understand, because between them
+they are the only view you have into a system that fails closed by design — and a system
+that fails closed silently is indistinguishable from one that is broken.
+
+What may be recorded in either stream is [ADR-015](adr/ADR-015-what-a-view-record-contains.md).
+
+### The log stream
+
+One line of JSON per event, stable names, straight into Cloudflare's pipeline.
+`worker/src/log.ts` is the only writer. `level: "error"` routes to `console.error`, so
+`wrangler tail --status error` means *this deployment is broken*, not *someone's session
+expired* — that split is the whole reason the levels exist.
+
+| Event | Level | What it means |
+|---|---|---|
+| `jwt_rejected` | warn / error | Why a token failed. `expired` and `malformed` are one user; the JWKS family, `bad_signature`, `claim_mismatch`, `config_missing` and `header_absent` are the deployment. |
+| `denied_cross_portal_document` | error | A portal was asked for a document it does not own. A 404 either way — but a *pattern* is someone walking ids across portals. |
+| `dangling_public_token` | error | A `pub:` key outlived its document. A KV inconsistency; nothing else reports it. |
+| `mcp_tool_failed` / `mcp_tool_misconfigured` | error | An MCP tool broke. The model used to get the text and the operator nothing. |
+| `pdf_render_failed` | error | Browser Run failed or hit its daily allocation. |
+| `denied_portal_index` / `denied_document_view` | warn | `canViewPortal` / `canView` said no. |
+| `blocked_public_token_*` | warn | Which of the four `/p/` refusals it was — unknown, superseded, or owner-only. |
+| `blocked_public_portal_route` | warn | `/pub` against a non-public portal. `exists: true` means someone guessed a real client's slug. |
+| `blocked_render_invalid_capability` | warn | A `/render` capability was absent, expired, or named another document. |
+| `blocked_api_request_invalid_origin` | warn | Cross-origin `/api` request refused. |
+
+**No credential is ever logged.** Not the capability, not the path it rides in — on
+`/p/{token}` the path *is* the credential, so `log()` derives nothing at all from the URL.
+Tokens appear as an 8-hex fingerprint, enough to recognise a retry loop against one dead
+token and useless for reconstructing it.
+
+> **The one boundary worth knowing.** Cloudflare attaches `event.request.url` to every event
+> itself, before our code runs, and `observability.enabled` is `true` — so a `/p/` URL does
+> reach Workers Logs through platform metadata regardless of what the Worker writes. Bounded
+> by the account: anyone who can read these logs can already read KV. It stops being bounded
+> the moment logs are Logpushed to a third party or someone is given log-only access. Treat
+> either as a decision, not a config change.
+
+### The view stream
+
+Analytics Engine, one data point per document open, written from `renderShell` — the single
+point all three surfaces pass through, and *after* the capability mint, because a view that
+could not be served is not a view. Deliberately not `/render`, which fires per iframe load
+and would count a refresh, a PDF export and a raw download as three more views of the same
+document.
+
+- **Optional.** No binding, no recording, nothing else changes. `make provision ANALYTICS=on|off`.
+- **Identity only where Access established it.** `/v/` records the verified email. `/pub/` and
+  `/p/` record none — not an IP, not a User-Agent. They have no Access application in front of
+  them, so there was never an identity to withhold.
+- **Retention is three months.** This is a rolling window, not a history. A nine-month
+  engagement outlives its own view data, and nothing in the UI should imply otherwise.
+- **Counts come from `sum(_sample_interval)`.** Analytics Engine samples under load; `count()`
+  under-reports by exactly the amount that still looks plausible. No count is stored, so the
+  wrong query cannot be written by accident.
+
+Read it with `make views` or `pagevault views [--days] [--portal] [--doc] [--json]`.
+
+**`views` is CLI-only, and that is the one documented exception to CLI/MCP parity.** The
+binding is write-only; reading needs an account-scoped `Account Analytics Read` token, which
+is strictly wider than the Access-group-scoped credential the Worker holds. Giving the Worker
+that token is the blast-radius widening ADR-002 exists to prevent — and the MCP server runs
+inside the Worker. So the Worker writes and the operator reads.
+
+### Retention, sampling, and how to read `make logs`
+
+**Workers Logs keeps 3 days on the free plan, 7 on paid.** No `logpush`, no `tail_consumers` —
+nothing older survives. Post-incident forensics past that window is not hard, it is impossible,
+so anything you need to keep must be copied out while it is still there.
+
+`observability.enabled` is `true` with no `head_sampling_rate`, which defaults to `1` — every
+invocation is logged, nothing is dropped. That is the right setting at this volume and it is the
+thing to revisit first if log volume ever becomes a cost.
+
+```bash
+make logs                       # everything
+make logs ERRORS=1              # only errors — the deployment-is-broken tier
+make logs SEARCH=denied_        # one event family
+make logs SEARCH=jwt_rejected JSON=1 | jq   # machine-readable
+```
+
+🔴 **An invocation is not a view.** Opening one document is *two* Worker invocations: the shell
+(`/v/:portal/:doc`), then the sandboxed iframe fetching `/render/:id`. Request counts in the
+Cloudflare dashboard run about double the human page-opens, and PDF export and raw download add
+more. This is exactly why view tracking hooks `renderShell` and not `/render` — but the
+dashboard's request graph has no such correction, so do not read it as traffic.
+
+### What the free tier does not tell you
+
+**Cloudflare will not notify you about any of this.** There are *zero* Workers notification types
+at any tier — no request-limit alert, no error-rate alert, no KV-quota alert, and no seat alert
+(§10). Every guardrail here is one you build. That is the single most important operational fact
+about running on this stack.
+
+The numbers worth knowing, all daily and all free-plan:
+
+| Resource | Limit |
+|---|---|
+| Worker requests | 100,000/day |
+| KV reads | 100,000/day |
+| KV **writes** | 1,000/day |
+| KV deletes | 1,000/day |
+| KV **lists** | 1,000/day (separate from reads — do not poll `list()` from the console) |
+| Analytics Engine writes | 100,000/day |
+| Analytics Engine queries | 10,000/day |
+
+A publish costs 2–3 KV writes. The write quota is the one that binds first, and it is why view
+tracking lives in Analytics Engine rather than a KV counter.
+
+### On fail-open, and why it is not the hole it looks like
+
+Exceeding the free daily request limit triggers a route-level fail-open/fail-closed toggle, and
+Cloudflare's docs recommend fail closed "for security-critical Workers." Read quickly, that
+sounds like *over quota → Worker bypassed → documents served unauthenticated*.
+
+It cannot do that here. Fail open means "behave as if no Worker is configured" — and on a Custom
+Domain **the Worker is the origin**. KV, the viewer shell and `/render` all live inside it, so
+bypassing the Worker does not skip `canView()` and serve the document; it removes the only thing
+that *has* the document. The result is a 1027 or a 522-class error, never an unauthorized read.
+The Pages analogue is the tell: there, fail open falls back to static assets because a real
+fallback target exists. A custom-domain Worker has no equivalent.
+
+Set the route to fail closed anyway — it costs nothing and the docs recommend it. It is
+dashboard-only (Settings → Domains & Routes); there is no wrangler key and no Routes API field.
+Do not write an ADR premised on fail-open serving unauthorized content, because it cannot.
+
+### What is still dark
+
+No rejection *rate*: denials are in the log stream and views are in Analytics, so the two have no
+shared denominator. No seat-count alerting — see §10 and #44. And the **default** fail mode for a
+quota-exceeded custom domain is undocumented; it is flagged here rather than guessed.
+
+## 13. Explicit non-goals
 
 No comments, reactions, or presence — sharehtml's lane, a Durable Objects project,
 and a client reading a report does not want to leave threaded replies on it. No

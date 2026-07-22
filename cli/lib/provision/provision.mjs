@@ -164,6 +164,66 @@ export async function provisionAccess(opts = {}) {
   info("  The daily free allocation (~10 min) is the only limit; past it /pdf returns 429 and the");
   console.log(`  ${c.dim("viewer's PDF button degrades off until it resets — https://developers.cloudflare.com/browser-rendering/platform/limits/")}`);
 
+  // --- Analytics Engine: ask once, remember, never hard-fail (#91) -----------
+  //
+  // 🔴 Unlike Browser Run, this one is NOT on by default, and unlike KV it cannot be created
+  // over the API — enabling it is a dashboard action on the account. Wrangler refuses the whole
+  // deploy if the binding is present and the product is off (error 10089), which lands at the
+  // very last step, after every Access app has been created. That is the worst place to fail,
+  // and a fork running `pagevault init` on a fresh account would hit it every time.
+  //
+  // So the binding is conditional and the answer is remembered. Off means the block is stripped
+  // from the generated config, ANALYTICS is absent, and `recordView` no-ops (env.ts, analytics.ts).
+  // View tracking is genuinely optional rather than nominally optional.
+  //
+  // There is no probe. The SQL API is the only available signal and its 403 is ambiguous: it is
+  // what you get when Analytics Engine is off, and equally what you get when the token simply
+  // lacks `Account Analytics Read`. Deploy-token scopes vary between accounts and forks, so
+  // reading 403 as "off" would silently strip view tracking from a deployment where it works.
+  // An answer we store beats a signal we cannot disambiguate.
+  const analyticsUrl = `https://dash.cloudflare.com/${account.id}/workers/analytics-engine`;
+  let analytics = opts.analytics ?? ctx.analytics;
+
+  if (analytics === undefined) {
+    if (isInteractive()) {
+      console.log();
+      info("View tracking (optional) records which documents each client opens.");
+      console.log(`  ${c.dim("Free — a separate quota from KV, so it never competes with publishing. Retention")}`);
+      console.log(`  ${c.dim("is 3 months, so it answers \"recently\", never \"ever\".")}`);
+      console.log();
+      console.log(`  ${c.dim("It must be enabled once on the account, in the dashboard:")}`);
+      console.log(`  ${c.bold(analyticsUrl)}`);
+      console.log();
+      // The dashboard flow is genuinely confusing: it opens on "Create Dataset", the only choice
+      // is "Create Blank Dataset", and then it asks for a name and a binding as if they were
+      // yours to invent. They are not — they have to match what the Worker config already
+      // declares. Creating the dataset is really just how the UI switches the product on.
+      console.log(`  ${c.dim("It opens on \"Create Dataset\" — choose Create Blank Dataset, then enter EXACTLY:")}`);
+      console.log(`      Dataset Name     ${c.bold("pagevault_views")}`);
+      console.log(`      Dataset Binding  ${c.bold("ANALYTICS")}`);
+      console.log(`  ${c.dim("Those must match what worker/wrangler.jsonc already declares. Ignore the wrangler")}`);
+      console.log(`  ${c.dim("snippet it offers afterward — yours is committed. Creating the dataset is just how")}`);
+      console.log(`  ${c.dim("the dashboard turns the product on.")}`);
+      console.log();
+      const rl = createInterface({ input: stdin, output: stdout });
+      const answer = (await rl.question(`  ${c.bold("Done that, and want view tracking? [y/N] ")}`)).trim().toLowerCase();
+      rl.close();
+      analytics = answer === "y" || answer === "yes";
+    } else {
+      // Non-interactive (CI, `--yes`) defaults OFF. A deploy that works beats a deploy that
+      // dies on an optional feature nobody asked for.
+      analytics = false;
+    }
+  }
+
+  if (analytics) {
+    ok("View tracking: on (Analytics Engine)");
+    info(`  If the deploy fails with error 10089, it is not enabled yet — ${analyticsUrl}`);
+  } else {
+    ok("View tracking: off — no Analytics Engine binding");
+    info(`  Turn it on later: enable it at ${c.dim(analyticsUrl)}, then \`make provision ANALYTICS=on\`.`);
+  }
+
   // --- One-time PIN: the zero-onboarding mechanism ---------------------------
   //
   // 🔴 A fresh Zero Trust org ships with "Sign in with Cloudflare" as its only login method,
@@ -311,6 +371,22 @@ export async function provisionAccess(opts = {}) {
       `"routes": [{ "pattern": "${host}", "custom_domain": true }],\n\n  "observability": {`,
     );
 
+  // View tracking off → drop the binding entirely, so wrangler never asks the account for a
+  // product it does not have. Matches the "a fork can delete this block" comment in the
+  // template; this just does it for you.
+  if (!analytics) {
+    generated = generated.replace(
+      /\n *\/\/ View tracking \(#91\)[\s\S]*?"analytics_engine_datasets": \[[\s\S]*?\n *\],\n/,
+      "\n",
+    );
+  }
+  if (generated.includes("analytics_engine_datasets") !== !!analytics) {
+    die(
+      `Failed to ${analytics ? "keep" : "strip"} the Analytics Engine binding in ${CONFIG_OUT}.`,
+      "The template's view-tracking block changed shape — see provision.mjs.",
+    );
+  }
+
   // A silent substitution miss would deploy a Worker with no KV and no audiences, surfacing as
   // "nothing works" rather than an error. Fail loud instead.
   for (const [key, value] of Object.entries({ kv: kvId, oauthKv: oauthKvId, team, host, audDocs, audAdmin, accountId: account.id, groupId: group.id })) {
@@ -327,7 +403,7 @@ export async function provisionAccess(opts = {}) {
   writeFileSync(CONFIG_OUT, generated);
   ok(`Wrote ${CONFIG_OUT} ${c.dim("(rung 3, gitignored)")}`);
 
-  saveContext({ ...loadContext(), host, ownerEmail, accountId: account.id, kvId, oauthKvId, team, audDocs, audAdmin, groupId: group.id });
+  saveContext({ ...loadContext(), host, ownerEmail, accountId: account.id, kvId, oauthKvId, team, audDocs, audAdmin, groupId: group.id, analytics });
 
   // Provision's job ends here. deploy runs `wrangler deploy` and sets the secrets — the bearer
   // (PAGEVAULT_API_TOKEN) and, next phase, the scoped runtime CF_API_TOKEN. No manual steps.
@@ -338,5 +414,9 @@ export async function provisionAccess(opts = {}) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await provisionAccess();
+  // The stored answer is sticky, so these are how you change your mind about view tracking
+  // without hand-editing .pagevault.json.
+  const argv = process.argv.slice(2);
+  const analytics = argv.includes("--analytics") ? true : argv.includes("--no-analytics") ? false : undefined;
+  await provisionAccess(analytics === undefined ? {} : { analytics });
 }

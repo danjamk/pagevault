@@ -114,6 +114,16 @@ export async function deploy(opts = {}) {
       die("This account still has no workers.dev subdomain.",
         "Odd — the step above should have registered one. Re-run `make deploy`.");
     }
+    // 10089 — the ANALYTICS binding is in the config but Analytics Engine is off on the
+    // account. Provisioning asks before adding the binding, so reaching here means it was
+    // turned back off, or the config was hand-edited. Either way the fix is two options, not
+    // a Cloudflare error code.
+    if (/10089/.test(output) || /enable Analytics Engine/i.test(output)) {
+      die(
+        "Analytics Engine is not enabled on this account, but the Worker config binds it.",
+        `Enable it at https://dash.cloudflare.com/${ctx.accountId ?? ""}/workers/analytics-engine and re-run, or drop view tracking with \`make provision ANALYTICS=off\`.`,
+      );
+    }
     die("Deploy failed — see wrangler's output above.");
   }
 

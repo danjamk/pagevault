@@ -7,6 +7,42 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **Authorization and failure logging (#41).** The Worker emitted four events; it now emits
+  fifteen. Every `canView`/`canViewPortal` denial, all four `/p/{token}` refusals, MCP tool
+  failures, and JWT rejections are named events with a level — `error` means the deployment is
+  broken, `warn` means a visitor did something ordinary. `worker/src/log.ts` is the only writer.
+- **JWT failures are classified by blast radius.** A JWKS fetch failure or key-rotation miss is
+  a total lockout and logs as an error; an expired token is one user and logs as a warning. Both
+  used to be the same silence.
+- **View tracking (#91).** Analytics Engine records which documents each client opens, read back
+  with `make views` or `pagevault views [--days] [--portal] [--doc] [--json]`. Optional — no
+  binding, no recording. Identity is recorded only on the Access-gated surface; `/pub/` and
+  `/p/` views record no viewer, no IP and no User-Agent, because those routes never had an
+  identity to withhold ([ADR-015](docs/adr/ADR-015-what-a-view-record-contains.md)).
+- **`docs/architecture.md` §12, Operations (#45)** — the event table, what is never logged, the
+  Workers Logs boundary, log retention and sampling, the free-tier quotas that actually bind, why
+  an invocation is not a view, and why fail-open cannot serve an unauthorized document. Plus the
+  fact that Cloudflare sends **zero** Workers notifications at any tier, so every guardrail here
+  is one you build.
+- **`make logs` takes filters** — `ERRORS=1`, `SEARCH=<text>`, `JSON=1`. A bare tail was mostly
+  request lines; there are fifteen named events to narrow to now.
+
+### Fixed
+- 🔴 **Capability tokens no longer reach the log.** `logBlocked` wrote `request.url`, and
+  `/render` takes its capability from `?cap=`. The fix removes the URL entirely rather than
+  sanitizing it: on `/p/{token}` the path *is* the credential, so a "safe path" would have been
+  the same bug. Tokens now appear as an 8-hex fingerprint.
+- **A deploy no longer fails on an account without Analytics Engine.** The binding is conditional
+  on a stored answer, so `pagevault init` on a fresh account cannot die on `error 10089` at the
+  last step. `make provision ANALYTICS=on|off`.
+
+### Notes
+- Cloudflare attaches the request URL to every log event itself, so `/p/` URLs still reach
+  Workers Logs through platform metadata regardless of what the Worker writes. Bounded by the
+  account. Enabling Logpush changes that, and should be treated as a decision.
+- Analytics Engine retains three months. View data is a rolling window, not a history.
+
 ## [0.14.0] — 2026-07-21
 
 The npm package becomes the installed product ([ADR-014](docs/adr/ADR-014-installed-product-not-thin-client.md)):
