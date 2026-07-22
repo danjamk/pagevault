@@ -10,7 +10,8 @@ import {
   getPortal,
   listDocs,
 } from "./store.js";
-import { logBlocked, renderShell } from "./viewer.js";
+import { log } from "./log.js";
+import { renderShell } from "./viewer.js";
 
 /**
  * `/v/{slug}` and `/v/{slug}/{id}` — the client-facing surface.
@@ -48,7 +49,9 @@ export async function handlePortalRoute(
   // bare "Not found" with nothing to go on. Never again: it is impossible for an
   // unauthenticated request to reach this path unless the deployment is broken, so say so.
   if (email === null) {
-    logBlocked("jwt_verification_failed_behind_access", request, { slug });
+    // `error`, not `warn`: this is a deployment fault, not a visitor fault, and it locks
+    // out every user at once. It should be reachable via `wrangler tail --status error`.
+    log("error", "jwt_verification_failed_behind_access", { request, slug });
     return misconfigured();
   }
 

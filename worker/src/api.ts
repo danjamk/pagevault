@@ -37,7 +37,7 @@ import {
   putMembers,
   putPortal,
 } from "./store.js";
-import { logBlocked } from "./viewer.js";
+import { log } from "./log.js";
 
 /**
  * `/api/*` — the HTTP surface.
@@ -70,7 +70,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
   // it — but this is the cheapest possible second wall, and it means a future endpoint that
   // gets its auth wrong is still not reachable from inside an artifact. See ADR-007.
   if (!originAllowed(request)) {
-    logBlocked("blocked_api_request_invalid_origin", request);
+    log("warn", "blocked_api_request_invalid_origin", { request });
     return fail(403, "forbidden_origin", "Cross-origin request refused");
   }
 

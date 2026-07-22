@@ -1,5 +1,6 @@
 import { mintCapability, verifyCapability } from "./capability.js";
 import type { Env } from "./env.js";
+import { log } from "./log.js";
 import { renderPdf } from "./pdf.js";
 import type { DocMeta } from "./store.js";
 import { getDoc, getMeta, getRawSource } from "./store.js";
@@ -67,7 +68,7 @@ export async function handleRender(request: Request, env: Env, id: string): Prom
   // capability for this one.
   const capability = await verifyCapability(env, cap, id);
   if (!capability) {
-    logBlocked("blocked_render_invalid_capability", request, { doc: id });
+    log("warn", "blocked_render_invalid_capability", { request, doc: id });
     return new Response("Not found", { status: 404 });
   }
 
@@ -123,7 +124,7 @@ export async function handleRender(request: Request, env: Env, id: string): Prom
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      logBlocked("pdf_render_failed", request, { doc: id, error: message });
+      log("error", "pdf_render_failed", { request, doc: id, error: message });
       // Free tier is 10 minutes of browser time per day; a burst returns 429. Surface that as
       // its own status so the button can say "try again later" rather than a generic failure.
       const rateLimited = /\b429\b|rate.?limit|too many|quota|exceeded/i.test(message);
@@ -367,24 +368,6 @@ ${pdfScript}
   if (opts.noindex) headers["X-Robots-Tag"] = "noindex, nofollow";
 
   return new Response(html, { headers });
-}
-
-/**
- * Structured, named events. Cheap, and the first time something goes wrong you will be
- * glad they are here.
- */
-export function logBlocked(event: string, request: Request, extra: Record<string, unknown> = {}) {
-  console.log(
-    JSON.stringify({
-      level: "warn",
-      event,
-      timestamp: new Date().toISOString(),
-      method: request.method,
-      url: request.url,
-      origin: request.headers.get("Origin"),
-      ...extra,
-    }),
-  );
 }
 
 const esc = (s: string): string =>
