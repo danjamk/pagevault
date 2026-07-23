@@ -7,7 +7,30 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
-## [0.17.0] — 2026-07-23
+## [0.18.0] — 2026-07-23
+
+Viewer and console UX, most of it found by using the portals on real work.
+
+### Added
+- **Copy-as-rich-text for markdown documents (#93).** The viewer offers a Copy control for
+  markdown docs that writes two clipboard flavors at once — the rendered HTML (paste into Google
+  Docs and headings, lists, tables and bold come through) and the original `.md` (paste into a
+  markdown editor). The shell fetches the bytes same-origin and hands them to the clipboard
+  opaque; it never renders the artifact in our document context (no `allow-same-origin`, no iframe
+  DOM read — ADR-007). HTML documents don't get it — they paste as a blank rectangle, and PDF
+  export (#50) covers that case.
+- **Client portal document rows** now show a document-type icon (Markdown vs HTML), a per-row
+  copy-link button, and clickable tags — clicking a tag filters the list by it. Tags moved onto
+  the meta line beside the date, under the summary.
+- **Refresh controls** on both the client portal and the admin console, to pick up documents
+  published out-of-band (from the CLI or an agent) since the page opened. In the console, refresh
+  keeps the selected portal rather than dropping back to the default (#92).
+- **Open the portal page** from the console portal header, the way a document row already opens
+  (public and restricted portals — a private portal has no browsable page).
+
+### Changed
+- The console footer's deploy timestamp renders in the operator's local time; the UTC value stays
+  as the no-JS fallback and in the title attribute.
 
 MCP polish, both items found by using the server on claude.ai rather than reading the code.
 

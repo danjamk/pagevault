@@ -251,12 +251,20 @@ function renderPortalPage(portal: Portal, docs: DocSummary[], isOwner: boolean):
   .wrap { max-width: 44rem; margin: 0 auto; }
   h1 { font-size: 1.75rem; margin: 0 0 .25rem; letter-spacing: -.01em; }
   .desc { color: var(--muted); margin: 0 0 2rem; }
+  .toolbar { display: flex; gap: .5rem; margin-bottom: 2rem; }
   .filter {
-    width: 100%; padding: .6rem .75rem; margin-bottom: 2rem;
+    flex: 1 1 auto; min-width: 0; padding: .6rem .75rem;
     border: 1px solid var(--border); border-radius: 6px; background: var(--surface);
     color: var(--ink); font: inherit; font-size: .9375rem;
   }
   .filter:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+  /* Refresh — reload to pick up documents published since the page opened. */
+  .refresh {
+    flex: 0 0 auto; margin-left: auto; display: inline-flex; align-items: center;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--muted); padding: 0 .7rem; cursor: pointer;
+  }
+  .refresh:hover { color: var(--accent); border-color: var(--accent); }
   h2 {
     font-size: .75rem; text-transform: uppercase; letter-spacing: .08em;
     color: var(--muted); font-weight: 600;
@@ -264,16 +272,32 @@ function renderPortalPage(portal: Portal, docs: DocSummary[], isOwner: boolean):
   }
   ul { list-style: none; margin: 0; padding: 0; }
   li { border-bottom: 1px solid var(--border); }
-  li a { display: block; padding: .9rem 0; text-decoration: none; color: inherit; }
-  li a:hover { background: var(--hover); }
+  li[hidden] { display: none; }
+  .rowmain { display: flex; align-items: flex-start; gap: .5rem; }
+  .rowmain:hover { background: var(--hover); }
+  .rowlink { flex: 1 1 auto; min-width: 0; display: block; padding: .9rem 0 .25rem; text-decoration: none; color: inherit; }
   .title { font-weight: 600; color: var(--accent); }
-  .summary { color: var(--muted); font-size: .9375rem; }
-  .row-meta { color: var(--muted); font-size: .8125rem; margin-top: .15rem; }
-  .tag {
-    display: inline-block; margin-left: .4rem; padding: .05rem .4rem;
-    background: var(--chip-bg); color: var(--chip-fg); border-radius: 3px;
-    font-size: .6875rem; font-weight: 600; letter-spacing: .04em;
+  /* Document-type mark: a subtle cue, tinted with the muted ink so it never competes with the title. */
+  .dicon { color: var(--muted); vertical-align: -2px; margin-right: .45rem; }
+  .summary { display: block; color: var(--muted); font-size: .9375rem; margin-top: .1rem; }
+  /* Share (copy link) — icon-only, quiet until hovered. */
+  .share {
+    flex: 0 0 auto; align-self: center; display: inline-flex; align-items: center;
+    background: none; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--muted); padding: .35rem .45rem; cursor: pointer;
   }
+  .share:hover { background: var(--surface); color: var(--accent); border-color: var(--accent); }
+  /* Date + tags share one line, under the summary. */
+  .row-meta {
+    display: flex; align-items: center; flex-wrap: wrap; gap: .4rem;
+    color: var(--muted); font-size: .8125rem; padding: 0 0 .9rem;
+  }
+  button.tag {
+    padding: .1rem .45rem; background: var(--chip-bg); color: var(--chip-fg);
+    border: 0; border-radius: 3px; font: inherit; font-size: .6875rem; font-weight: 600;
+    letter-spacing: .04em; cursor: pointer;
+  }
+  button.tag:hover { text-decoration: underline; filter: brightness(1.06); }
   .draft {
     display: inline-block; margin-left: .4rem; padding: .05rem .4rem;
     background: var(--draft-bg); color: var(--draft-fg); border-radius: 3px;
@@ -290,7 +314,10 @@ function renderPortalPage(portal: Portal, docs: DocSummary[], isOwner: boolean):
   <h1>${esc(portal.name)}</h1>
   ${portal.description ? `<p class="desc">${esc(portal.description)}</p>` : ""}
 
-  ${docs.length > 0 ? `<input class="filter" id="filter" type="search" placeholder="Filter by title or tag" autocomplete="off">` : ""}
+  <div class="toolbar">
+    ${docs.length > 0 ? `<input class="filter" id="filter" type="search" placeholder="Filter by title or tag" autocomplete="off">` : ""}
+    <button type="button" class="refresh" id="refresh" title="Refresh" aria-label="Refresh">${ICON_REFRESH}</button>
+  </div>
   ${empty}
   ${sections}
 
@@ -300,17 +327,42 @@ function renderPortalPage(portal: Portal, docs: DocSummary[], isOwner: boolean):
   // Client-side, because the corpus is small — fourteen documents, not fourteen thousand.
   // No index, no service, no request.
   const input = document.getElementById("filter");
-  if (input) {
-    input.addEventListener("input", () => {
-      const q = input.value.trim().toLowerCase();
-      for (const li of document.querySelectorAll("li")) {
-        li.hidden = q !== "" && !li.dataset.search.includes(q);
-      }
-      for (const section of document.querySelectorAll("section")) {
-        section.hidden = [...section.querySelectorAll("li")].every((li) => li.hidden);
-      }
-    });
+  const CHECK = ${JSON.stringify(ICON_CHECK)};
+
+  function applyFilter() {
+    const q = (input ? input.value : "").trim().toLowerCase();
+    for (const li of document.querySelectorAll("li")) {
+      li.hidden = q !== "" && !li.dataset.search.includes(q);
+    }
+    for (const section of document.querySelectorAll("section")) {
+      section.hidden = [...section.querySelectorAll("li")].every((li) => li.hidden);
+    }
   }
+  if (input) input.addEventListener("input", applyFilter);
+
+  document.addEventListener("click", (e) => {
+    // A tag click filters by that tag — dropped into the search box so it's visible and clearable.
+    const tag = e.target.closest(".tag");
+    if (tag && input) {
+      e.preventDefault();
+      input.value = tag.dataset.tag;
+      applyFilter();
+      input.focus();
+      return;
+    }
+    // A share click copies the document's absolute link. Clipboard needs no network — no connect-src.
+    const share = e.target.closest(".share");
+    if (share) {
+      e.preventDefault();
+      const url = new URL(share.dataset.share, location.origin).href;
+      const flash = () => { const o = share.innerHTML; share.innerHTML = CHECK; setTimeout(() => { share.innerHTML = o; }, 1200); };
+      if (navigator.clipboard) navigator.clipboard.writeText(url).then(flash, () => prompt("Copy this link:", url));
+      else prompt("Copy this link:", url);
+      return;
+    }
+    // Refresh — reload to pick up documents published since the page opened.
+    if (e.target.closest(".refresh")) location.reload();
+  });
 </script>
 </body>
 </html>`;
@@ -341,18 +393,52 @@ function renderRow(portal: Portal, doc: DocSummary): string {
   // into an Access login wall and burn a seat on a page that is deliberately public.
   const href = documentPath(portal, doc.id);
   const date = doc.createdAt.slice(0, 10);
-  const tags = (doc.tags ?? []).map((tag) => `<span class="tag">${esc(tag)}</span>`).join("");
+  const tagList = doc.tags ?? [];
+  // Tags are buttons, not spans: clicking one filters by it (the handler drops it into the search
+  // box). They sit OUTSIDE the row's <a>, so a tag click filters instead of opening the document.
+  const tags = tagList
+    .map((tag) => `<button type="button" class="tag" data-tag="${esc(tag)}">${esc(tag)}</button>`)
+    .join("");
   const draft = doc.ownerOnly ? `<span class="draft">draft</span>` : "";
-  const search = esc([doc.title, doc.summary ?? "", ...(doc.tags ?? [])].join(" ").toLowerCase());
+  const search = esc([doc.title, doc.summary ?? "", ...tagList].join(" ").toLowerCase());
 
   return `<li data-search="${search}">
-    <a href="${esc(href)}">
-      <span class="title">${esc(doc.title)}</span>${draft}${tags}
-      ${doc.summary ? `<div class="summary">${esc(doc.summary)}</div>` : ""}
-      <div class="row-meta">${esc(date)}</div>
-    </a>
+    <div class="rowmain">
+      <a class="rowlink" href="${esc(href)}">
+        <span class="title">${typeIcon(doc.sourceKind)}${esc(doc.title)}</span>${draft}
+        ${doc.summary ? `<span class="summary">${esc(doc.summary)}</span>` : ""}
+      </a>
+      <button type="button" class="share" data-share="${esc(href)}" title="Copy link" aria-label="Copy link">${ICON_SHARE}</button>
+    </div>
+    <div class="row-meta">
+      <span class="date">${esc(date)}</span>${tags}
+    </div>
   </li>`;
 }
+
+/**
+ * Document-type marks and the share glyph for the client portal. Inline SVG (no sprite, no
+ * webfont — the portal stays the client's work, not our product): a Markdown doc gets the
+ * Markdown mark, everything else the `</>` glyph. `currentColor` so they inherit `.dicon`.
+ */
+const ICON_MD =
+  `<svg class="dicon" width="15" height="10" viewBox="0 0 208 128" aria-hidden="true">` +
+  `<rect width="198" height="118" x="5" y="5" ry="10" fill="none" stroke="currentColor" stroke-width="12"/>` +
+  `<path fill="currentColor" d="M30 98V30h20l20 25 20-25h20v68H90V59L70 84 50 59v39zm125 0l-30-33h20V30h20v35h20z"/></svg>`;
+const ICON_HTML =
+  `<svg class="dicon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" ` +
+  `stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 8l-4 4 4 4M15 8l4 4-4 4"/></svg>`;
+const ICON_SHARE =
+  `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ` +
+  `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="2.6"/>` +
+  `<circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.3 10.8l7.4-4.5M8.3 13.2l7.4 4.5"/></svg>`;
+const ICON_CHECK =
+  `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" ` +
+  `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6"/></svg>`;
+const ICON_REFRESH =
+  `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ` +
+  `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 4v5h-5"/></svg>`;
+const typeIcon = (kind?: string): string => (kind === "markdown" ? ICON_MD : ICON_HTML);
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",

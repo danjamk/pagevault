@@ -114,6 +114,22 @@ describe("🔴 /admin — session token + strict CSP (ADR-004)", () => {
   });
 });
 
+describe("console — UI tweaks", () => {
+  it("ships a refresh path that re-fetches while keeping the selected portal (#92)", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain('id="i-refresh"'); // the refresh glyph
+    expect(body).toContain("async function refresh("); // the re-fetch that preserves `selected`
+    expect(body).toContain('a === "refresh"'); // wired into the action dispatch
+  });
+
+  it("offers an open-portal link and localizes the deploy timestamp", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain('id="i-open"'); // the open glyph
+    expect(body).toContain('title="Open the portal page"'); // the portal header Open control
+    expect(body).toContain("toLocaleString"); // UTC baked at deploy → shown in the operator's zone
+  });
+});
+
 describe("create-portal control (#43)", () => {
   it("renders the New portal button and a dialog with each kind explained at the point of choice", async () => {
     const body = await (await getAdmin(await adminJwt(OWNER))).text();

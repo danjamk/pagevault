@@ -188,6 +188,47 @@ describe("/v/{slug} — the portal index", () => {
     expect(body).toContain("draft");
   });
 
+  // ── The client-portal UX tweaks ─────────────────────────────────────────────
+  describe("document-row chrome", () => {
+    const PUB = "clubidx";
+    beforeEach(async () => {
+      await putPortal(env, portal(PUB, "public", "Club Index"));
+      await seedDoc(PUB, "mdauaaaaaaaa", {
+        sourceKind: "markdown",
+        title: "Trail Notes",
+        summary: "Three days on the loop.",
+        tags: ["hiking", "gear"],
+      });
+      await seedDoc(PUB, "htmlbbbbbbbb", { sourceKind: "html", title: "Rack Build", summary: "A quiet 12U rack.", tags: ["homelab"] });
+    });
+    const index = async () => (await SELF.fetch(`${HOST}/pub/${PUB}`)).text();
+
+    it("marks a markdown document with a different type icon than an HTML one", async () => {
+      const body = await index();
+      expect(body).toContain("dicon");
+      expect(body).toContain("208 128"); // the Markdown-mark viewBox — the .md rows
+      expect(body).toContain("M9 8l-4 4 4 4"); // the </> glyph — the HTML rows
+    });
+
+    it("renders the summary and a copy-link (share) control per row", async () => {
+      const body = await index();
+      expect(body).toContain("Three days on the loop.");
+      expect(body).toContain('class="share"');
+      expect(body).toContain(`data-share="/pub/${PUB}/mdauaaaaaaaa"`);
+    });
+
+    it("renders tags as filter buttons and wires the tag→search-box click", async () => {
+      const body = await index();
+      expect(body).toContain('<button type="button" class="tag" data-tag="hiking">hiking</button>');
+      expect(body).toContain('data-tag="gear"');
+      expect(body).toContain('closest(".tag")'); // clicking a tag drops it into the filter box
+    });
+
+    it("offers a refresh control to pick up out-of-band publishes (#92)", async () => {
+      expect(await index()).toContain('id="refresh"');
+    });
+  });
+
   it("404s an authenticated stranger — not 403, which would confirm the portal exists", async () => {
     const res = await SELF.fetch(`${HOST}/v/realplus`, { headers: await as(STRANGER) });
     expect(res.status).toBe(404);

@@ -272,6 +272,7 @@ function page(session: string, nonce: string, owner: string, version: string, de
   .dochead { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;
              padding:0 2px; }
   .dochead .h { display:flex; align-items:baseline; gap:10px; }
+  .dochead-act { display:flex; align-items:center; gap:10px; }
   .dochead h2 { font-size:16px; font-weight:600; letter-spacing:-0.3px; margin:0; color:var(--pv-ink); }
   .dochead .cnt { font-size:13px; color:var(--pv-muted); }
   .doclist { background:var(--pv-surface); border:1px solid var(--pv-border); border-radius:14px;
@@ -461,7 +462,7 @@ ${ICON_DEFS}
     <div class="side-foot">
       <span class="tagline">Self-hosted &middot; Cloudflare &middot; MIT</span>
       <span class="build">
-        <a href="${changelogUrl}" target="_blank" rel="noopener" title="Changelog">v${esc(version)}</a>${deployDate ? ` &middot; deployed ${deployDate}` : ""}
+        <a href="${changelogUrl}" target="_blank" rel="noopener" title="Changelog">v${esc(version)}</a>${deployedAt ? ` &middot; deployed <span data-utc="${esc(deployedAt)}" title="${esc(deployDate)}">${deployDate}</span>` : ""}
       </span>
     </div>
   </aside>
@@ -826,12 +827,17 @@ ${ICON_DEFS}
           : "Your team can browse this portal after signing in. Not forwardable to outsiders.") +
         '">' + ico("link") + 'Copy portal link</button>'
       : '';
+    // Open the portal page itself, the way a document row can be opened. Only where the index is
+    // reachable by its audience — a private portal has no browsable page to open (portalUrl null).
+    const openBtn = pShare
+      ? '<a class="btn sm" href="' + esc(pShare) + '" target="_blank" rel="noopener" title="Open the portal page">' + ico("open") + 'Open</a>'
+      : '';
     const editBtn = '<button class="btn sm" data-act="edit-portal" data-portal="' + esc(p.slug) + '" title="Edit name and description">' + ico("edit") + 'Edit</button>';
     const head =
       '<div class="phead"><div class="phead-top"><div class="min0">' +
         '<div class="titrow"><h1>' + esc(p.name) + '</h1><span class="slug mono">/' + esc(p.slug) + '</span></div>' +
         (p.description ? '<p>' + esc(p.description) + '</p>' : '') +
-      '</div><div class="base"><span class="lb">Base access</span>' + badge(r) + shareBtn + editBtn + '</div></div>' +
+      '</div><div class="base"><span class="lb">Base access</span>' + badge(r) + openBtn + shareBtn + editBtn + '</div></div>' +
       memberEditor(p) + '</div>';
 
     let list;
@@ -843,7 +849,10 @@ ${ICON_DEFS}
 
     app.innerHTML = head +
       '<div class="dochead"><div class="h"><h2>Documents</h2><span class="cnt">' + (docs ? docs.length : "") + '</span></div>' +
-      '<button class="btn" id="pub-here"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Upload to ' + esc(p.name) + '</button></div>' + list;
+      '<div class="dochead-act">' +
+        '<button class="btn sm" data-act="refresh" title="Re-fetch the document list — picks up anything published from the CLI or an agent since this loaded">' + ico("refresh") + 'Refresh</button>' +
+        '<button class="btn" id="pub-here"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Upload to ' + esc(p.name) + '</button>' +
+      '</div></div>' + list;
   }
 
   async function selectPortal(slug) {
@@ -857,6 +866,14 @@ ${ICON_DEFS}
       } catch (e) { DOCS[slug] = []; }
       if (selected === slug) renderMain();
     }
+  }
+
+  // Re-fetch from the server, keeping the selected portal (#92). load() re-reads the portal list
+  // (so a portal created out-of-band appears) and re-selects the current one; clearing its doc
+  // cache first forces the selected portal's documents to reload — the out-of-band-publish case.
+  async function refresh() {
+    if (selected) delete DOCS[selected];
+    await load();
   }
 
   async function load() {
@@ -940,6 +957,7 @@ ${ICON_DEFS}
       const a = actEl.dataset.act, id = actEl.dataset.id;
       try {
         if (a === "copy") { copyBtn(actEl); return; }
+        if (a === "refresh") { await refresh(); return; }
         if (a === "mint") {
           // Widening to the default reach — no confirm; it is the expected action (ADR-011).
           replaceItem(id, await patch(id, { makePublic: true })); return;
@@ -1216,6 +1234,13 @@ ${ICON_DEFS}
     }
   });
 
+  // Server timestamps are baked in UTC (ADR-010); show them in the operator's own zone. The
+  // UTC text stays as the no-JS fallback and lives on in the title attribute.
+  for (const el of document.querySelectorAll("[data-utc]")) {
+    const d = new Date(el.dataset.utc);
+    if (!isNaN(d)) el.textContent = d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  }
+
   load();
 </script>
 </body>
@@ -1261,4 +1286,6 @@ const ICON_DEFS = `<svg class="sprite" aria-hidden="true"><defs>
   <symbol id="i-signout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
   <symbol id="i-edit" viewBox="0 0 24 24"><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></symbol>
+  <symbol id="i-open" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6"/></symbol>
 </defs></svg>`;

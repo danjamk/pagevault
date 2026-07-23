@@ -281,6 +281,44 @@ export async function renderShell(
 </script>`
     : "";
 
+  // Copy-as-rich-text (#93). Markdown only: an HTML artifact with script-drawn charts pastes into
+  // a Doc as a blank rectangle — PDF export (#50) covers that case honestly. The shell fetches the
+  // bytes same-origin and hands them to the clipboard opaque; it never renders hostile markup in
+  // our document context (no same-origin token, no iframe DOM read — ADR-007). The parsing happens
+  // in the paste target's sandbox, where scripts are stripped anyway.
+  const canCopyRich = meta.sourceKind === "markdown";
+  const copyBtn = canCopyRich ? `<button class="ctl" id="copy" type="button">Copy</button>` : "";
+  const copyScript = canCopyRich
+    ? `<script nonce="${nonce}">
+  (function () {
+    var b = document.getElementById("copy");
+    if (!b) return;
+    var htmlUrl = ${JSON.stringify(src)}, mdUrl = ${JSON.stringify(downloadHref)}, label = b.textContent;
+    // Re-type each body into a Blob whose MIME matches the ClipboardItem key: the rendered HTML
+    // comes back as text/html, but the raw markdown downloads as octet-stream, and a strict
+    // clipboard rejects a mismatch. .text() never renders — it is bytes, not a DOM.
+    function flavor(url, mime) {
+      return fetch(url).then(function (r) { if (!r.ok) throw new Error("copy"); return r.text(); })
+        .then(function (t) { return new Blob([t], { type: mime }); });
+    }
+    b.addEventListener("click", function () {
+      if (b.disabled) return;
+      if (!navigator.clipboard || !window.ClipboardItem) {
+        b.textContent = "Unsupported"; setTimeout(function () { b.textContent = label; }, 1400); return;
+      }
+      b.disabled = true; b.textContent = "Copying…";
+      // 🔴 Safari: construct the ClipboardItem SYNCHRONOUSLY inside the gesture, with a Promise<Blob>
+      // per flavor. Awaiting a fetch before this loses the user-gesture context and the write fails.
+      var item = new ClipboardItem({ "text/html": flavor(htmlUrl, "text/html"), "text/plain": flavor(mdUrl, "text/plain") });
+      navigator.clipboard.write([item]).then(
+        function () { b.textContent = "Copied"; },
+        function () { b.textContent = "Copy failed"; }
+      ).finally(function () { setTimeout(function () { b.disabled = false; b.textContent = label; }, 1400); });
+    });
+  })();
+</script>`
+    : "";
+
   const pdfBtn = opts.pdfEnabled ? `<button class="ctl" id="pdf" type="button">PDF</button>` : "";
   // The button fetches the PDF (one render — never a plain link that would re-render on retry),
   // shows a generating state for the cold-launch latency, and turns a 429/failure into a
@@ -353,6 +391,7 @@ export async function renderShell(
     <span class="meta">${esc(new Date(meta.updatedAt).toISOString().slice(0, 10))}</span>
     <a class="ctl" href="${esc(downloadHref)}" download>Download</a>
     ${pdfBtn}
+    ${copyBtn}
     ${shareBtn}
   </div>
 </header>
@@ -363,6 +402,7 @@ export async function renderShell(
   title="${esc(meta.title)}"></iframe>
 ${shareScript}
 ${pdfScript}
+${copyScript}
 </body>
 </html>`;
 
@@ -373,10 +413,10 @@ ${pdfScript}
       `style-src 'nonce-${nonce}'`,
       `script-src 'nonce-${nonce}'`,
       "frame-src 'self'",
-      // Only the PDF button needs to reach our origin (to fetch the render). Added just for it,
-      // and only to our own origin — the artifact is in the iframe (opaque origin) and cannot
-      // use this. See #50.
-      ...(opts.pdfEnabled ? ["connect-src 'self'"] : []),
+      // The PDF button (#50) and the markdown Copy control (#93) both fetch from our own origin —
+      // the PDF render, and the two clipboard flavors. Added only when one of them is present, and
+      // only to 'self': the artifact is in the iframe (opaque origin) and cannot use this.
+      ...(opts.pdfEnabled || canCopyRich ? ["connect-src 'self'"] : []),
       "form-action 'none'",
       "frame-ancestors 'none'",
       "base-uri 'none'",
