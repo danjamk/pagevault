@@ -259,6 +259,31 @@ describe("viewer chrome — PDF control (#50)", () => {
   });
 });
 
+describe("viewer chrome — copy-as-rich-text (#93)", () => {
+  it("shows the Copy control and grants connect-src 'self' for a markdown document", async () => {
+    const res = await renderShell(env, doc({ sourceKind: "markdown" }), { email: null, noindex: true, pdfEnabled: false, surface: "link" });
+    const body = await res.text();
+    expect(body).toContain('id="copy"');
+    expect(body).toContain(">Copy<");
+    // The copy handler fetches both flavors same-origin, so the shell must allow connect-src 'self'
+    // even with PDF disabled (#93).
+    expect(res.headers.get("Content-Security-Policy")).toContain("connect-src 'self'");
+  });
+
+  it("🔴 hides the Copy control for an HTML document — it would paste as a blank rectangle", async () => {
+    const res = await renderShell(env, doc({ sourceKind: "html" }), { email: null, noindex: true, pdfEnabled: false, surface: "link" });
+    const body = await res.text();
+    expect(body).not.toContain('id="copy"');
+    // No copy control and no PDF → nothing fetches, so the CSP stays tight.
+    expect(res.headers.get("Content-Security-Policy")).not.toContain("connect-src");
+  });
+
+  it("🔴 the copy control never introduces allow-same-origin (ADR-007)", async () => {
+    const res = await renderShell(env, doc({ sourceKind: "markdown" }), { email: null, noindex: true, pdfEnabled: true, surface: "link" });
+    expect(await res.text()).not.toContain("allow-same-origin");
+  });
+});
+
 describe("🔴 /render — the response headers ARE the sandbox", () => {
   // These assertions are not decoration. They are what stops someone "cleaning up" a
   // header they don't understand.
