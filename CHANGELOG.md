@@ -7,6 +7,34 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-07-23
+
+MCP hardening. The remote server closes the last three gaps between "good" and
+"reference-quality": it refuses a foreign `Origin`, it returns machine-readable results
+so an agent stops re-parsing IDs out of prose, and documents are now addressable as
+Resources — the user-attachable half of *the collection reads back*. Governed by
+[ADR-016](docs/adr/ADR-016-documents-as-mcp-resources.md).
+
+### Added
+- **Structured tool output (#81).** The five chain tools — `list_portals`, `list_documents`,
+  `read_document`, `search_portal`, `publish_document` — declare an `outputSchema` and return
+  `structuredContent` (the id and a ready-to-open `url` as fields) beside their unchanged prose.
+  The `url` respects the portal kind (`/pub/` vs `/v/`) so an agent never hands out a link that
+  would burn an Access seat on a public document. Emitted as JSON Schema 2020-12 (SEP-1613).
+- **Documents as MCP Resources (#82, ADR-016).** Every document is addressable at
+  `pagevault://<portal>/<id>` through a resource template; the read reuses the same read path the
+  tools do, and `list_documents`/`search_portal` return `resource_link` handles into the space. A
+  URI whose portal does not match where the document lives is refused. Shipping is gated on
+  verifying a non-Desktop host renders the primitive — the code is present and tested; the
+  per-surface claim waits on the live check (#95).
+
+### Fixed
+- **Foreign `Origin` on `/mcp` is refused with 403 (DNS-rebinding, MCP 2025-11-25 MUST).** The
+  check runs ahead of authentication, so a rebound browser holding a real credential is still
+  refused; a request with no `Origin` (Claude Code, the connector infrastructure) is allowed, as
+  it must be. Not exploitable today — nothing on `/mcp` authenticates by cookie (ADR-004) — but a
+  spec MUST and defense in depth.
+
 ## [0.15.0] — 2026-07-22
 
 The Worker stops keeping secrets from its operator. Fifteen named events replace four, every
