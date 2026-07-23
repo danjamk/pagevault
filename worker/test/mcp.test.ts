@@ -48,6 +48,27 @@ async function callTool(name: string, args: Record<string, unknown> = {}): Promi
   return content.map((c) => c.text).join("\n");
 }
 
+/**
+ * The full tool result, so a test can read `structuredContent` (#81) as well as the prose.
+ *
+ * 🔴 A load-bearing side effect: the SDK validates `structuredContent` against the tool's
+ * `outputSchema` before replying, and a non-error success that omits it becomes a JSON-RPC
+ * *error* — at which point `result()` returns undefined and the `.structuredContent` read
+ * throws. So every one of these calls is also an assertion that the schema was honoured.
+ */
+async function callToolFull(
+  name: string,
+  args: Record<string, unknown> = {},
+): Promise<{ text: string; structured: Record<string, unknown> }> {
+  const res = await rpc("tools/call", { name, arguments: args });
+  const payload = await result(res);
+  const content = payload["content"] as { type: string; text: string }[];
+  return {
+    text: content.map((c) => c.text).join("\n"),
+    structured: payload["structuredContent"] as Record<string, unknown>,
+  };
+}
+
 async function seedPortals() {
   const now = "2026-01-01T00:00:00.000Z";
   await putPortal(env, { slug: "realplus", name: "RealPlus", kind: "restricted", createdAt: now, updatedAt: now });
@@ -220,6 +241,163 @@ describe("/mcp — protocol", () => {
 
     // Every tool has a human-readable title.
     for (const t of tools) expect(typeof t.title, t.name).toBe("string");
+  });
+});
+
+describe("⭐ structured tool output — the read→publish chain is machine-readable (#81)", () => {
+  it("tools/list declares outputSchema on exactly the five chain tools, and not the others", async () => {
+    const payload = await result(await rpc("tools/list"));
+    const tools = payload["tools"] as { name: string; outputSchema?: Record<string, unknown> }[];
+    const withSchema = tools
+      .filter((t) => t.outputSchema)
+      .map((t) => t.name)
+      .sort();
+
+    expect(withSchema).toEqual([
+      "list_documents",
+      "list_portals",
+      "publish_document",
+      "read_document",
+      "search_portal",
+    ]);
+
+    // The emitted schema is an object schema — the shape a 2020-12 host expects (SEP-1613).
+    const read = tools.find((t) => t.name === "read_document")!;
+    expect(read.outputSchema?.["type"]).toBe("object");
+    expect(read.outputSchema?.["properties"]).toBeTruthy();
+  });
+
+  it("publish_document returns id + url + created as fields, not just prose", async () => {
+    const { text, structured } = await callToolFull("publish_document", { title: "Q3", html: "<h1>x</h1>" });
+
+    expect(structured["created"]).toBe(true);
+    expect(structured["portal"]).toBe("default");
+    expect(structured["public"]).toBe(false);
+    expect(structured["ownerOnly"]).toBe(false);
+    // The url an agent hands the user, no scraping — and it agrees with the prose.
+    expect(structured["url"]).toMatch(/\/v\/default\/[a-z2-9]{12}$/);
+    expect(text).toContain(structured["url"] as string);
+    // The id joins straight to read_document, no regex over the prose.
+    expect(await callToolFull("read_document", { id: structured["id"] as string })).toBeTruthy();
+  });
+
+  it("publish_document reports created:false when it overwrites in place", async () => {
+    await callTool("publish_document", { title: "Q3", html: "<h1>v1</h1>" });
+    const { structured } = await callToolFull("publish_document", {
+      title: "Q3",
+      html: "<h1>v2</h1>",
+      confirm: true,
+    });
+    expect(structured["created"]).toBe(false);
+  });
+
+  it("publish_document surfaces the public URL scheme for a public portal", async () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    await putPortal(env, { slug: "openhouse", name: "Open", kind: "public", createdAt: now, updatedAt: now });
+
+    const { structured } = await callToolFull("publish_document", {
+      title: "Flyer",
+      html: "<h1>x</h1>",
+      portal: "openhouse",
+    });
+    // A public-portal document lives at /pub/, never /v/ — handing out /v/ would burn an Access seat.
+    expect(structured["url"]).toMatch(/\/pub\/openhouse\/[a-z2-9]{12}$/);
+  });
+
+  it("read_document carries the source, the true byte size, and the truncation flag", async () => {
+    const { structured: pub } = await callToolFull("publish_document", {
+      title: "Doc",
+      html: "<h1>hello</h1>",
+      summary: "a summary",
+    });
+    const { structured } = await callToolFull("read_document", { id: pub["id"] as string });
+
+    expect(structured["source"]).toContain("<h1>hello</h1>");
+    expect(structured["summary"]).toBe("a summary");
+    expect(structured["truncated"]).toBe(false);
+    expect(structured["sourceKind"]).toBe("html");
+    expect(typeof structured["bytes"]).toBe("number");
+  });
+
+  it("read_document flags truncation and still reports the full byte size", async () => {
+    const { structured: pub } = await callToolFull("publish_document", {
+      title: "Huge",
+      html: `<h1>x</h1>${"y".repeat(200 * 1024)}`,
+    });
+    const { structured } = await callToolFull("read_document", { id: pub["id"] as string });
+
+    expect(structured["truncated"]).toBe(true);
+    // bytes is the ORIGINAL size, not the truncated slice — so an agent knows the payload is partial.
+    expect(structured["bytes"] as number).toBeGreaterThan(100 * 1024);
+  });
+
+  it("list_documents returns each document's id and opening url", async () => {
+    await callTool("publish_document", { title: "A", html: "<h1>a</h1>" });
+    const { structured } = await callToolFull("list_documents");
+
+    const docs = structured["documents"] as Record<string, unknown>[];
+    expect(docs).toHaveLength(1);
+    expect(docs[0]!["id"]).toMatch(/^[a-z2-9]{12}$/);
+    expect(docs[0]!["url"]).toMatch(/\/v\/default\/[a-z2-9]{12}$/);
+    expect(docs[0]!["public"]).toBe(false);
+    expect(docs[0]!["sourceKind"]).toBe("html");
+  });
+
+  it("search_portal returns matches with where-it-matched, machine-readable", async () => {
+    await callTool("publish_document", {
+      title: "Architecture",
+      html: "<h1>x</h1><p>We chose Debezium.</p>",
+      summary: "CDC approach",
+    });
+    const { structured } = await callToolFull("search_portal", { portal: "default", query: "debezium" });
+
+    expect(structured["portal"]).toBe("default");
+    expect(structured["query"]).toBe("debezium");
+    const matches = structured["matches"] as Record<string, unknown>[];
+    expect(matches).toHaveLength(1);
+    expect(matches[0]!["matched"]).toContain("body");
+    expect(matches[0]!["url"]).toMatch(/\/v\/default\/[a-z2-9]{12}$/);
+  });
+
+  it("list_portals returns slug/kind/documentCount as fields", async () => {
+    await seedPortals();
+    await callTool("publish_document", { title: "Q3", html: "<h1>x</h1>", portal: "realplus" });
+
+    const { structured } = await callToolFull("list_portals");
+    const portals = structured["portals"] as Record<string, unknown>[];
+    const realplus = portals.find((p) => p["slug"] === "realplus")!;
+
+    expect(realplus["kind"]).toBe("restricted");
+    expect(realplus["documentCount"]).toBe(1);
+  });
+});
+
+describe("🔴 structured output — the empty-result paths must not throw a protocol error (#81)", () => {
+  // The SDK trap: with an outputSchema set, a NON-error success that omits structuredContent
+  // becomes a JSON-RPC error, not a tool result. The empty cases are the ones easiest to miss —
+  // so each is pinned. callToolFull throws if the reply came back as an error instead.
+
+  it("list_portals with no portals returns an empty array, not an error", async () => {
+    const { text, structured } = await callToolFull("list_portals");
+    expect(text).toContain("No portals yet.");
+    expect(structured["portals"]).toEqual([]);
+  });
+
+  it("list_documents with no documents returns an empty array, not an error", async () => {
+    const { text, structured } = await callToolFull("list_documents");
+    expect(text).toContain("No documents found.");
+    expect(structured["documents"]).toEqual([]);
+  });
+
+  it("search_portal with no matches returns an empty array, not an error", async () => {
+    await callTool("publish_document", { title: "A", html: "<h1>a</h1>" });
+    const { text, structured } = await callToolFull("search_portal", { portal: "default", query: "nothingmatchesthis" });
+
+    expect(text).toContain("No matches");
+    expect(structured["matches"]).toEqual([]);
+    // The query and portal still come back, so an agent can report what it searched.
+    expect(structured["query"]).toBe("nothingmatchesthis");
+    expect(structured["portal"]).toBe("default");
   });
 });
 

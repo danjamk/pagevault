@@ -19,6 +19,7 @@ import type { Env } from "./env.js";
 import { log } from "./log.js";
 import {
   type DocMeta,
+  type DocSummary,
   type Portal,
   deleteDoc,
   deletePublicToken,
@@ -160,6 +161,50 @@ const INSTRUCTIONS = [
   "   URL. That needs confirm: true, and you must show the user what is being replaced first.",
 ].join("\n");
 
+/**
+ * Structured tool output (#81, mcp-best-practices.md §4).
+ *
+ * `list_documents → search_portal → read_document → publish_document` is a chain an agent runs
+ * programmatically. Prose forces it to re-parse an id out of text at each hop, so these five
+ * tools declare an `outputSchema` and return `structuredContent` beside the prose — the id and
+ * a ready-to-open `url` as fields, not something to scrape. The prose block stays exactly as it
+ * was: this ADDS a machine payload, it does not replace the readable one.
+ *
+ * 🔴 The SDK trap this must never spring: when a tool declares `outputSchema`, any NON-error
+ * success return that omits `structuredContent` becomes a *protocol* error (validateToolOutput
+ * in the SDK) — the very failure §"errors as results" exists to prevent. So every success path
+ * of these five, including the empty ones (`No documents found.`, `No matches…`), returns
+ * `structured(...)`. Error paths still use `text(..., true)`: `isError` results are exempt.
+ *
+ * The schemas are plain zod-4 shapes; the SDK emits them as JSON Schema 2020-12 (SEP-1613), the
+ * same path the input schemas already take. `mcp.test.ts` validates the emitted shape.
+ */
+const PORTAL_KIND = z.enum(["private", "restricted", "public"]);
+const SOURCE_KIND = z.enum(["html", "markdown"]);
+
+/** One document, as an agent-consumable record. `url` opens it; `id` joins to read_document. */
+const DOC_OUT_SHAPE = {
+  id: z.string(),
+  portal: z.string(),
+  title: z.string(),
+  summary: z.string().optional(),
+  url: z.string(),
+  ownerOnly: z.boolean(),
+  public: z.boolean(),
+  sourceKind: SOURCE_KIND,
+  tags: z.array(z.string()).optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  bytes: z.number(),
+};
+
+const PORTAL_OUT_SHAPE = {
+  slug: z.string(),
+  name: z.string(),
+  kind: PORTAL_KIND,
+  documentCount: z.number(),
+};
+
 function buildServer(env: Env, origin: string): McpServer {
   // The version a client sees in serverInfo is the deployed build, not a hardcoded string —
   // baked at deploy (ADR-010).
@@ -231,6 +276,17 @@ function buildServer(env: Env, origin: string): McpServer {
               "absolute https:// or data: URIs; there are no separate assets.",
           ),
       },
+      // The id + url the next step needs, machine-readable (#81). `created` false = replaced in place.
+      outputSchema: {
+        id: z.string(),
+        portal: z.string(),
+        title: z.string(),
+        url: z.string(),
+        created: z.boolean(),
+        ownerOnly: z.boolean(),
+        public: z.boolean(),
+        sharedWith: z.array(z.string()).optional(),
+      },
     },
     async (args) => {
       try {
@@ -253,16 +309,27 @@ function buildServer(env: Env, origin: string): McpServer {
         const syncNote = sync ? groupSyncNote(sync) : [];
 
         const base = baseUrl(env, origin);
-        return text(
+        const url = `${base}${documentPath(portal, meta.id)}`;
+        return structured(
           [
             `${created ? "Published" : "Updated in place"}: ${meta.title}`,
-            `URL:    ${base}${documentPath(portal, meta.id)}`,
+            `URL:    ${url}`,
             `Portal: ${meta.portal}`,
             ...(meta.ownerOnly ? ["Draft:  owner-only. The client cannot see this."] : []),
             ...(meta.extraEmails ? [`Shared: ${meta.extraEmails.join(", ")}`] : []),
             ...(created ? [] : ["", "Anyone holding the existing link now sees the new version."]),
             ...syncNote,
           ].join("\n"),
+          {
+            id: meta.id,
+            portal: meta.portal,
+            title: meta.title,
+            url,
+            created,
+            ownerOnly: meta.ownerOnly,
+            public: !!meta.publicToken,
+            ...(meta.extraEmails ? { sharedWith: meta.extraEmails } : {}),
+          },
         );
       } catch (err) {
         // ⭐ The overwrite guard. An agent must not clobber a client deliverable in one
@@ -521,19 +588,27 @@ function buildServer(env: Env, origin: string): McpServer {
       title: "List portals",
       annotations: { readOnlyHint: true, openWorldHint: false },
       description: "List the client portals. Use this when you need to know which clients exist.",
+      outputSchema: { portals: z.array(z.object(PORTAL_OUT_SHAPE)) },
     },
     async () => {
       try {
         const portals = await listPortals(env);
-        if (portals.length === 0) return text("No portals yet.");
+        if (portals.length === 0) return structured("No portals yet.", { portals: [] });
 
-        const lines = await Promise.all(
-          portals.map(async (p) => {
-            const docs = await listDocs(env, p.slug);
-            return `  ${p.slug.padEnd(16)} ${p.kind.padEnd(11)} ${docs.length} document(s)  ${p.name}`;
-          }),
+        const rows = await Promise.all(
+          portals.map(async (p) => ({ p, count: (await listDocs(env, p.slug)).length })),
         );
-        return text(`Portals:\n${lines.join("\n")}`);
+        const lines = rows.map(
+          ({ p, count }) => `  ${p.slug.padEnd(16)} ${p.kind.padEnd(11)} ${count} document(s)  ${p.name}`,
+        );
+        return structured(`Portals:\n${lines.join("\n")}`, {
+          portals: rows.map(({ p, count }) => ({
+            slug: p.slug,
+            name: p.name,
+            kind: p.kind,
+            documentCount: count,
+          })),
+        });
       } catch (err) {
         return toolError(err, "list_portals");
       }
@@ -550,6 +625,7 @@ function buildServer(env: Env, origin: string): McpServer {
         portal: z.string().optional().describe("Omit to list across all portals."),
         tag: z.string().optional(),
       },
+      outputSchema: { documents: z.array(z.object(DOC_OUT_SHAPE)) },
     },
     async (args) => {
       try {
@@ -557,8 +633,16 @@ function buildServer(env: Env, origin: string): McpServer {
           .filter((d) => !args.tag || d.tags?.includes(args.tag))
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-        if (docs.length === 0) return text("No documents found.");
-        return text(docs.map(describe).join("\n\n"));
+        if (docs.length === 0) return structured("No documents found.", { documents: [] });
+
+        // One list() to resolve each document's portal kind for its URL — a document can span any
+        // portal here. It is a single call per invocation, never per-document, so it stays clear of
+        // the KV list quota (1000/day). See store.ts on why kind is not on the DocSummary.
+        const base = baseUrl(env, origin);
+        const byslug = new Map((await listPortals(env)).map((p) => [p.slug, p]));
+        return structured(docs.map(describe).join("\n\n"), {
+          documents: docs.map((d) => docOut(d, docUrl(base, d.portal, d.id, byslug.get(d.portal) ?? null))),
+        });
       } catch (err) {
         return toolError(err, "list_documents");
       }
@@ -577,6 +661,21 @@ function buildServer(env: Env, origin: string): McpServer {
         "engagement you can ask what was decided, and the answer is in here.",
       ].join("\n"),
       inputSchema: { id: z.string() },
+      // `source` is what the prose shows — truncated when the doc is large; `bytes` is the true
+      // size, so `truncated: true` + `bytes` together tell an agent the payload is partial (#81).
+      outputSchema: {
+        id: z.string(),
+        portal: z.string(),
+        title: z.string(),
+        summary: z.string().optional(),
+        sourceKind: SOURCE_KIND,
+        url: z.string(),
+        source: z.string(),
+        truncated: z.boolean(),
+        bytes: z.number(),
+        createdAt: z.string(),
+        updatedAt: z.string(),
+      },
     },
     async (args) => {
       try {
@@ -584,7 +683,8 @@ function buildServer(env: Env, origin: string): McpServer {
         if (!result) throw new BadRequest("not_found", `No such document: ${args.id}`);
 
         const { meta, source, truncated } = result;
-        return text(
+        const url = docUrl(baseUrl(env, origin), meta.portal, meta.id, await getPortal(env, meta.portal));
+        return structured(
           [
             `# ${meta.title}`,
             `portal: ${meta.portal} · published: ${meta.createdAt.slice(0, 10)} · updated: ${meta.updatedAt.slice(0, 10)}`,
@@ -593,6 +693,19 @@ function buildServer(env: Env, origin: string): McpServer {
             ``,
             source,
           ].join("\n"),
+          {
+            id: meta.id,
+            portal: meta.portal,
+            title: meta.title,
+            ...(meta.summary ? { summary: meta.summary } : {}),
+            sourceKind: meta.sourceKind,
+            url,
+            source,
+            truncated,
+            bytes: meta.bytes,
+            createdAt: meta.createdAt,
+            updatedAt: meta.updatedAt,
+          },
         );
       } catch (err) {
         return toolError(err, "read_document");
@@ -620,6 +733,18 @@ function buildServer(env: Env, origin: string): McpServer {
         portal: z.string().describe("Which client. Required — ask the user if you are unsure."),
         query: z.string(),
       },
+      // Every hit carries where it matched — the same signal the prose surfaces, so an agent can
+      // rank or explain a result without re-reading the doc (#81).
+      outputSchema: {
+        portal: z.string(),
+        query: z.string(),
+        matches: z.array(
+          z.object({
+            ...DOC_OUT_SHAPE,
+            matched: z.array(z.enum(["title", "summary", "tag", "body"])),
+          }),
+        ),
+      },
     },
     async (args) => {
       try {
@@ -627,10 +752,16 @@ function buildServer(env: Env, origin: string): McpServer {
         const hits = await searchPortal(env, portal.slug, args.query);
 
         if (hits.length === 0) {
-          return text(`No matches for "${args.query}" in portal "${portal.slug}".`);
+          return structured(`No matches for "${args.query}" in portal "${portal.slug}".`, {
+            portal: portal.slug,
+            query: args.query,
+            matches: [],
+          });
         }
 
-        return text(
+        // All hits are in this one resolved portal, so its kind builds every URL — no per-hit read.
+        const base = baseUrl(env, origin);
+        return structured(
           [
             `${hits.length} match(es) for "${args.query}" in "${portal.slug}":`,
             ``,
@@ -638,6 +769,14 @@ function buildServer(env: Env, origin: string): McpServer {
             ``,
             `Use read_document to read one.`,
           ].join("\n"),
+          {
+            portal: portal.slug,
+            query: args.query,
+            matches: hits.map((hit) => ({
+              ...docOut(hit.doc, `${base}${documentPath(portal, hit.doc.id)}`),
+              matched: hit.matched,
+            })),
+          },
         );
       } catch (err) {
         return toolError(err, "search_portal");
@@ -678,6 +817,49 @@ const text = (body: string, isError = false) => ({
   content: [{ type: "text" as const, text: body }],
   ...(isError ? { isError: true } : {}),
 });
+
+/**
+ * A success result carrying BOTH the prose block and the machine payload (#81).
+ *
+ * The prose is unchanged from what the tool returned before; `structuredContent` is the new
+ * half. There is no `isError` variant on purpose — an error is `text(msg, true)`, and error
+ * results are exempt from output-schema validation, so they must not carry structuredContent.
+ */
+const structured = (body: string, structuredContent: Record<string, unknown>) => ({
+  content: [{ type: "text" as const, text: body }],
+  structuredContent,
+});
+
+/**
+ * A `DocSummary` as a structured-output record. `public`/`sourceKind` are normalized to always
+ * present (the listing omits them at their common value to save KV metadata bytes; an agent
+ * reading the field should not have to know that), while `summary`/`tags` stay optional — absent
+ * means none, which is information, not a default worth inventing.
+ */
+const docOut = (doc: DocSummary, url: string): Record<string, unknown> => ({
+  id: doc.id,
+  portal: doc.portal,
+  title: doc.title,
+  ...(doc.summary ? { summary: doc.summary } : {}),
+  url,
+  ownerOnly: doc.ownerOnly,
+  public: doc.public ?? false,
+  sourceKind: doc.sourceKind ?? "html",
+  ...(doc.tags?.length ? { tags: doc.tags } : {}),
+  createdAt: doc.createdAt,
+  updatedAt: doc.updatedAt,
+  bytes: doc.bytes,
+});
+
+/**
+ * The `/v/` or `/pub/` URL for a document whose portal we may or may not have resolved. Prefer
+ * the real `Portal` (its `kind` decides the route); fall back to the private-style `/v/` path
+ * only when the portal record is unexpectedly missing, so a URL is always produced.
+ */
+const docUrl = (base: string, portalSlug: string, id: string, portal: Portal | null): string =>
+  portal
+    ? `${base}${documentPath(portal, id)}`
+    : `${base}/v/${encodeURIComponent(portalSlug)}/${encodeURIComponent(id)}`;
 
 /**
  * Errors come back as tool results, not exceptions.

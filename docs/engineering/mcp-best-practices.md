@@ -23,18 +23,19 @@ Full reference list at the bottom.
 
 The server is already above the median on the parts people usually get wrong — request
 isolation, auth posture, errors-as-results, and description quality. Two of the four gaps
-between "good" and "reference-quality" are now closed (#80, 0.12.0); two remain, in
-leverage order:
+between "good" and "reference-quality" are now closed (#80, 0.12.0; #81); one remains:
 
 1. ~~**Tool annotations** — we ship none.~~ ✅ **Done (#80).** All tools carry
    `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint` + a human `title`.
 2. ~~**Server `instructions`** — unset.~~ ✅ **Done (#80).** The three cross-cutting rules
    (portal boundary, capability links, publish-overwrite) are stated once at `initialize`
    and de-duplicated out of the per-tool descriptions.
-3. **Structured tool output** — everything is prose; the read→publish chain re-parses IDs.
+3. ~~**Structured tool output** — everything is prose; the read→publish chain re-parses IDs.~~
+   ✅ **Done (#81).** The five chain tools return `structuredContent` (id + opening `url` as
+   fields) beside the unchanged prose.
 4. **Resources** — documents are addressable content we expose only through tools.
 
-The sequenced work that closes the remaining two is at the end.
+The sequenced work that closes the last one is at the end.
 
 ---
 
@@ -128,12 +129,20 @@ conforming to it, and SHOULD *also* serialize a readable `text` block for backwa
 for the model to reason over. Use structured output when something downstream parses fields;
 use prose when the result is just for the model to read. Best-in-class does both.
 
-**Where we stand.** ⚠️ Everything is hand-formatted prose. That is fine for a human-in-the-loop
-read, but `list_documents` → `search_portal` → `read_document` → `publish_document` is a chain
-an agent runs programmatically, and prose forces it to re-parse IDs out of text at each hop.
-Add `outputSchema` + `structuredContent` to the four read tools and `publish_document` (so the
-returned id/URL is machine-readable), and **keep the existing prose text block** — the point is
-to add the structured payload, not replace the readable rendering we already have.
+**Where we stand.** ✅ **Done (#81).** The four read tools and `publish_document` declare an
+`outputSchema` and return `structuredContent` beside the prose — the id and a ready-to-open
+`url` as fields, so the chain no longer re-parses IDs out of text. The prose block is unchanged.
+Three things worth recording so they are not re-litigated:
+
+- **The empty-result paths return structured content too.** The SDK makes a non-error success
+  that omits `structuredContent` a *protocol* error (`validateToolOutput`) — exactly the failure
+  §"errors as results" avoids. So `No documents found.` / `No matches…` return an empty array,
+  not bare prose. `mcp.test.ts` pins each. Error paths stay `isError` and are exempt.
+- **`url` respects the portal kind** — `/pub/` for a public portal, `/v/` otherwise — so an agent
+  never hands out a `/v/` link that would burn an Access seat on a deliberately public document.
+  `read_document` and `list_documents` resolve kind with one extra read (never per-document).
+- **`read_document` reports `bytes` (true size) alongside a possibly-truncated `source`**, so
+  `truncated: true` + `bytes` together tell an agent the payload is partial.
 
 ### 5. Resources — addressable content, not just model-invoked tools
 
@@ -225,25 +234,26 @@ Recording these so they are decisions, not oversights:
 | Tool design / naming | ✅ Meets | prefix only if collisions appear |
 | **Tool annotations** | ✅ Meets (#80) | done in 0.12.0 |
 | **Server `instructions`** | ✅ Meets (#80) | done in 0.12.0 |
-| **Structured tool output** | ⚠️ Prose-only | **P3** |
+| **Structured tool output** | ✅ Meets (#81) | done |
 | **Resources** | ⚠️ Tools-only | **P4 (ADR-gated)** |
 | Pagination / prompts / elicitation / Tasks | ⏭️ Skipped | recorded above |
 
 ## Sequenced work
 
-P1 and P2 shipped in #80 (0.12.0) — `registerTool`, annotations, and server `instructions`, all
-in `worker/src/mcp.ts`. Two remain, in leverage order:
+P1–P3 shipped (#80 in 0.12.0, #81). One remains:
 
 1. ✅ **MCP polish — annotations + server instructions (P1 + P2).** Done (#80): migrated to
    `registerTool`, set the annotation table above, added `instructions`, de-duplicated the
    cross-cutting rules out of the tool descriptions.
-2. **Structured tool output (P3).** `outputSchema` + `structuredContent` on the four read tools
-   and `publish_document`, keeping the existing prose blocks.
+2. ✅ **Structured tool output (P3).** Done (#81): `outputSchema` + `structuredContent` on the
+   four read tools and `publish_document`, prose blocks unchanged, empty-result paths pinned.
 3. **Documents as MCP Resources (P4).** ADR first (the trade-off is real), then implement
    `pagevault://<portal>/<id>` + a resource template. On-thesis; part of the #73 parity story.
 
-`#76` (comprehensive MCP tests) trails all three: it should assert the annotations, validate the
-structured schemas, and cover the three auth MUSTs flagged in §6.
+`#76` (comprehensive MCP tests) trails these: it should assert the annotations, validate the
+structured schemas, and cover the two remaining auth MUSTs flagged in §6 (Origin is now closed).
+`#95` (live acceptance protocol) is the deployed-surface companion — it exercises the same tools
+over real OAuth against the shipped bundle.
 
 ---
 
