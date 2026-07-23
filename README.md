@@ -173,7 +173,7 @@ The MCP server runs inside your Worker — there is nothing extra to host.
 
 Add your Worker as a connector on claude.ai, Desktop, or mobile — OAuth 2.1, and you
 sign in with your own Access identity. Claude Code uses a bearer token. Same server,
-same eleven tools, every surface.
+same twelve tools, every surface.
 
 Tools carry annotations, so a host knows which are safe to auto-run and which need a
 confirmation first. Full walkthrough:

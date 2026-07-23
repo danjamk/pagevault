@@ -177,6 +177,15 @@ const INSTRUCTIONS = [
 const PORTAL_KIND = z.enum(["private", "restricted", "public"]);
 const SOURCE_KIND = z.enum(["html", "markdown"]);
 
+/**
+ * Where releases are published for the canonical `pagevault` npm package (#98). Hardcoded to
+ * upstream on purpose: the update check compares against the package an operator installs, not
+ * against whatever repo a given deployment was built from. A fork that republishes under its own
+ * npm name would point this at its own releases — one constant to change, in keeping with
+ * single-operator infra you fork rather than configure.
+ */
+const RELEASES_URL = "https://github.com/danjamk/pagevault/releases/latest";
+
 /** One document, as an agent-consumable record. `url` opens it; `id` joins to read_document. */
 const DOC_OUT_SHAPE = {
   id: z.string(),
@@ -244,7 +253,11 @@ function buildServer(env: Env, origin: string): McpServer {
         html: z
           .string()
           .describe(
-            "The complete, self-contained document body (HTML, or Markdown if sourceKind is markdown). Inline all CSS and JS, and embed " +
+            "Pass the document VERBATIM and in full — never a placeholder, an ellipsis, a summary, " +
+              "or a '[content continues]' stub. PageVault stores exactly these bytes and serves them " +
+              "unchanged; a stub publishes a stub. The result reports the stored byte count — confirm " +
+              "it matches the document you sent. " +
+              "The complete, self-contained document body (HTML, or Markdown if sourceKind is markdown). Inline all CSS and JS, and embed " +
               "images as data: URIs — PageVault stores only this one HTML blob and hosts no " +
               "separate assets. An external https:// image loads, but it adds a live dependency " +
               "and phones home: for a private document the third-party host learns who opened it " +
@@ -272,12 +285,14 @@ function buildServer(env: Env, origin: string): McpServer {
           ),
       },
       // The id + url the next step needs, machine-readable (#81). `created` false = replaced in place.
+      // `bytes` is the stored size, so the model can confirm a full doc landed — not a stub (#99).
       outputSchema: {
         id: z.string(),
         portal: z.string(),
         title: z.string(),
         url: z.string(),
         created: z.boolean(),
+        bytes: z.number(),
         ownerOnly: z.boolean(),
         public: z.boolean(),
         sharedWith: z.array(z.string()).optional(),
@@ -310,6 +325,8 @@ function buildServer(env: Env, origin: string): McpServer {
             `${created ? "Published" : "Updated in place"}: ${meta.title}`,
             `URL:    ${url}`,
             `Portal: ${meta.portal}`,
+            // The stored size, so a stub is obvious at a glance — no read_document round-trip (#99).
+            `Bytes:  ${meta.bytes}`,
             ...(meta.ownerOnly ? ["Draft:  owner-only. The client cannot see this."] : []),
             ...(meta.extraEmails ? [`Shared: ${meta.extraEmails.join(", ")}`] : []),
             ...(created ? [] : ["", "Anyone holding the existing link now sees the new version."]),
@@ -321,6 +338,7 @@ function buildServer(env: Env, origin: string): McpServer {
             title: meta.title,
             url,
             created,
+            bytes: meta.bytes,
             ownerOnly: meta.ownerOnly,
             public: !!meta.publicToken,
             ...(meta.extraEmails ? { sharedWith: meta.extraEmails } : {}),
@@ -778,6 +796,64 @@ function buildServer(env: Env, origin: string): McpServer {
         );
       } catch (err) {
         return toolError(err, "search_portal");
+      }
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // Diagnostics
+  //
+  // "What am I connected to, and is it current?" The version is on the wire at initialize
+  // (serverInfo.version), but that is protocol metadata the model cannot report — only a tool
+  // RESULT reaches it. So an operator running a test connector and a prod connector side by side
+  // cannot tell them apart from inside a chat without leaving to curl /health. This surfaces the
+  // same values /health already serves (public, unauthenticated — zero new disclosure), and
+  // doubles as a lightweight check-for-updates the model drives. See #98. Read-only.
+  // -------------------------------------------------------------------------
+  server.registerTool(
+    "server_info",
+    {
+      title: "Server info",
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      description: [
+        "Report the running PageVault deployment: its version, host, and when it was deployed.",
+        "",
+        "Use this to confirm WHICH deployment you are connected to (test vs. prod) and whether it is",
+        "current. To check for updates, compare `releaseVersion` against the latest release at",
+        "`releasesUrl`. If the deployment is behind, tell the operator their version vs. the latest,",
+        "offer to summarize what changed (from the release notes), and mention the update path:",
+        "`npm update -g pagevault && pagevault upgrade`. If you cannot fetch the latest release, say",
+        "so rather than guessing — do not assume it is up to date, and do not assume it is behind.",
+      ].join("\n"),
+      outputSchema: {
+        version: z.string(),
+        releaseVersion: z.string(),
+        host: z.string(),
+        deployedAt: z.string().nullable(),
+        releasesUrl: z.string(),
+      },
+    },
+    async () => {
+      try {
+        // Mirrors /health (index.ts): one source of truth, baked at deploy (ADR-010).
+        const version = env.PAGEVAULT_VERSION || "unknown";
+        // `<version>+<shortsha>` → the clean semver, so a client compares versions without parsing
+        // build metadata (which, per semver, does not affect precedence anyway).
+        const releaseVersion = version.split("+")[0] || "unknown";
+        const host = baseUrl(env, origin);
+        const deployedAt = env.PAGEVAULT_DEPLOYED_AT || null;
+
+        return structured(
+          [
+            `PageVault ${version}`,
+            `Host:     ${host}`,
+            `Deployed: ${deployedAt ?? "unknown"}`,
+            `Releases: ${RELEASES_URL}`,
+          ].join("\n"),
+          { version, releaseVersion, host, deployedAt, releasesUrl: RELEASES_URL },
+        );
+      } catch (err) {
+        return toolError(err, "server_info");
       }
     },
   );
