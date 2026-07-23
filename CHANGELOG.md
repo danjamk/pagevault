@@ -7,6 +7,28 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.19.1] — 2026-07-23
+
+### Added
+- **Install-path guidance and an agent runbook (#103).** The README now presents the three ways to
+  stand PageVault up — npm, `git clone`, or hand the runbook to your LLM. `docs/setup/cli-reference.md`
+  documents every command, flag, and environment variable. `docs/setup/ai-guided-setup.md` is a setup
+  runbook written *for an assistant* to walk a non-expert through deployment — a stable URL you paste
+  to your LLM; it picks npm or clone and guides from there.
+
+### Fixed
+- **`PAGEVAULT_HOME` now isolates the login config too.** `config.json` follows `PAGEVAULT_HOME` the
+  way `.pagevault.json` and `.env.local` already did, so one machine can hold several deployments
+  without them colliding over `~/.pagevault/config.json`.
+
+### Changed
+- **Overhauled the npm package page**, which still described the pre-ADR-014 product ("a thin HTTP
+  client… no local state") the package no longer is. Rewrote `cli/README.md` to the installed product
+  — `init`, portals, the remote MCP server, the operator commands — and the package metadata with it:
+  a `description` and `keywords` that surface the MCP surface, `homepage` pointed at the product page,
+  an `author` field, and the **`LICENSE` now shipped inside the tarball** (`build-bundle.mjs` copies
+  the repo-root license into the package at pack time).
+
 ## [0.19.0] — 2026-07-23
 
 The installed CLI reaches parity with `make` for operating a deployment (#102): an install can now
