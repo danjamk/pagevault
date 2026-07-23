@@ -12,10 +12,11 @@ import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import {
   c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, isInteractive, cfApi, cfAccounts, cfErr, slug,
-  writeEnvLocalVar, fromEnv, acct, shortId, banner, chooseBearer, generatedConfigPath,
+  writeEnvLocalVar, fromEnv, acct, shortId, banner, chooseBearer, generatedConfigPath, RUNNING_FROM_REPO,
 } from "./context.mjs";
 import { provisionAccess } from "./provision.mjs";
 import { writeTier0Config } from "./tier0.mjs";
+import { saveLoginConfig } from "../client.mjs";
 
 const CONFIG_OUT = generatedConfigPath();
 
@@ -163,8 +164,15 @@ export async function deploy(opts = {}) {
   console.log();
   const bearer = chooseBearer({ hasSecret, provided: fromEnv("PAGEVAULT_API_TOKEN"), interactive: isInteractive() });
 
+  // The bearer we end up with in plaintext, if any — used just below to write the installed CLI's
+  // login config. Set only on a known-good state (the secret is live and this value is it).
+  let bearerValue;
+
   if (bearer.action === "skip") {
     ok("PAGEVAULT_API_TOKEN is already set — reused, not rotated.");
+    // Worker already has it; the plaintext isn't on the Worker (secrets are write-only), but a
+    // re-deploy from the same install has it in .env.local — enough to (re)write the login config.
+    bearerValue = fromEnv("PAGEVAULT_API_TOKEN");
   } else if (bearer.action === "fail") {
     die("No PAGEVAULT_API_TOKEN on the Worker, and none provided, in a non-interactive deploy.", [
       "  This looks like a CI deploy into a fresh Worker. Minting a random bearer here would strand it",
@@ -174,9 +182,12 @@ export async function deploy(opts = {}) {
     ]);
   } else if (bearer.action === "set") {
     const put = await setBearer(bearer.value);
-    put.ok
-      ? ok("PAGEVAULT_API_TOKEN set from the environment — your existing CLI / MCP bearer, unchanged.")
-      : warn(`Couldn't set PAGEVAULT_API_TOKEN (${cfErr(put.errors)}).`);
+    if (put.ok) {
+      ok("PAGEVAULT_API_TOKEN set from the environment — your existing CLI / MCP bearer, unchanged.");
+      bearerValue = bearer.value;
+    } else {
+      warn(`Couldn't set PAGEVAULT_API_TOKEN (${cfErr(put.errors)}).`);
+    }
   } else {
     const value = randomBytes(32).toString("hex");
     const put = await setBearer(value);
@@ -184,6 +195,7 @@ export async function deploy(opts = {}) {
       // Save it locally too: the Worker now has this secret, but so must the CLI, the MCP
       // bearer, and `make verify` (which publishes the welcome doc). .env.local is gitignored.
       writeEnvLocalVar("PAGEVAULT_API_TOKEN", value);
+      bearerValue = value;
       ok("PAGEVAULT_API_TOKEN set on the Worker and saved to .env.local (your CLI / MCP bearer):");
       console.log(`     ${c.bold(value)}`);
       console.log(`     ${c.dim("Same token the Worker uses — verify will publish your first document with it.")}`);
@@ -191,6 +203,16 @@ export async function deploy(opts = {}) {
       warn(`Couldn't set PAGEVAULT_API_TOKEN automatically (${cfErr(put.errors)}).`);
       console.log(`  Set it by hand under Node 22: ${c.bold(`npx wrangler secret put PAGEVAULT_API_TOKEN --config ${CONFIG_OUT}`)}`);
     }
+  }
+
+  // Installed (ADR-014): leave the operator ready to publish with no second `login`. We know the URL
+  // we deployed to and the bearer we just set, so write the CLI's login config (~/.pagevault/config.json)
+  // now. A repo run uses .env.local + make and shouldn't have that file silently repointed at its last
+  // deploy, so this is installed-only. Skipped when the bearer plaintext isn't in hand (a `skip` on a
+  // machine that never held it — e.g. redeploying someone else's Worker); `pagevault login` covers that.
+  if (!RUNNING_FROM_REPO && url && bearerValue) {
+    const path = saveLoginConfig({ url, token: bearerValue });
+    ok(`Saved ${path} — ${c.bold("pagevault publish")} is ready, no ${c.bold("login")} step needed.`);
   }
 
   // --- 5. rung 3: the scoped runtime secret (CF_API_TOKEN) -------------------
