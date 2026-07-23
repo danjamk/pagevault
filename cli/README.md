@@ -1,66 +1,73 @@
 # pagevault
 
-Publish self-contained HTML to your own [PageVault](https://github.com/danjamk/pagevault)
-deployment from the terminal. A thin HTTP client of the `/api` surface — no Cloudflare access,
-no local state, zero dependencies. It works against any deployment you hold a token for.
+Stand up, publish to, and operate your own [PageVault](https://github.com/danjamk/pagevault)
+deployment from the terminal. `pagevault init` provisions and deploys PageVault onto your own
+Cloudflare account — Access, KV, and the Worker — with no repo clone; the package carries a prebuilt
+Worker, so nothing is compiled locally.
 
 ```bash
-npx pagevault publish report.html
-# → https://share.example.com/p/u3qph25exs92   (prints only the URL, so it pipes)
+npm install -g pagevault
+pagevault init                       # provision + deploy to your Cloudflare account
+pagevault publish report.html        # → https://you.example.com/p/u3qph25exs92  (prints only the URL)
 ```
+
+Once it's up you get three things:
+
+- **Publish** an HTML or Markdown file to a URL, with per-document access control — a public
+  no-login link, or gated to named people.
+- **Portals** — one durable URL per client, with permissions on the client, not the document.
+- A **remote MCP server** running inside your Worker, so you can publish and search the collection
+  from inside Claude (web, Desktop, mobile, or Claude Code) — this CLI is one front door, the MCP
+  server is the other. See [connect-mcp.md](https://github.com/danjamk/pagevault/blob/main/docs/setup/connect-mcp.md).
 
 ## Install
 
 ```bash
-npm install -g pagevault      # or just use `npx pagevault …`
+npm install -g pagevault             # or `npx pagevault …`
 ```
 
-Requires Node 18+.
+**Node 22+** for `init`/`upgrade` (they bundle and deploy the Worker). The document commands run on
+Node 18+.
 
-## Configure
-
-Point it at your deployment once:
+## Stand it up, or point at an existing deployment
 
 ```bash
-pagevault login --url https://share.example.com --token <PAGEVAULT_API_TOKEN>
+pagevault init                       # walks you through token, tier, account; deploys; configures the CLI
 ```
 
-This writes `~/.pagevault/config.json` (mode `600` — it holds your bearer token) and verifies the
-connection. Alternatively, set `PAGEVAULT_URL` and `PAGEVAULT_API_TOKEN` per command — the
-environment overrides the saved config, so a one-off against another deployment needs no re-login.
+`init` writes your state to `~/.pagevault/` and points the CLI at the deployment it just made — so
+`pagevault publish` works immediately. To target a *different* deployment (a second machine, or
+someone else's), use `login` instead:
+
+```bash
+pagevault login --url https://you.example.com --token <PAGEVAULT_API_TOKEN>
+```
+
+Either way, `PAGEVAULT_URL` and `PAGEVAULT_API_TOKEN` in the environment override the saved config
+per command.
 
 ## Commands
 
 ```
-pagevault publish <file.html> [--portal s] [--title t] [--summary s]
-                              [--tags a,b] [--emails a@b,c@d]
-                              [--public] [--owner-only] [--confirm]
-pagevault list [--portal s] [--tag t] [--json]
-pagevault share <portal> <email> [email …]
-pagevault rm <id> [--yes]
-pagevault export [dir] [--portal s] [--include-drafts] [--zip]
+Set up & deploy:   init · upgrade · login
+Publish & manage:  publish · list · read · search · mint · revoke · rotate · share · rm · export
+Operate:           status · verify · health · sync-access · views · destroy
 ```
 
-- **`publish`** uploads the file and prints its URL. The title comes from the HTML's `<title>`
-  (or the filename) unless you pass `--title`. `--public` also mints a no-login `/p/` link and
-  prints *that*; the "anyone with the link can open it" warning goes to stderr. Re-publishing the
-  same title in a portal replaces it in place — that needs `--confirm`.
-- **`list`** shows your documents, newest first. `--json` for scripting.
-- **`share`** grants a client access to a whole portal by email — one write, every document in it.
-- **`rm`** deletes a document. Interactive confirm unless `--yes`.
-- **`export`** writes everything you own to a browsable folder — `index.html`, an `ACCESS.md`
-  that spells out who can see what, and one folder per portal with each document as a standalone
-  file. Unzip, double-click, browse. It's a walk-away copy, not a backup: document ids and public
-  tokens are omitted. Owner-only drafts are excluded unless you pass `--include-drafts`; `--zip`
-  bundles the folder (needs the system `zip`). The final path is printed to stdout.
+- **`publish`** uploads a file and prints its URL (only the URL — so it pipes). `--public` mints a
+  no-login `/p/` link; `--emails` gates it to named people; re-publishing the same title replaces it
+  in place (`--confirm`).
+- **`status` / `verify` / `health`** report on your deployment — what's configured, whether it's live
+  and serving MCP, and whether it's running the build you shipped. Each takes `--json`.
+- **`destroy`** tears it down — it verifies the account and makes you type the hostname first.
 
-```bash
-pagevault export ./client-handoff --portal acme-corp --zip
-```
+Full detail on every command, flag, and environment variable:
+**[docs/setup/cli-reference.md](https://github.com/danjamk/pagevault/blob/main/docs/setup/cli-reference.md)**.
+`pagevault help` prints the short version.
 
 ## The stdout contract
 
-On success, `publish` and `list --json` write **only** their result to stdout; every status line,
+On success, `publish` and `--json` reads write **only** their result to stdout; every status line,
 warning, and prompt goes to stderr. So this does the obvious thing:
 
 ```bash
@@ -69,7 +76,7 @@ pagevault publish report.html | pbcopy
 
 ## Read-after-write
 
-Cloudflare KV is eventually consistent — a just-published URL can 404 for a second. `publish`
-polls until the document is readable before printing the link, so what it hands you works.
+Cloudflare KV is eventually consistent — a just-published URL can 404 for a second. `publish` polls
+until the document is readable before printing the link, so what it hands you works.
 
 MIT. Part of [PageVault](https://github.com/danjamk/pagevault) — fork it, steal it.

@@ -185,3 +185,23 @@ test("saveLoginConfig round-trips through loadConfig and writes 0600", () => {
   assert.equal(cfg.token, "tok123");
   assert.equal(statSync(p).mode & 0o777, 0o600); // it holds a bearer
 });
+
+test("PAGEVAULT_HOME isolates the login config from HOME", () => {
+  // The whole point of PAGEVAULT_HOME is holding several deployments on one machine: config.json must
+  // follow it, not HOME, or two PAGEVAULT_HOME dirs would fight over ~/.pagevault/config.json.
+  const home = mkdtempSync(join(tmpdir(), "pv-home-"));
+  const pvHome = mkdtempSync(join(tmpdir(), "pv-isolate-"));
+  const clientHref = new URL("./lib/client.mjs", import.meta.url).href;
+  const script = `
+    const { saveLoginConfig, CONFIG_PATH } = await import(${JSON.stringify(clientHref)});
+    saveLoginConfig({ url: "https://a.example.com", token: "tokA" });
+    process.stdout.write(CONFIG_PATH);
+  `;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    encoding: "utf8",
+    env: { ...process.env, HOME: home, PAGEVAULT_HOME: pvHome, PAGEVAULT_URL: "", PAGEVAULT_API_TOKEN: "" },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, join(pvHome, "config.json")); // under PAGEVAULT_HOME, not HOME
+  assert.ok(statSync(join(pvHome, "config.json")).isFile());
+});

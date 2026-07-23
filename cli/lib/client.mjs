@@ -8,7 +8,13 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-export const CONFIG_PATH = join(homedir(), ".pagevault", "config.json");
+// The login config lives in the same state dir the provisioning code uses, so PAGEVAULT_HOME
+// isolates EVERYTHING for a given deployment — `.pagevault.json`, `.env.local`, and this file —
+// which is what lets one machine hold several deployments cleanly. We read PAGEVAULT_HOME directly
+// rather than import stateDir() from the provisioning module: this file is the lean HTTP client the
+// document commands load, and it must not pull in the heavy provision tree. Default is unchanged:
+// ~/.pagevault/config.json for a normal install or repo checkout.
+export const CONFIG_PATH = join(process.env.PAGEVAULT_HOME || join(homedir(), ".pagevault"), "config.json");
 
 /**
  * Write the login config the document commands read — `{ url, token }` at CONFIG_PATH, mode 0600
