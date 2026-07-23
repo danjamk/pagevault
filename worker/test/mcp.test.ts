@@ -82,6 +82,63 @@ describe("🔴 /mcp — auth", () => {
   });
 });
 
+describe("🔴 /mcp — Origin validation (DNS rebinding, MCP 2025-11-25 MUST)", () => {
+  /**
+   * An attacker's page resolves its own hostname to our IP; the browser then talks to our
+   * Worker while the page keeps the attacker's origin. Comparing Origin to our own host is
+   * the defense — a rebound page cannot forge an origin it does not control.
+   */
+  const withOrigin = (origin: string | null, host = HOST, token = TOKEN) =>
+    SELF.fetch(`${host}/mcp`, {
+      method: "POST",
+      headers: {
+        ...HEADERS,
+        Authorization: `Bearer ${token}`,
+        ...(origin === null ? {} : { Origin: origin }),
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 99, method: "tools/list", params: {} }),
+    });
+
+  it("🔴 allows a request with NO Origin — the Claude Code and connector path", async () => {
+    // The load-bearing non-regression. Neither Claude Code nor Anthropic's connector
+    // infrastructure is a browser, so neither sends Origin. Requiring it would 403 every
+    // real client and turn this hardening into an outage.
+    expect((await withOrigin(null)).status).toBe(200);
+  });
+
+  it("allows our own origin", async () => {
+    expect((await withOrigin(HOST)).status).toBe(200);
+  });
+
+  it("allows the declared PUBLIC_HOST even when the request arrived elsewhere", async () => {
+    // Behind a proxy — or at rung 1 on *.workers.dev — the host the request arrives on and
+    // the host a browser would have used are not the same string.
+    const res = await withOrigin(HOST, "https://pagevault.workers.dev");
+    expect(res.status).toBe(200);
+  });
+
+  it("🔴 403s a foreign origin EVEN WITH a valid bearer token", async () => {
+    // The whole point of checking before auth: a rebound browser that somehow holds a real
+    // credential must still be refused. If this ever returns 200, the check moved below auth.
+    const res = await withOrigin("https://evil.example.com");
+
+    expect(res.status).toBe(403);
+    // 403, not 401 — a credential would not help, and pointing a rebinding attempt at the
+    // auth flow is the wrong advice.
+    expect(res.status).not.toBe(401);
+    expect(await res.text()).toContain("forbidden_origin");
+  });
+
+  it("403s a foreign origin before OAuth sees it, with no token at all", async () => {
+    const res = await withOrigin("https://evil.example.com", HOST, "not-the-token");
+    expect(res.status).toBe(403);
+  });
+
+  it("refuses a literal 'null' origin — a sandboxed frame is not our console", async () => {
+    expect((await withOrigin("null")).status).toBe(403);
+  });
+});
+
 describe("/mcp — protocol", () => {
   it("advertises every tool", async () => {
     const payload = await result(await rpc("tools/list"));

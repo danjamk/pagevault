@@ -76,6 +76,47 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
 }
 
 /**
+ * 🔴 Origin validation for `/mcp` — a Streamable HTTP MUST (MCP 2025-11-25).
+ *
+ * The threat is **DNS rebinding**: an attacker's page resolves its own hostname to our IP, so
+ * the browser sends requests to our Worker while the page keeps the *attacker's* origin. That
+ * is the whole reason comparing `Origin` against our own host is the defense — a rebound page
+ * cannot forge an origin it does not control.
+ *
+ * Honest severity: not exploitable here today. Rebinding buys an attacker ambient authority,
+ * and PageVault has none to steal — `/mcp` takes a bearer or an OAuth token, never a cookie,
+ * and ADR-004 says the Worker never accepts one anywhere. A rebound page has no credential to
+ * ride. This is defense in depth against the day something *does* authenticate by cookie, and
+ * it is a spec MUST regardless. See mcp-best-practices.md §6.
+ *
+ * **A missing `Origin` is the normal case, not a suspicious one.** Claude Code and Anthropic's
+ * connector infrastructure are not browsers and never send it; the header is a browser's own
+ * self-declaration, and the browser is the only attacker this rule defends against. Requiring
+ * one would 403 every real client — the fastest way to turn a hardening measure into an outage.
+ */
+export function rejectForeignOrigin(request: Request, env: Env): Response | null {
+  const origin = request.headers.get("Origin");
+  if (!origin) return null;
+
+  // Both, because the two disagree in real deployments: at rung 1 the request arrives on
+  // *.workers.dev with no PUBLIC_HOST set, and behind a proxy the declared host is the only
+  // one a browser would ever have used. A literal "null" origin (sandboxed frame) matches
+  // neither and is refused, which is correct.
+  const arrivedOn = new URL(request.url).origin;
+  const declared = env.PUBLIC_HOST?.trim();
+  if (origin === arrivedOn || (declared && origin === `https://${declared}`)) return null;
+
+  // 403, not 401: this is not a "you need to authenticate" — a credential would not help, and
+  // pointing a rebinding attempt at the auth flow is the wrong advice. The Origin itself is
+  // already carried by requestFields (log.ts); it is a header, not a credential.
+  log("warn", "blocked_mcp_origin", { request });
+  return new Response(JSON.stringify({ error: "Forbidden", code: "forbidden_origin" }), {
+    status: 403,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/**
  * The OAuth-authenticated MCP path (ADR-006 / #22).
  *
  * Identical to `handleMcp` except it does NOT check the bearer itself: the OAuthProvider has

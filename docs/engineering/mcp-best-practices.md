@@ -167,17 +167,20 @@ incremental scope consent (SEP-835) as alternatives.
 
 **Where we stand.** ✅ Shipped (v0.9.0, ADR-012): OAuth 2.1 via `@cloudflare/workers-oauth-provider`
 with Cloudflare Access as the upstream IdP, DCR, and the bearer path preserved for Claude Code.
-Three things to *verify* against 2025-11-25 rather than assume (likely fine, but they are MUSTs):
+Three MUSTs against 2025-11-25. One is now closed; two remain to verify:
 
+- ✅ **403 on invalid `Origin`** for Streamable HTTP. `createMcpHandler` does *not* enforce this
+  (its only `Origin` references are CORS headers), so `rejectForeignOrigin` in `worker/src/mcp.ts`
+  does — gating both `/mcp` entry paths in the default export, ahead of auth, so a rebound browser
+  holding a real credential is still refused. Not exploitable today (nothing on `/mcp`
+  authenticates by cookie; ADR-004), but a spec MUST and defense in depth. Tests in `mcp.test.ts`.
 - The `.well-known/oauth-protected-resource` document is actually served and the 401 discovery
   path resolves to it. Our bearer path already returns `WWW-Authenticate: Bearer`; confirm the
   OAuth path advertises the metadata clients probe for.
-- **403 on invalid `Origin`** for Streamable HTTP (new MUST). Confirm `createMcpHandler`
-  enforces it or add it.
 - **JSON Schema 2020-12** is now the default dialect (SEP-1613). Confirm the `inputSchema` our
   zod-4 shapes emit is sane under it.
 
-These belong in #76's comprehensive-coverage scope.
+The two open items belong in #76's comprehensive-coverage scope.
 
 ### 7. Security — the named risks
 
@@ -216,7 +219,7 @@ Recording these so they are decisions, not oversights:
 |---|---|---|
 | Request isolation (server-per-request) | ✅ Meets | — |
 | Errors as `isError` results | ✅ Meets | — |
-| Auth posture (verify JWT, audience, no passthrough) | ✅ Meets | verify 3 spec MUSTs in #76 |
+| Auth posture (verify JWT, audience, no passthrough) | ✅ Meets | Origin MUST closed; 2 to verify in #76 |
 | Description quality | ✅ Meets | hold the bar |
 | Security (confused-deputy, passthrough, session) | ✅ Meets | don't regress |
 | Tool design / naming | ✅ Meets | prefix only if collisions appear |
