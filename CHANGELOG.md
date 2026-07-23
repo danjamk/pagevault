@@ -7,6 +7,27 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-07-23
+
+MCP polish, both items found by using the server on claude.ai rather than reading the code.
+
+### Added
+- **`server_info` MCP tool (#98).** Reports the running deployment — `version`, `releaseVersion`
+  (the clean semver, split from the `+sha`), `host`, `deployedAt`, `releasesUrl` — so from inside
+  a chat you can confirm *which* deployment you're connected to (test vs. prod) and whether it's
+  current. The version was always on the wire at `initialize`, but that is protocol metadata a
+  model can't report; only a tool result reaches it. The description doubles the tool as a
+  check-for-updates: compare against the latest release, offer to summarize what changed, and
+  point at `npm update -g pagevault && pagevault upgrade`. The Worker makes no outbound call — the
+  model does the lookup, so the Worker stays dependency-free.
+
+### Changed
+- **`publish_document` guards against a truncated publish (#99).** A "publish this doc" request
+  stored a placeholder and needed a `read_document` round-trip to catch it — three tool calls for
+  a one-call job. The `html` description now forbids a stub verbatim, and the result reports the
+  stored `bytes` (prose and `structuredContent`), so a placeholder is obvious from the publish
+  call itself. No read-back required.
+
 ## [0.16.1] — 2026-07-23
 
 A same-day fix for 0.16.0. The Origin block it shipped broke the claude.ai web connector.
