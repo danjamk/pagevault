@@ -22,8 +22,9 @@ Full reference list at the bottom.
 ## The short version
 
 The server is already above the median on the parts people usually get wrong — request
-isolation, auth posture, errors-as-results, and description quality. Two of the four gaps
-between "good" and "reference-quality" are now closed (#80, 0.12.0; #81); one remains:
+isolation, auth posture, errors-as-results, and description quality. All four gaps between
+"good" and "reference-quality" are now closed in code (#80, 0.12.0; #81; #82) — the last,
+Resources, ships gated on a live host check (ADR-016):
 
 1. ~~**Tool annotations** — we ship none.~~ ✅ **Done (#80).** All tools carry
    `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint` + a human `title`.
@@ -33,9 +34,12 @@ between "good" and "reference-quality" are now closed (#80, 0.12.0; #81); one re
 3. ~~**Structured tool output** — everything is prose; the read→publish chain re-parses IDs.~~
    ✅ **Done (#81).** The five chain tools return `structuredContent` (id + opening `url` as
    fields) beside the unchanged prose.
-4. **Resources** — documents are addressable content we expose only through tools.
+4. ~~**Resources** — documents are addressable content we expose only through tools.~~
+   ✅ **Built (#82, ADR-016).** Documents are addressable at `pagevault://<portal>/<id>`; the
+   read reuses `readDocument()`, and the discovery tools return `resource_link`s. Shipping is
+   gated on verifying a non-Desktop host renders the primitive usefully — see §5.
 
-The sequenced work that closes the last one is at the end.
+All four are closed in code. The Resources host-verification gate is the only open thread.
 
 ---
 
@@ -152,17 +156,26 @@ lookups, optional `subscribe`/`listChanged`). Rule of thumb: if the model decide
 fetch, it's a tool; if the user or app picks it from a list, it's a Resource. A server can do
 both, and tools can return `resource_link`s that point into the Resource space.
 
-**Where we stand.** ⚠️ We expose documents only through tools. This is the most on-thesis
-upgrade available and deserves its own ADR before any code. The project's pitch is *the
-collection reads back — publishing and remembering are the same act*. Today that only works
-when the model chooses to call `search_portal`/`read_document`. Resources are the other half:
-exposing documents at `pagevault://<portal>/<id>` with a template lets a user **attach** the
-January architecture doc as context deterministically instead of hoping the agent finds it.
+**Where we stand.** ✅ **Built (#82, ADR-016), shipping gated.** Documents are addressable at
+`pagevault://<portal>/<id>` through a `registerResource` template; the `list` callback enumerates
+the collection, the read reuses `readDocument()` — one read path behind one operator gate — and
+`list_documents`/`search_portal` return `resource_link`s into the space. This is the other half
+of *the collection reads back*: instead of hoping the model calls `search_portal`, the operator
+**attaches** the January architecture doc deterministically.
 
-The trade-off is real and is why this is ADR-gated, not a quick win: Resources are less
-universally supported across hosts than tools, and it is genuine new surface. But of everything
-here it is the item that makes our MCP server *distinctive* rather than merely correct, and it
-is squarely inside the #73 surface-parity conversation.
+Two things the ADR nails down and this page inherits:
+
+- **Authorization, honestly.** There is no per-resource `canView()` — the whole `/mcp` surface is
+  operator-gated, and the sole operator passes `canView()` trivially. Prime directive #5 is
+  honored by the single shared `readDocument()` path, not by a decorative check that cannot fail.
+  A URI whose portal does not match where the document lives is refused, so a handle cannot lie
+  about its client.
+- **The gate that remains.** Host support for the Resources *primitive* (as opposed to tools) is
+  uneven and, for claude.ai web and mobile, unverified — and those are the surfaces that matter,
+  because reach is the differentiator (ADR-006). The code is merged and tested; #82 does not close,
+  and the release notes make no per-surface claim, until #95's live protocol proves a non-Desktop
+  host renders it. Non-goals recorded in ADR-016: no `subscribe`/`listChanged`, no pagination, no
+  resource-level mutation.
 
 ### 6. Auth — OAuth 2.1 resource server
 
@@ -235,25 +248,29 @@ Recording these so they are decisions, not oversights:
 | **Tool annotations** | ✅ Meets (#80) | done in 0.12.0 |
 | **Server `instructions`** | ✅ Meets (#80) | done in 0.12.0 |
 | **Structured tool output** | ✅ Meets (#81) | done |
-| **Resources** | ⚠️ Tools-only | **P4 (ADR-gated)** |
+| **Resources** | ✅ Built (#82) | ships gated on a live host check (ADR-016) |
 | Pagination / prompts / elicitation / Tasks | ⏭️ Skipped | recorded above |
 
 ## Sequenced work
 
-P1–P3 shipped (#80 in 0.12.0, #81). One remains:
+All four (P1–P4) are shipped in code (#80 in 0.12.0, #81, #82):
 
 1. ✅ **MCP polish — annotations + server instructions (P1 + P2).** Done (#80): migrated to
    `registerTool`, set the annotation table above, added `instructions`, de-duplicated the
    cross-cutting rules out of the tool descriptions.
 2. ✅ **Structured tool output (P3).** Done (#81): `outputSchema` + `structuredContent` on the
    four read tools and `publish_document`, prose blocks unchanged, empty-result paths pinned.
-3. **Documents as MCP Resources (P4).** ADR first (the trade-off is real), then implement
-   `pagevault://<portal>/<id>` + a resource template. On-thesis; part of the #73 parity story.
+3. ✅ **Documents as MCP Resources (P4).** Built (#82, ADR-016): `pagevault://<portal>/<id>`
+   template, read reusing `readDocument()`, `resource_link`s from the discovery tools. Shipping
+   is gated on a live host check — see §5.
 
-`#76` (comprehensive MCP tests) trails these: it should assert the annotations, validate the
-structured schemas, and cover the two remaining auth MUSTs flagged in §6 (Origin is now closed).
-`#95` (live acceptance protocol) is the deployed-surface companion — it exercises the same tools
-over real OAuth against the shipped bundle.
+Two threads remain, both about verification rather than new features:
+
+- `#76` (comprehensive MCP tests) — assert the annotations, validate the structured schemas,
+  and cover the two remaining auth MUSTs flagged in §6 (Origin is now closed).
+- `#95` (live acceptance protocol) — the deployed-surface companion. It exercises the tools over
+  real OAuth against the shipped bundle, and it is where the Resources host-verification gate is
+  discharged.
 
 ---
 

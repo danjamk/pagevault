@@ -30,22 +30,32 @@ async function rpc(method: string, params: unknown = {}, token = TOKEN): Promise
   });
 }
 
-/** Streamable HTTP may answer as JSON or as an SSE frame. Accept either. */
-async function result(res: Response): Promise<Record<string, unknown>> {
+/** The full JSON-RPC envelope (`result` OR `error`), for asserting on failures. */
+async function envelope(res: Response): Promise<Record<string, unknown>> {
   const body = await res.text();
-
   if (body.startsWith("event:") || body.includes("\ndata: ")) {
     const line = body.split("\n").find((l) => l.startsWith("data: "));
-    return JSON.parse(line!.slice("data: ".length)).result;
+    return JSON.parse(line!.slice("data: ".length));
   }
-  return JSON.parse(body).result;
+  return JSON.parse(body);
 }
+
+/** Streamable HTTP may answer as JSON or as an SSE frame. Accept either. */
+async function result(res: Response): Promise<Record<string, unknown>> {
+  return (await envelope(res))["result"] as Record<string, unknown>;
+}
+
+/** Only text blocks join into the prose. A tool result may also carry resource_link blocks (#82). */
+const proseOf = (content: { type: string; text?: string }[]): string =>
+  content
+    .filter((c) => c.type === "text")
+    .map((c) => c.text)
+    .join("\n");
 
 async function callTool(name: string, args: Record<string, unknown> = {}): Promise<string> {
   const res = await rpc("tools/call", { name, arguments: args });
   const payload = await result(res);
-  const content = payload["content"] as { type: string; text: string }[];
-  return content.map((c) => c.text).join("\n");
+  return proseOf(payload["content"] as { type: string; text?: string }[]);
 }
 
 /**
@@ -59,13 +69,14 @@ async function callTool(name: string, args: Record<string, unknown> = {}): Promi
 async function callToolFull(
   name: string,
   args: Record<string, unknown> = {},
-): Promise<{ text: string; structured: Record<string, unknown> }> {
+): Promise<{ text: string; structured: Record<string, unknown>; content: { type: string; uri?: string; name?: string }[] }> {
   const res = await rpc("tools/call", { name, arguments: args });
   const payload = await result(res);
-  const content = payload["content"] as { type: string; text: string }[];
+  const content = payload["content"] as { type: string; text?: string; uri?: string; name?: string }[];
   return {
-    text: content.map((c) => c.text).join("\n"),
+    text: proseOf(content),
     structured: payload["structuredContent"] as Record<string, unknown>,
+    content,
   };
 }
 
@@ -369,6 +380,103 @@ describe("⭐ structured tool output — the read→publish chain is machine-rea
 
     expect(realplus["kind"]).toBe("restricted");
     expect(realplus["documentCount"]).toBe(1);
+  });
+});
+
+describe("⭐ documents as MCP Resources — the user-addressable half (#82, ADR-016)", () => {
+  /** Publish one doc and return its structured id/portal, so a test can address it as a resource. */
+  async function publishOne(args: Record<string, unknown>): Promise<{ id: string; portal: string }> {
+    const { structured } = await callToolFull("publish_document", args);
+    return { id: structured["id"] as string, portal: structured["portal"] as string };
+  }
+
+  it("advertises the resources capability at initialize", async () => {
+    const init = await result(
+      await rpc("initialize", {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "test", version: "0" },
+      }),
+    );
+    expect((init["capabilities"] as Record<string, unknown>)["resources"]).toBeTruthy();
+  });
+
+  it("exposes the pagevault://{portal}/{id} template", async () => {
+    const payload = await result(await rpc("resources/templates/list"));
+    const templates = payload["resourceTemplates"] as { uriTemplate: string }[];
+    expect(templates.some((t) => t.uriTemplate === "pagevault://{portal}/{id}")).toBe(true);
+  });
+
+  it("lists every published document as an addressable resource", async () => {
+    await seedPortals();
+    const { id } = await publishOne({ title: "Architecture", html: "<h1>x</h1>", portal: "realplus" });
+
+    const payload = await result(await rpc("resources/list"));
+    const resources = payload["resources"] as { uri: string; name: string; mimeType?: string }[];
+    const hit = resources.find((r) => r.uri === `pagevault://realplus/${id}`)!;
+
+    expect(hit).toBeTruthy();
+    expect(hit.name).toBe("Architecture");
+    expect(hit.mimeType).toBe("text/html");
+  });
+
+  it("reads a document back through its resource URI — the same source read_document returns", async () => {
+    const { id, portal } = await publishOne({ title: "Memo", html: "<h1>the decision</h1>" });
+
+    const payload = await result(await rpc("resources/read", { uri: `pagevault://${portal}/${id}` }));
+    const contents = payload["contents"] as { uri: string; mimeType?: string; text?: string }[];
+
+    expect(contents).toHaveLength(1);
+    expect(contents[0]!.text).toContain("<h1>the decision</h1>");
+    expect(contents[0]!.mimeType).toBe("text/html");
+  });
+
+  it("hands markdown back as markdown, with the right mime type", async () => {
+    const { id, portal } = await publishOne({
+      title: "Notes",
+      html: "# Heading\n\n**bold**",
+      sourceKind: "markdown",
+    });
+
+    const payload = await result(await rpc("resources/read", { uri: `pagevault://${portal}/${id}` }));
+    const contents = payload["contents"] as { mimeType?: string; text?: string }[];
+
+    expect(contents[0]!.text).toContain("# Heading");
+    expect(contents[0]!.mimeType).toBe("text/markdown");
+  });
+
+  it("🔴 refuses a URI whose portal does not match where the document lives", async () => {
+    await seedPortals();
+    // Published into realplus, then addressed under acme — a handle that lies about its client.
+    const { id } = await publishOne({ title: "RealPlus Only", html: "<h1>x</h1>", portal: "realplus" });
+
+    const env = await envelope(await rpc("resources/read", { uri: `pagevault://acme/${id}` }));
+    expect(env["error"]).toBeTruthy();
+    expect(env["result"]).toBeUndefined();
+  });
+
+  it("errors on an unknown document id", async () => {
+    const env = await envelope(await rpc("resources/read", { uri: "pagevault://default/zzzzzzzzzzzz" }));
+    expect(env["error"]).toBeTruthy();
+  });
+
+  it("read tools return resource_link handles into the resource space (design point 4)", async () => {
+    const { id } = await publishOne({ title: "Findable", html: "<h1>x</h1>" });
+
+    const { content } = await callToolFull("list_documents");
+    const link = content.find((c) => c.type === "resource_link" && c.uri === `pagevault://default/${id}`);
+
+    expect(link).toBeTruthy();
+    expect(link!.name).toBe("Findable");
+  });
+
+  it("search_portal hits carry resource_link handles too", async () => {
+    const { id } = await publishOne({ title: "Debezium Doc", html: "<h1>x</h1><p>We chose Debezium.</p>" });
+
+    const { content } = await callToolFull("search_portal", { portal: "default", query: "debezium" });
+    const link = content.find((c) => c.type === "resource_link");
+
+    expect(link?.uri).toBe(`pagevault://default/${id}`);
   });
 });
 

@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createMcpHandler } from "agents/mcp";
 import { z } from "zod";
 import type { GroupSyncResult } from "./access-group.js";
@@ -640,9 +640,11 @@ function buildServer(env: Env, origin: string): McpServer {
         // the KV list quota (1000/day). See store.ts on why kind is not on the DocSummary.
         const base = baseUrl(env, origin);
         const byslug = new Map((await listPortals(env)).map((p) => [p.slug, p]));
-        return structured(docs.map(describe).join("\n\n"), {
-          documents: docs.map((d) => docOut(d, docUrl(base, d.portal, d.id, byslug.get(d.portal) ?? null))),
-        });
+        return structured(
+          docs.map(describe).join("\n\n"),
+          { documents: docs.map((d) => docOut(d, docUrl(base, d.portal, d.id, byslug.get(d.portal) ?? null))) },
+          docs.map((d) => resourceLink(d.portal, d.id, d.title, d.sourceKind)),
+        );
       } catch (err) {
         return toolError(err, "list_documents");
       }
@@ -777,10 +779,65 @@ function buildServer(env: Env, origin: string): McpServer {
               matched: hit.matched,
             })),
           },
+          hits.map((hit) => resourceLink(portal.slug, hit.doc.id, hit.doc.title, hit.doc.sourceKind)),
         );
       } catch (err) {
         return toolError(err, "search_portal");
       }
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // Resources — the user-addressable half (ADR-016, #82)
+  //
+  // Tools are model-initiated; a Resource is how the operator ATTACHES a specific document as
+  // context deterministically — the other half of "the collection reads back." Read-only, one
+  // URI per document, and the read reuses the same readDocument() the tools do: one read path
+  // behind one operator gate. The whole /mcp surface is operator-authenticated before buildServer
+  // ever runs, so there is no per-resource canView — the sole operator passes it trivially, and
+  // dressing this path in a check that cannot fail would misstate where the authorization is
+  // (prime directive #5; ADR-016, "authorization, stated honestly").
+  // -------------------------------------------------------------------------
+  server.registerResource(
+    "document",
+    new ResourceTemplate("pagevault://{portal}/{id}", {
+      // Every document, across every portal — the operator owns all of it, so the picker is not
+      // client-scoped (ADR-016, design point 5). Metadata-only, one list() call, no per-doc read.
+      list: async () => {
+        const docs = await listDocs(env);
+        return {
+          resources: docs.map((d) => ({
+            uri: resourceUri(d.portal, d.id),
+            name: d.title,
+            ...(d.summary ? { description: d.summary } : {}),
+            mimeType: mimeFor(d.sourceKind),
+            size: d.bytes,
+          })),
+        };
+      },
+    }),
+    {
+      title: "Client documents",
+      description:
+        "Every published document, addressable as pagevault://<portal>/<id> to attach as context. Read-only.",
+    },
+    async (uri, variables) => {
+      const id = Array.isArray(variables.id) ? variables.id[0] : variables.id;
+      const portal = Array.isArray(variables.portal) ? variables.portal[0] : variables.portal;
+      if (!id) throw new BadRequest("invalid_resource", `Malformed resource URI: ${uri.href}`);
+
+      const result = await readDocument(env, id);
+      // The URI names a portal. Refuse to serve a document under a portal it does not live in, so
+      // a handle can never quietly lie about which client it belongs to — even though, for the
+      // sole operator, the bytes would be identical either way.
+      if (!result || result.meta.portal !== portal) {
+        throw new BadRequest("not_found", `No such document: ${uri.href}`);
+      }
+
+      // The source the author wrote (markdown stays markdown), same as read_document returns.
+      return {
+        contents: [{ uri: uri.href, mimeType: mimeFor(result.meta.sourceKind), text: result.source }],
+      };
     },
   );
 
@@ -819,14 +876,35 @@ const text = (body: string, isError = false) => ({
 });
 
 /**
- * A success result carrying BOTH the prose block and the machine payload (#81).
+ * A `resource_link` content block (ADR-016, design point 4): an attachable handle into the
+ * Resource space, so a discovery tool can hand back `pagevault://…` alongside its prose. A host
+ * that does not render resource_links ignores it; the text and structuredContent stand alone.
+ */
+interface ResourceLink {
+  type: "resource_link";
+  uri: string;
+  name: string;
+  mimeType?: string;
+  description?: string;
+}
+
+const resourceLink = (portal: string, id: string, name: string, sourceKind?: string): ResourceLink => ({
+  type: "resource_link",
+  uri: resourceUri(portal, id),
+  name,
+  mimeType: mimeFor(sourceKind),
+});
+
+/**
+ * A success result carrying BOTH the prose block and the machine payload (#81), plus any
+ * `resource_link`s (#82).
  *
  * The prose is unchanged from what the tool returned before; `structuredContent` is the new
  * half. There is no `isError` variant on purpose — an error is `text(msg, true)`, and error
  * results are exempt from output-schema validation, so they must not carry structuredContent.
  */
-const structured = (body: string, structuredContent: Record<string, unknown>) => ({
-  content: [{ type: "text" as const, text: body }],
+const structured = (body: string, structuredContent: Record<string, unknown>, links: ResourceLink[] = []) => ({
+  content: [{ type: "text" as const, text: body }, ...links],
   structuredContent,
 });
 
@@ -860,6 +938,17 @@ const docUrl = (base: string, portalSlug: string, id: string, portal: Portal | n
   portal
     ? `${base}${documentPath(portal, id)}`
     : `${base}/v/${encodeURIComponent(portalSlug)}/${encodeURIComponent(id)}`;
+
+/**
+ * The `pagevault://<portal>/<id>` handle a document is addressable by as an MCP Resource
+ * (ADR-016). Distinct from the `/v/` or `/pub/` *browser* URL (`docUrl`): this one is an
+ * attach-in-host identifier, not a link a person opens.
+ */
+const resourceUri = (portal: string, id: string): string => `pagevault://${portal}/${id}`;
+
+/** `text/markdown` for a markdown source, `text/html` otherwise — the listing omits it for HTML. */
+const mimeFor = (sourceKind: string | undefined): string =>
+  sourceKind === "markdown" ? "text/markdown" : "text/html";
 
 /**
  * Errors come back as tool results, not exceptions.
