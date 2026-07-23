@@ -3,7 +3,7 @@ import { handleApi, json } from "./api.js";
 import { isAuthorized } from "./auth.js";
 import { handleConsole } from "./console.js";
 import type { Env } from "./env.js";
-import { handleMcp, mcpApiHandler, rejectForeignOrigin } from "./mcp.js";
+import { handleMcp, mcpApiHandler, noteMcpOrigin } from "./mcp.js";
 import { handleAuthorize } from "./oauth.js";
 import { favicon, rootLanding } from "./pages.js";
 import { handlePortalRoute, handlePublicPortalRoute } from "./portal.js";
@@ -151,12 +151,11 @@ export default {
     // has always used; nothing else about this shortcut is trusted. See ADR-006's staged auth.
     const { pathname } = new URL(request.url);
     if (pathname === "/mcp") {
-      // 🔴 Origin first — before auth, and before the OAuthProvider. Both `/mcp` entry paths
-      // (this bearer shortcut and the OAuth one below) converge here, so this is the only
-      // place the rule can be enforced once. Checking it ahead of `isAuthorized` is deliberate:
-      // a rebound browser holding a real credential must still be refused. See mcp.ts.
-      const blocked = rejectForeignOrigin(request, env);
-      if (blocked) return blocked;
+      // Observe the Origin — never block it. A remote, token-authenticated server gains nothing
+      // from rejecting a browser client's origin (a rebound page has no cookie to ride, ADR-004),
+      // and blocking `Origin: https://claude.ai` took the hosted connector down. `isAuthorized`
+      // below is the real gate. See mcp.ts.
+      noteMcpOrigin(request, env);
 
       if (isAuthorized(request, env)) return handleMcp(request, env, ctx);
     }

@@ -189,20 +189,27 @@ incremental scope consent (SEP-835) as alternatives.
 
 **Where we stand.** ✅ Shipped (v0.9.0, ADR-012): OAuth 2.1 via `@cloudflare/workers-oauth-provider`
 with Cloudflare Access as the upstream IdP, DCR, and the bearer path preserved for Claude Code.
-Three MUSTs against 2025-11-25. One is now closed; two remain to verify:
+Three MUSTs against 2025-11-25. The Origin one we tried, shipped, and reverted — the story is
+worth keeping; two remain to verify:
 
-- ✅ **403 on invalid `Origin`** for Streamable HTTP. `createMcpHandler` does *not* enforce this
-  (its only `Origin` references are CORS headers), so `rejectForeignOrigin` in `worker/src/mcp.ts`
-  does — gating both `/mcp` entry paths in the default export, ahead of auth, so a rebound browser
-  holding a real credential is still refused. Not exploitable today (nothing on `/mcp`
-  authenticates by cookie; ADR-004), but a spec MUST and defense in depth. Tests in `mcp.test.ts`.
+- ⚠️ **`Origin` validation for Streamable HTTP — deliberately NOT enforced as a block.** 0.16.0
+  shipped a 403 on any foreign `Origin` (`createMcpHandler` does not do it — its only `Origin`
+  references are CORS headers). A live claude.ai connect proved that wrong within the hour: the
+  web app POSTs to `/mcp` from the browser with `Origin: https://claude.ai`, so the block 403'd
+  the tool-list refresh and read as "server unavailable." The rule is written for **localhost-bound**
+  servers that grant access by network position; on a **remote, token-authenticated** server it
+  defends a door that does not exist — a rebound page steals *ambient authority*, and `/mcp` grants
+  none (no cookie, ever; ADR-004), so the attacker's page can only make unauthenticated requests
+  that 401 anyway. `noteMcpOrigin` now *logs* a foreign origin (`mcp_foreign_origin`) and lets
+  `isAuthorized` do the real work. If the log turns to noise, drop it — it carries no security
+  weight. This is the honest read of the MUST for our topology, not a gap to close.
 - The `.well-known/oauth-protected-resource` document is actually served and the 401 discovery
   path resolves to it. Our bearer path already returns `WWW-Authenticate: Bearer`; confirm the
   OAuth path advertises the metadata clients probe for.
 - **JSON Schema 2020-12** is now the default dialect (SEP-1613). Confirm the `inputSchema` our
   zod-4 shapes emit is sane under it.
 
-The two open items belong in #76's comprehensive-coverage scope.
+The two `verify` items belong in #76's comprehensive-coverage scope.
 
 ### 7. Security — the named risks
 
@@ -241,7 +248,7 @@ Recording these so they are decisions, not oversights:
 |---|---|---|
 | Request isolation (server-per-request) | ✅ Meets | — |
 | Errors as `isError` results | ✅ Meets | — |
-| Auth posture (verify JWT, audience, no passthrough) | ✅ Meets | Origin MUST closed; 2 to verify in #76 |
+| Auth posture (verify JWT, audience, no passthrough) | ✅ Meets | Origin logged not blocked (remote topology); 2 to verify in #76 |
 | Description quality | ✅ Meets | hold the bar |
 | Security (confused-deputy, passthrough, session) | ✅ Meets | don't regress |
 | Tool design / naming | ✅ Meets | prefix only if collisions appear |

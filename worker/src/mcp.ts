@@ -77,44 +77,39 @@ export async function handleMcp(request: Request, env: Env, ctx: ExecutionContex
 }
 
 /**
- * 🔴 Origin validation for `/mcp` — a Streamable HTTP MUST (MCP 2025-11-25).
+ * Note the `Origin` on an `/mcp` request. Observational only — it never blocks.
  *
- * The threat is **DNS rebinding**: an attacker's page resolves its own hostname to our IP, so
- * the browser sends requests to our Worker while the page keeps the *attacker's* origin. That
- * is the whole reason comparing `Origin` against our own host is the defense — a rebound page
- * cannot forge an origin it does not control.
+ * 🔴 This started life as a 403 on any foreign `Origin`, to satisfy the MCP 2025-11-25
+ * DNS-rebinding rule. That rule is written for **localhost-bound** servers that grant access by
+ * network position, and it is actively wrong for a **remote, token-authenticated** one. The
+ * claude.ai web app calls `/mcp` from the browser carrying `Origin: https://claude.ai`, so the
+ * block took the hosted connector down — the browser-side tool refresh 403'd, and the surface
+ * that is the entire differentiator (ADR-006) stopped working. Only a live host revealed it;
+ * curl never sends a real client's origin.
  *
- * Honest severity: not exploitable here today. Rebinding buys an attacker ambient authority,
- * and PageVault has none to steal — `/mcp` takes a bearer or an OAuth token, never a cookie,
- * and ADR-004 says the Worker never accepts one anywhere. A rebound page has no credential to
- * ride. This is defense in depth against the day something *does* authenticate by cookie, and
- * it is a spec MUST regardless. See mcp-best-practices.md §6.
+ * Dropping the block loses nothing, because a rebound page gains nothing here. Rebinding steals
+ * **ambient authority**, and `/mcp` grants none: it takes a bearer or an OAuth token and trusts
+ * no cookie, ever (ADR-004). An attacker's page can only make *unauthenticated* requests, which
+ * `isAuthorized` 401s regardless of `Origin`. The auth gate was always the real defense; the
+ * Origin check was defending a door that does not exist.
  *
- * **A missing `Origin` is the normal case, not a suspicious one.** Claude Code and Anthropic's
- * connector infrastructure are not browsers and never send it; the header is a browser's own
- * self-declaration, and the browser is the only attacker this rule defends against. Requiring
- * one would 403 every real client — the fastest way to turn a hardening measure into an outage.
+ * So it logs and lets the request through. The log is useful *right now* — it shows exactly what
+ * `Origin` each host sends while the surfaces are being tested. If it turns out to be pure noise
+ * (claude.ai fires it on every request), drop it; it carries no security weight. A missing
+ * `Origin` (Claude Code, the connector infrastructure — not browsers) is the ordinary case and
+ * is not logged.
  */
-export function rejectForeignOrigin(request: Request, env: Env): Response | null {
+export function noteMcpOrigin(request: Request, env: Env): void {
   const origin = request.headers.get("Origin");
-  if (!origin) return null;
+  if (!origin) return;
 
-  // Both, because the two disagree in real deployments: at rung 1 the request arrives on
-  // *.workers.dev with no PUBLIC_HOST set, and behind a proxy the declared host is the only
-  // one a browser would ever have used. A literal "null" origin (sandboxed frame) matches
-  // neither and is refused, which is correct.
   const arrivedOn = new URL(request.url).origin;
   const declared = env.PUBLIC_HOST?.trim();
-  if (origin === arrivedOn || (declared && origin === `https://${declared}`)) return null;
+  if (origin === arrivedOn || (declared && origin === `https://${declared}`)) return;
 
-  // 403, not 401: this is not a "you need to authenticate" — a credential would not help, and
-  // pointing a rebinding attempt at the auth flow is the wrong advice. The Origin itself is
-  // already carried by requestFields (log.ts); it is a header, not a credential.
-  log("warn", "blocked_mcp_origin", { request });
-  return new Response(JSON.stringify({ error: "Forbidden", code: "forbidden_origin" }), {
-    status: 403,
-    headers: { "Content-Type": "application/json" },
-  });
+  // Observation, not an alarm: a foreign Origin is expected from a browser client. The origin
+  // itself rides in via requestFields (log.ts).
+  log("info", "mcp_foreign_origin", { request });
 }
 
 /**

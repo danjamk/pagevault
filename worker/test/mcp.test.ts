@@ -114,14 +114,16 @@ describe("🔴 /mcp — auth", () => {
   });
 });
 
-describe("🔴 /mcp — Origin validation (DNS rebinding, MCP 2025-11-25 MUST)", () => {
+describe("🔴 /mcp — Origin is observed, never blocked (remote token-auth server)", () => {
   /**
-   * An attacker's page resolves its own hostname to our IP; the browser then talks to our
-   * Worker while the page keeps the attacker's origin. Comparing Origin to our own host is
-   * the defense — a rebound page cannot forge an origin it does not control.
+   * This began as a 403 on any foreign Origin, to satisfy the MCP 2025-11-25 DNS-rebinding rule.
+   * That rule is for localhost-bound servers; here it broke the claude.ai web client, which calls
+   * /mcp from the browser with `Origin: https://claude.ai`. A rebound page steals nothing (no
+   * cookie, no ambient authority — ADR-004), so the Origin check now logs and lets the auth gate
+   * do the work. `isAuthorized` is the real defense, regardless of Origin.
    */
-  const withOrigin = (origin: string | null, host = HOST, token = TOKEN) =>
-    SELF.fetch(`${host}/mcp`, {
+  const withOrigin = (origin: string | null, token = TOKEN) =>
+    SELF.fetch(`${HOST}/mcp`, {
       method: "POST",
       headers: {
         ...HEADERS,
@@ -131,10 +133,15 @@ describe("🔴 /mcp — Origin validation (DNS rebinding, MCP 2025-11-25 MUST)",
       body: JSON.stringify({ jsonrpc: "2.0", id: 99, method: "tools/list", params: {} }),
     });
 
-  it("🔴 allows a request with NO Origin — the Claude Code and connector path", async () => {
-    // The load-bearing non-regression. Neither Claude Code nor Anthropic's connector
-    // infrastructure is a browser, so neither sends Origin. Requiring it would 403 every
-    // real client and turn this hardening into an outage.
+  it("🔴 allows Origin: https://claude.ai with a valid token — the regression that took prod down", async () => {
+    // The claude.ai web app POSTs to /mcp from the browser carrying its own origin. Blocking it
+    // 403'd the tool-list refresh and read as "server unavailable". If this ever 403s again, the
+    // block is back.
+    const res = await withOrigin("https://claude.ai");
+    expect(res.status).toBe(200);
+  });
+
+  it("allows a request with no Origin — the Claude Code and connector path", async () => {
     expect((await withOrigin(null)).status).toBe(200);
   });
 
@@ -142,32 +149,11 @@ describe("🔴 /mcp — Origin validation (DNS rebinding, MCP 2025-11-25 MUST)",
     expect((await withOrigin(HOST)).status).toBe(200);
   });
 
-  it("allows the declared PUBLIC_HOST even when the request arrived elsewhere", async () => {
-    // Behind a proxy — or at rung 1 on *.workers.dev — the host the request arrives on and
-    // the host a browser would have used are not the same string.
-    const res = await withOrigin(HOST, "https://pagevault.workers.dev");
-    expect(res.status).toBe(200);
-  });
-
-  it("🔴 403s a foreign origin EVEN WITH a valid bearer token", async () => {
-    // The whole point of checking before auth: a rebound browser that somehow holds a real
-    // credential must still be refused. If this ever returns 200, the check moved below auth.
-    const res = await withOrigin("https://evil.example.com");
-
-    expect(res.status).toBe(403);
-    // 403, not 401 — a credential would not help, and pointing a rebinding attempt at the
-    // auth flow is the wrong advice.
-    expect(res.status).not.toBe(401);
-    expect(await res.text()).toContain("forbidden_origin");
-  });
-
-  it("403s a foreign origin before OAuth sees it, with no token at all", async () => {
-    const res = await withOrigin("https://evil.example.com", HOST, "not-the-token");
-    expect(res.status).toBe(403);
-  });
-
-  it("refuses a literal 'null' origin — a sandboxed frame is not our console", async () => {
-    expect((await withOrigin("null")).status).toBe(403);
+  it("🔴 a foreign origin with NO token still 401s — auth is the gate, not Origin", async () => {
+    // Origin never authorizes anything. A request without a valid credential is refused because
+    // it lacks the credential, not because of where it claims to come from.
+    const res = await withOrigin("https://evil.example.com", "not-the-token");
+    expect(res.status).toBe(401);
   });
 });
 
