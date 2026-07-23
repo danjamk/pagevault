@@ -7,6 +7,32 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-07-23
+
+The installed CLI reaches parity with `make` for operating a deployment (#102): an install can now
+diagnose and tear itself down, not just publish. One engine, two front doors — the command logic
+lives in `cli/lib/ops/` and both the CLI and `make` call it, so there's no forked script layer.
+
+### Added
+- **`pagevault status`** — what this install is configured for (rung, account, host, versions).
+  Local only, no network. `--json` for a machine-readable object.
+- **`pagevault verify`** — the post-deploy smoke test (Worker liveness, the `/mcp`
+  publish→read→revoke round-trip, OAuth discovery, a sample publish). `--json` emits a verdict with
+  per-check results; the same exit codes drive an agent.
+- **`pagevault health`** — assert the live `/health` reports the exact build you shipped, and that
+  `/mcp` answers. `--json` for the verdict. This is what prod CI runs.
+- **`pagevault destroy [--keep-data]`** — tear the deployment down. Same account-guard and
+  type-the-target confirmation as before; now available to an install, not just a repo checkout.
+
+### Changed
+- **`pagevault init` writes the CLI login config** (`~/.pagevault/config.json`) for the deployment
+  it just stood up — so `pagevault publish` works immediately, with no separate `pagevault login`
+  step. `login` remains, for a second machine or someone else's deployment. (`init` and `login` now
+  share one writer.)
+- **`make status`/`verify`/`health`/`destroy` now run the CLI** (`pagevault <cmd>`) instead of
+  parallel `scripts/*.mjs`. The four scripts are removed; the logic moved to `cli/lib/ops/` (shipped
+  with the package). Prod CI's build check runs `pagevault health`. No behavior change to `make`.
+
 ## [0.18.0] — 2026-07-23
 
 Viewer and console UX, most of it found by using the portals on real work.

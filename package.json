@@ -1,6 +1,6 @@
 {
   "name": "pagevault",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "private": true,
   "description": "Self-hosted, single-file HTML publishing with per-document access control, on Cloudflare's free tier",
   "license": "MIT",
