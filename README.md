@@ -19,7 +19,7 @@ nothing and signs up for nothing — no account, on any platform.
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-34507A) &nbsp;
 ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-34507A) &nbsp;
-![Version](https://img.shields.io/badge/version-0.16.1-34507A)
+![Version](https://img.shields.io/badge/version-0.17.0-34507A)
 
 > **Pre-1.0 and honest about it.** [Status](#status) says what works today and what
 > doesn't. This README is the setup guide — the product argument lives on the
@@ -173,7 +173,7 @@ The MCP server runs inside your Worker — there is nothing extra to host.
 
 Add your Worker as a connector on claude.ai, Desktop, or mobile — OAuth 2.1, and you
 sign in with your own Access identity. Claude Code uses a bearer token. Same server,
-same eleven tools, every surface.
+same twelve tools, every surface.
 
 Tools carry annotations, so a host knows which are safe to auto-run and which need a
 confirmation first. Full walkthrough:

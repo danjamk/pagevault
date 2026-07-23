@@ -173,6 +173,7 @@ describe("/mcp — protocol", () => {
       "revoke_public_link",
       "rotate_public_link",
       "search_portal",
+      "server_info",
       "update_portal_members",
     ]);
   });
@@ -242,7 +243,7 @@ describe("/mcp — protocol", () => {
 });
 
 describe("⭐ structured tool output — the read→publish chain is machine-readable (#81)", () => {
-  it("tools/list declares outputSchema on exactly the five chain tools, and not the others", async () => {
+  it("tools/list declares outputSchema on the chain tools plus server_info, and not the others", async () => {
     const payload = await result(await rpc("tools/list"));
     const tools = payload["tools"] as { name: string; outputSchema?: Record<string, unknown> }[];
     const withSchema = tools
@@ -250,12 +251,14 @@ describe("⭐ structured tool output — the read→publish chain is machine-rea
       .map((t) => t.name)
       .sort();
 
+    // The five #81 chain tools, plus server_info (#98) — all machine-readable returns.
     expect(withSchema).toEqual([
       "list_documents",
       "list_portals",
       "publish_document",
       "read_document",
       "search_portal",
+      "server_info",
     ]);
 
     // The emitted schema is an object schema — the shape a 2020-12 host expects (SEP-1613).
@@ -276,6 +279,30 @@ describe("⭐ structured tool output — the read→publish chain is machine-rea
     expect(text).toContain(structured["url"] as string);
     // The id joins straight to read_document, no regex over the prose.
     expect(await callToolFull("read_document", { id: structured["id"] as string })).toBeTruthy();
+  });
+
+  it("🔴 publish_document returns the stored byte count — so a stub is caught without read_document (#99)", async () => {
+    const { text, structured } = await callToolFull("publish_document", {
+      title: "Real Doc",
+      html: "<h1>the whole thing</h1><p>lots of real content here</p>",
+    });
+
+    // The size the model needs to confirm a full doc landed, not a placeholder — in the publish
+    // result itself, so no read_document round-trip is required to verify.
+    expect(structured["bytes"]).toBeGreaterThan(0);
+    expect(structured["bytes"]).toBe("<h1>the whole thing</h1><p>lots of real content here</p>".length);
+    expect(text).toContain("Bytes:");
+  });
+
+  it("its html description forbids a placeholder/stub, verbatim (#99)", async () => {
+    const payload = await result(await rpc("tools/list"));
+    const tools = payload["tools"] as { name: string; inputSchema: { properties: Record<string, { description?: string }> } }[];
+    const publish = tools.find((t) => t.name === "publish_document")!;
+    const htmlDesc = publish.inputSchema.properties["html"]!.description ?? "";
+
+    expect(htmlDesc).toContain("VERBATIM");
+    expect(htmlDesc).toContain("placeholder");
+    expect(htmlDesc).toContain("byte count"); // "the result reports the stored byte count"
   });
 
   it("publish_document reports created:false when it overwrites in place", async () => {
@@ -366,6 +393,36 @@ describe("⭐ structured tool output — the read→publish chain is machine-rea
 
     expect(realplus["kind"]).toBe("restricted");
     expect(realplus["documentCount"]).toBe(1);
+  });
+});
+
+describe("⭐ server_info — what am I connected to, and is it current? (#98)", () => {
+  it("reports version, host, and deployedAt as machine-readable fields", async () => {
+    const { text, structured } = await callToolFull("server_info");
+
+    // The env vars are baked at deploy; in the test harness they carry the configured values.
+    expect(typeof structured["version"]).toBe("string");
+    expect(structured["host"]).toBe(HOST); // PUBLIC_HOST in the test config
+    expect(structured["releasesUrl"]).toContain("github.com");
+    // The prose echoes the same, so a host that shows only text still surfaces it.
+    expect(text).toContain("PageVault");
+    expect(text).toContain(HOST);
+  });
+
+  it("splits the clean semver from the build sha, so a version compare needs no parsing", async () => {
+    const { structured } = await callToolFull("server_info");
+    // releaseVersion is the `<semver>` half of `<semver>+<sha>` — build metadata never rides along.
+    expect(structured["releaseVersion"]).not.toContain("+");
+  });
+
+  it("its description tells the model how to check for updates and to admit uncertainty", async () => {
+    const payload = await result(await rpc("tools/list"));
+    const tools = payload["tools"] as { name: string; description: string }[];
+    const info = tools.find((t) => t.name === "server_info")!;
+
+    expect(info.description).toContain("releaseVersion");
+    expect(info.description).toContain("pagevault upgrade"); // the update path
+    expect(info.description).toContain("say"); // "...say so rather than guessing" — no hallucinated verdict
   });
 });
 
