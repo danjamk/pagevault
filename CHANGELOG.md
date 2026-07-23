@@ -7,6 +7,21 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.16.1] — 2026-07-23
+
+A same-day fix for 0.16.0. The Origin block it shipped broke the claude.ai web connector.
+
+### Fixed
+- **`/mcp` no longer refuses a foreign `Origin` with 403 — it logs it and lets the auth gate
+  decide.** 0.16.0 added the 403 to satisfy the MCP 2025-11-25 DNS-rebinding rule; a live
+  claude.ai connect proved it wrong within the hour, because the web app calls `/mcp` from the
+  browser with `Origin: https://claude.ai` and the block read as "server unavailable." That rule
+  is written for localhost-bound servers that grant access by network position. On a remote,
+  token-authenticated server it defends a door that does not exist: a rebound page steals ambient
+  authority, and `/mcp` grants none (no cookie, ever — [ADR-004](docs/adr/ADR-004-console-auth.md)),
+  so an attacker's page can only make unauthenticated requests that 401 regardless of `Origin`.
+  A foreign origin is now recorded as an `mcp_foreign_origin` log event, not blocked.
+
 ## [0.16.0] — 2026-07-23
 
 MCP hardening. The remote server closes the last three gaps between "good" and
