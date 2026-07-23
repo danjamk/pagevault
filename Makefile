@@ -39,7 +39,7 @@ demo: ## Seed a running local Worker with a demo client engagement, and print wh
 	@bash scripts/demo.sh
 
 status: ## Show what this clone is configured for (versions, rung, account)
-	@$(NVM) && node scripts/status.mjs
+	@$(NVM) && node cli/bin/pagevault.mjs status
 
 ##@ Test & check
 test: ## Run the test suite
@@ -88,10 +88,10 @@ deploy: ## Deploy the Worker — rung-aware (Tier 0, or provision at rung 3)
 	@$(NVM) && node cli/lib/provision/deploy.mjs
 
 verify: ## Smoke-test the live deployment (run after deploy)
-	@$(NVM) && node scripts/verify.mjs
+	@$(NVM) && node cli/bin/pagevault.mjs verify
 
 health: ## Assert the live /health matches this checkout's build (<version>+<sha>)
-	@$(NVM) && node scripts/health-check.mjs
+	@$(NVM) && node cli/bin/pagevault.mjs health
 
 logs: ## Tail the deployed Worker (ERRORS=1 only errors, SEARCH=text filter, JSON=1 raw)
 # A bare tail on a healthy deployment is mostly request lines. Now that the Worker emits named
@@ -101,7 +101,7 @@ logs: ## Tail the deployed Worker (ERRORS=1 only errors, SEARCH=text filter, JSO
 		$(if $(ERRORS),--status error,) $(if $(SEARCH),--search "$(SEARCH)",) $(if $(JSON),--format json,)
 
 destroy: ## Tear the deployment down — Worker, DNS, Access apps, group, and KV data
-	@$(NVM) && node scripts/destroy.mjs
+	@$(NVM) && node cli/bin/pagevault.mjs destroy
 
 ##@ Data
 backup: ## Snapshot the KV namespace to a JSON file (OUT=path, KV=id optional)

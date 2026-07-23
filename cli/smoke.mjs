@@ -18,8 +18,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const cliDir = dirname(fileURLToPath(import.meta.url));
 const expected = JSON.parse(readFileSync(join(cliDir, "package.json"), "utf8")).version;
-// The PRODUCT version (root package.json) — what an installed deploy should report, distinct from
-// the npm package's own version above. build-bundle stamps it into dist/version.txt (#87).
+// The PRODUCT version (root package.json) — what an installed deploy reports. As of 0.19.0 the npm
+// package version above is kept EQUAL to it (one number: `pagevault --version` matches /health). The
+// two are still read from their own sources here, so this asserts each is wired to the right place —
+// `--version` from cli/package.json, the deploy stamp from dist/version.txt (#87).
 const productVersion = JSON.parse(readFileSync(join(cliDir, "..", "package.json"), "utf8")).version;
 
 // Run the installed binary and return its combined output. `help` prints to stderr (the CLI
@@ -85,8 +87,27 @@ try {
     throw new Error(`installed context VERSION is "${reported}", expected the stamped product version "${productVersion}"`);
   }
 
+  // 7. The operator commands ship and dispatch from an install too (new in 0.19 — a fresh
+  // lib/ops/ directory with its own relative imports). `status` is the safe probe: with an empty
+  // ~/.pagevault it reports "not configured" and exits 0, which proves lib/ops loads and stateDir()
+  // resolves under node_modules (RUNNING_FROM_REPO is false there — the in-repo tests can't reach it).
+  if (!/\bstatus\b/.test(run(bin, ["help"]))) {
+    throw new Error("`help` does not mention `status` — the operator commands (status/verify/health/destroy) didn't ship");
+  }
+  {
+    const r = spawnSync(bin, ["status", "--json"], { encoding: "utf8", env: { ...process.env, HOME: temp, PAGEVAULT_HOME: temp } });
+    if (r.status !== 0) throw new Error(`installed \`status --json\` exited ${r.status}: ${(r.stderr || "").trim() || "(no output)"}`);
+    let parsed;
+    try {
+      parsed = JSON.parse(r.stdout);
+    } catch {
+      throw new Error("installed `status --json` did not emit valid JSON — lib/ops failed to load from the package");
+    }
+    if (parsed.configured !== false) throw new Error("installed `status --json` on a fresh machine should report configured:false");
+  }
+
   console.log(
-    `✓ packed, installed, and ran pagevault@${version} (init/upgrade + ${productVersion} bundle) from the tarball`,
+    `✓ packed, installed, and ran pagevault@${version} (init/upgrade + status/verify/health/destroy + ${productVersion} bundle) from the tarball`,
   );
 } catch (err) {
   failure = err?.message ?? String(err);

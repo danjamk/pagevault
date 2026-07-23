@@ -28,7 +28,7 @@ export const CONTEXT_FILE = ".pagevault.json";
 // "Installed" = this module lives under node_modules. That signal survives the later move of these
 // scripts into the package (#87) and is never true when running from source — so no existing user's
 // repo-root state is stranded, and no migration is needed: a clone keeps using its cwd files.
-const RUNNING_FROM_REPO = !fileURLToPath(import.meta.url).includes(`${sep}node_modules${sep}`);
+export const RUNNING_FROM_REPO = !fileURLToPath(import.meta.url).includes(`${sep}node_modules${sep}`);
 
 /** The directory holding operator state. See the note above. */
 export function stateDir() {

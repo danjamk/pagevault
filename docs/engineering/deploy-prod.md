@@ -73,7 +73,7 @@ What the job does, in order:
 3. **Deploys** via `cli/lib/provision/deploy.mjs` — the same script `make deploy` runs, no forked logic. Its
    prompts auto-skip when stdin isn't a TTY. The bearer is reused from the Worker; only a
    first-ever prod deploy sets it from the secret.
-4. **Verifies the build** (`scripts/health-check.mjs`): asserts `/health` reports the exact
+4. **Verifies the build** (`pagevault health`, the same command `make health` runs): asserts `/health` reports the exact
    `<version>+<sha>` this commit produced. A stuck or partial rollout fails the run instead of
    going green.
 

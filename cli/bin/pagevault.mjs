@@ -6,11 +6,10 @@
 // deployment (yours or a colleague's) via PAGEVAULT_URL + PAGEVAULT_API_TOKEN. Zero dependencies.
 // See https://github.com/danjamk/pagevault.
 //
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
-import { api, apiText, requireConfig, waitReadable, CONFIG_PATH, PvError } from "../lib/client.mjs";
+import { api, apiText, requireConfig, saveLoginConfig, waitReadable, PvError } from "../lib/client.mjs";
 import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "../lib/format.mjs";
 import { buildExport } from "../lib/export.mjs";
 import { formatViews, queryViews } from "../lib/views.mjs";
@@ -36,6 +35,14 @@ async function main() {
       return init(flags);
     case "upgrade":
       return upgrade(flags);
+    case "status":
+      return status(flags);
+    case "verify":
+      return verify(flags);
+    case "health":
+      return health(flags);
+    case "destroy":
+      return destroy(flags);
     case "publish":
       return publish(positional, flags);
     case "list":
@@ -318,10 +325,11 @@ async function login(flags) {
     throw new PvError("Usage: pagevault login --url https://share.example.com --token <PAGEVAULT_API_TOKEN>");
   }
 
-  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-  // 0600: the file holds your bearer token.
-  writeFileSync(CONFIG_PATH, `${JSON.stringify({ url, token }, null, 2)}\n`, { mode: 0o600 });
-  note(`Saved to ${CONFIG_PATH} (mode 600).`);
+  // The same writer `pagevault init` uses, so an install and an explicit login leave identical
+  // config. `login` is for a second machine, or someone else's deployment — `init` already writes
+  // this for the deployment it just stood up.
+  const path = saveLoginConfig({ url, token });
+  note(`Saved to ${path} (mode 600).`);
 
   // Prove it works now, rather than at first publish.
   try {
@@ -357,13 +365,41 @@ async function upgrade() {
   await deploy({ bundle: true });
 }
 
+// The operator commands — diagnostics and teardown for YOUR deployment. Each is the same engine
+// `make status`/`verify`/`health`/`destroy` run (one engine, two front doors, ADR-014): the logic
+// lives in ../lib/ops, dynamic-imported so the document commands above load none of it. They
+// auto-target this install's deployment from ~/.pagevault/ state — zero config, like verify/health
+// already were behind `make`.
+
+async function status(flags) {
+  const { statusCmd } = await import("../lib/ops/status.mjs");
+  await statusCmd({ json: flags.json === true });
+}
+
+async function verify(flags) {
+  const { verifyCmd } = await import("../lib/ops/verify.mjs");
+  await verifyCmd({ json: flags.json === true });
+}
+
+async function health(flags) {
+  const { healthCmd } = await import("../lib/ops/health.mjs");
+  await healthCmd({ json: flags.json === true });
+}
+
+async function destroy(flags) {
+  const { destroyCmd } = await import("../lib/ops/destroy.mjs");
+  await destroyCmd({ keepData: flags["keep-data"] === true });
+}
+
 function usage() {
   note(`pagevault ${VERSION} — publish HTML or Markdown to your PageVault deployment
 
-Usage:
+Set up & deploy:
   pagevault init [--yes]              stand PageVault up on your own Cloudflare account (no repo)
   pagevault upgrade [--yes]           redeploy the bundled Worker (after 'npm update -g pagevault')
-  pagevault login --url <url> --token <token>
+  pagevault login --url <url> --token <token>   point at a deployment (init does this for you)
+
+Publish & manage documents:
   pagevault publish <file.html|.md> [--portal s] [--title t] [--summary s]
                                 [--tags a,b] [--emails a@b,c@d] [--source-kind html|markdown]
                                 [--public] [--owner-only] [--confirm]
@@ -374,12 +410,18 @@ Usage:
   pagevault revoke <id>               kill a document's public link (keeps the document)
   pagevault rotate <id>               replace the public link with a fresh one
   pagevault share <portal> <email> [email …]
-  pagevault sync-access [--reap] [--yes] [--json]  reconcile the Access viewer group with KV
   pagevault rm <id> [--yes]           delete the document (there is no undo)
   pagevault export [dir] [--portal s] [--include-drafts] [--zip]
-  pagevault views [--days 30] [--portal s] [--doc id] [--json]  which documents were opened
 
-Config: PAGEVAULT_URL / PAGEVAULT_API_TOKEN, or ~/.pagevault/config.json (via login).
+Operate your deployment:
+  pagevault status [--json]           what this install is configured for (local, no network)
+  pagevault verify [--json]           smoke-test the live deployment (run after init/upgrade)
+  pagevault health [--json]           assert /health reports the version you shipped
+  pagevault sync-access [--reap] [--yes] [--json]  reconcile the Access viewer group with KV
+  pagevault views [--days 30] [--portal s] [--doc id] [--json]  which documents were opened
+  pagevault destroy [--keep-data]     tear the deployment down (asks; irreversible)
+
+Config: PAGEVAULT_URL / PAGEVAULT_API_TOKEN, or ~/.pagevault/config.json (written by init/login).
 On success, publish/mint/rotate print only the URL to stdout:  pagevault mint <id> | pbcopy
 read --source prints the stored body to stdout:  pagevault read <id> --source > report.md
 Export writes a browsable folder (index.html + one folder per portal); its path is printed to stdout.`);

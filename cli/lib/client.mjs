@@ -4,11 +4,24 @@
 // so a second bin (the MCP proxy, #21) reuses exactly this auth + base-URL logic rather than
 // re-deriving it. Zero dependencies — Node built-ins only.
 //
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 export const CONFIG_PATH = join(homedir(), ".pagevault", "config.json");
+
+/**
+ * Write the login config the document commands read — `{ url, token }` at CONFIG_PATH, mode 0600
+ * (it holds a bearer). The single writer, shared by the `login` command and `pagevault init` so a
+ * successful install leaves you ready to publish with no second `login` step. `url`'s trailing
+ * slash is trimmed to match loadConfig.
+ */
+export function saveLoginConfig({ url, token }) {
+  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
+  const clean = { url: String(url).replace(/\/+$/, ""), token: String(token) };
+  writeFileSync(CONFIG_PATH, `${JSON.stringify(clean, null, 2)}\n`, { mode: 0o600 });
+  return CONFIG_PATH;
+}
 
 /** A user-facing error: the CLI prints its message plainly, no stack. */
 export class PvError extends Error {}

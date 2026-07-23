@@ -83,4 +83,4 @@ jobs:
       # Close the loop: assert /health reports the exact <version>+<sha> we just shipped. Fails the
       # run if the rollout didn't take. No token needed — /health is public.
       - name: Verify the deployed build
-        run: node scripts/health-check.mjs
+        run: node cli/bin/pagevault.mjs health
