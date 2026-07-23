@@ -49,9 +49,15 @@ export function canViewPortal(
  * ⚠️ THE authorization function. There is no other one.
  *
  * Cloudflare Access answers "who are you?". This answers "may you see this?". Every
- * path that shows a document goes through here — including the read-side MCP tools,
- * where it feels like a convenience feature and is actually the same threat wearing a
- * different hat.
+ * per-viewer path that shows a document to a *client* goes through here — the `/v/` route
+ * and the portal index.
+ *
+ * The read-side MCP surface is a different shape, and the honest description matters
+ * (ADR-016): `/mcp` is gated as a whole by operator identity, and the sole operator passes
+ * check #1 below every time — so `readDocument()` does not call this per document, because
+ * the call could not fail. Prime directive #5 ("one authorization function") is kept by there
+ * being exactly one read path, not by a decorative check bolted onto it. If a multi-viewer MCP
+ * surface is ever added, it routes its reads through here — that is what #5 is protecting.
  *
  * Pure by design: no `env`, no KV, no I/O. Everything it needs is an argument, so the
  * whole matrix can be exercised without a Worker.
