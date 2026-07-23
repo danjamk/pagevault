@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# cli/LICENSE is copied from the repo-root LICENSE by build-bundle.mjs at pack time, so it ships in
+# the npm tarball without a second committed copy to keep in sync.
+cli/LICENSE
 .DS_Store
 .idea/
 

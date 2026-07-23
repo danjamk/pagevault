@@ -20,8 +20,10 @@ Start with the question you came here to answer.
 
 ## Run it yourself
 
-- [Quick Start](../README.md#quick-start) — rung 1, public links, no card.
+- [Quick Start](../README.md#install--pick-a-path) — rung 1, public links, no card.
 - [`setup/prerequisites.md`](setup/prerequisites.md) — what you need before you start.
+- [`setup/ai-guided-setup.md`](setup/ai-guided-setup.md) — hand your LLM this runbook and let it walk you through setup.
+- [`setup/cli-reference.md`](setup/cli-reference.md) — every `pagevault` command, flag, and environment variable.
 - [`setup/connect-mcp.md`](setup/connect-mcp.md) — point Claude (web, Desktop, Code) at your MCP server.
 - [`setup/backup-and-restore.md`](setup/backup-and-restore.md) — export your state and put it back.
 - [`architecture.md` §12](architecture.md#12-operations--what-the-deployment-tells-you) — what the deployment logs, what it never logs, and how to read view tracking.

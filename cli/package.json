@@ -1,8 +1,9 @@
 {
   "name": "pagevault",
-  "version": "0.19.0",
-  "description": "Publish self-contained HTML to your own PageVault deployment from the terminal.",
+  "version": "0.19.1",
+  "description": "Self-hosted publishing for HTML and Markdown artifacts with per-document access control, on your own Cloudflare account — CLI and remote MCP server.",
   "type": "module",
+  "author": "Dan Kuhn",
   "scripts": {
     "build": "node ../scripts/build-bundle.mjs",
     "prepack": "npm run build",
@@ -17,6 +18,7 @@
     "bin",
     "lib",
     "dist",
+    "LICENSE",
     "README.md"
   ],
   "engines": {
@@ -28,14 +30,21 @@
     "url": "git+https://github.com/danjamk/pagevault.git",
     "directory": "cli"
   },
-  "homepage": "https://github.com/danjamk/pagevault#readme",
+  "homepage": "https://danjamk.github.io/pagevault",
   "bugs": "https://github.com/danjamk/pagevault/issues",
   "keywords": [
-    "pagevault",
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "cloudflare-workers",
+    "self-hosted",
+    "client-portal",
+    "markdown",
     "html",
     "publish",
+    "sharing",
     "cloudflare",
     "cli",
-    "sharing"
+    "pagevault"
   ]
 }

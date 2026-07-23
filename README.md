@@ -19,7 +19,7 @@ nothing and signs up for nothing — no account, on any platform.
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-34507A) &nbsp;
 ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-34507A) &nbsp;
-![Version](https://img.shields.io/badge/version-0.19.0-34507A)
+![Version](https://img.shields.io/badge/version-0.19.1-34507A)
 
 > **Pre-1.0 and honest about it.** [Status](#status) says what works today and what
 > doesn't. This README is the setup guide — the product argument lives on the
@@ -80,31 +80,45 @@ the ladder never means re-scoping:
 | Account | Access: Apps and Policies | Edit | tier 2 · gated access |
 | Account | Access: Organizations, Identity Providers, and Groups | Edit | tier 2 · **the viewer group lives here — easy to miss** |
 
-### Install and deploy
+### Install — pick a path
+
+Three ways to stand PageVault up. They end in the same place; the tier steps here pick up
+from a deployed PageVault.
+
+| | Pick this when | How |
+|---|---|---|
+| **npm** *(recommended)* | you just want it running | `npm install -g pagevault && pagevault init` |
+| **git clone** | you want to read or change the code | `git clone`, then `make setup && make deploy && make verify` |
+| **Hand it to your LLM** | you'd rather be walked through it | paste your assistant the [setup runbook](docs/setup/ai-guided-setup.md) and follow along |
+
+The **npm** path, in full:
 
 ```bash
 npm install -g pagevault
 pagevault init          # pastes your token, picks a tier, provisions and deploys — no clone
 ```
 
-`pagevault init` walks you through the token, the tier, and your account, then ships
-the Worker to Cloudflare and remembers where it landed in `~/.pagevault/`. Later,
-`pagevault upgrade` redeploys after `npm update -g pagevault`. Nothing is cloned;
-the package carries the Worker.
+`pagevault init` walks you through the token, the tier, and your account, ships the Worker to
+Cloudflare, remembers where it landed in `~/.pagevault/`, and points the CLI at it — so publishing
+works with no extra step. Later, `pagevault upgrade` redeploys after `npm update -g pagevault`.
 
-<sub>**Prefer to run from source** — to read the code, or contribute? `git clone`, then
-`make setup && make preflight && make deploy && make verify` does the same, from the
-repo. That path is the one every rung below is also tested on.</sub>
+**git clone** runs the same engine from source (`make` calls the same code the CLI does), and it's
+the path every tier here is also tested on. **Hand it to your LLM** isn't a third mechanism: the
+runbook picks npm or clone and walks you through that one — give your assistant this URL and answer
+its questions:
+
+```
+https://raw.githubusercontent.com/danjamk/pagevault/main/docs/setup/ai-guided-setup.md
+```
 
 ### Publish something
 
 ```bash
-pagevault login --url https://<your-worker>.workers.dev --token <PAGEVAULT_API_TOKEN>
 pagevault publish report.html --public
 ```
 
-`init` prints both values when it finishes. Or publish straight from the conversation
-where you made the artifact — see [Connect an agent](#connect-an-agent).
+`init` already pointed the CLI at your deployment, so there's nothing to configure first. Or publish
+straight from the conversation where you made the artifact — see [Connect an agent](#connect-an-agent).
 
 `/v/` and `/admin` fail closed at this tier. That's correct: you aren't using them
 yet. When you want them, climb.
@@ -256,6 +270,8 @@ lets an agent read it back. That's the claim — not any one row.
 |---|---|
 | Understand the design | [`docs/architecture.md`](docs/architecture.md), then the [ADRs](docs/adr/) |
 | Work through setup properly | [`docs/setup/prerequisites.md`](docs/setup/prerequisites.md) |
+| Have my assistant set it up | [`docs/setup/ai-guided-setup.md`](docs/setup/ai-guided-setup.md) |
+| Look up a CLI command | [`docs/setup/cli-reference.md`](docs/setup/cli-reference.md) |
 | Connect Claude to it | [`docs/setup/connect-mcp.md`](docs/setup/connect-mcp.md) |
 | Back it up | [`docs/setup/backup-and-restore.md`](docs/setup/backup-and-restore.md) |
 | See how it was built with an agent | [`docs/engineering/how-i-built-this.md`](docs/engineering/how-i-built-this.md) |

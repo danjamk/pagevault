@@ -46,6 +46,11 @@ rmSync(tmpDir, { recursive: true, force: true });
 // generate the deploy config from it — `templatePath()` resolves here when not running from source.
 copyFileSync(join(root, "worker", "wrangler.jsonc"), join(distDir, "wrangler.template.jsonc"));
 
+// Ship the LICENSE inside the package. npm shows "MIT" from the field, but the file itself must be
+// in the tarball for a license check (or an awesome-selfhosted review) to find it — and the package
+// root is cli/, so npm won't pick up the repo-root LICENSE on its own. One source of truth: copy it.
+copyFileSync(join(root, "LICENSE"), join(root, "cli", "LICENSE"));
+
 // Stamp the PRODUCT version (root package.json) so an installed deploy reports the right version at
 // /health. The installed package has no root package.json at cwd, and its own cli/package.json
 // version is independent (#87). context.mjs reads this file when not running from source.
