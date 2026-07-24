@@ -1,0 +1,65 @@
+name: Publish CLI to npm
+
+# Publishes the `pagevault` CLI (the cli/ package) to npm with build provenance, when a GitHub
+# Release is published. Provenance ties the exact tarball to the workflow run and commit that built
+# it — a verified badge on the npm page. That signal matters here: the package's pitch is "let me
+# provision your Cloudflare account," and it ships a large prebuilt Worker bundle nobody reads. (#107)
+#
+# Auth is OIDC **trusted publishing**: configure a Trusted Publisher for this repo + this workflow at
+#   npmjs.com → the pagevault package → Settings → Trusted Publisher
+# and no NPM_TOKEN is needed — `id-token: write` below lets npm exchange the OIDC token and attach
+# provenance. Token fallback: set an `NPM_TOKEN` repo secret, add `registry-url` to setup-node, and
+# set `NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}` on the publish step.
+#
+# `make publish-cli` remains the manual/local path; this workflow is the provenance-carrying one for
+# releases. Tagging a release does not deploy the Worker (that's deploy-prod.yml, ADR-010) — this only
+# ships the npm package.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}   # manual re-run if a release publish needs a retry
+
+permissions:
+  contents: read
+  id-token: write         # required for npm provenance + OIDC trusted publishing
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      # The cli `prepack` builds the Worker bundle (wrangler --dry-run over worker/src), so the
+      # Worker's dependencies must be installed to resolve its imports.
+      - run: pnpm install --frozen-lockfile
+
+      # Trusted publishing needs npm >= 11.5; the npm bundled with Node 22 is older.
+      - run: npm install -g npm@latest
+
+      # A Release publishes at a tag like v0.19.2; the cli package version must match, or we would
+      # publish the wrong version — or re-publish an existing one, which npm rejects permanently.
+      - name: Guard — release tag matches cli/package.json
+        if: github.event_name == 'release'
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./cli/package.json').version")"
+          echo "release tag=$TAG  cli/package.json=$PKG"
+          [ "$TAG" = "$PKG" ] || { echo "::error::release tag ($TAG) != cli version ($PKG)"; exit 1; }
+
+      # `npm publish` runs cli's prepublishOnly (node --test + the pack-and-install smoke), so a
+      # broken package still cannot ship. --provenance attaches the signed build statement.
+      - name: Publish pagevault to npm with provenance
+        working-directory: cli
+        run: npm publish --provenance --access public
