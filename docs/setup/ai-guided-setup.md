@@ -24,7 +24,7 @@ decision tree and the failure guide that sit on top of them.
 - **Three things are irreversible or widening — always confirm first:**
   - `--public` / `pagevault mint` mints a link *anyone* who gets it can open, no login.
   - `pagevault destroy` deletes the deployment and its documents.
-  - Publishing over an existing document with the same title replaces it in place.
+  - Publishing over an existing document with the same filename replaces it in place.
 - **Never invent a portal name.** If the person is running a client practice (tier 3) and it's
   ambiguous which client a document belongs to, ask.
 

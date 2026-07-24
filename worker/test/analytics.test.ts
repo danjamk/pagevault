@@ -17,6 +17,7 @@ import type { DocMeta } from "../src/store.js";
 const doc = (over: Partial<DocMeta> = {}): DocMeta => ({
   id: "k3x9mq2vb7pd",
   portal: "acme",
+  name: "q3-review.html",
   title: "Q3 Review",
   sourceKind: "html",
   ownerOnly: false,

@@ -29,8 +29,18 @@ export function saveLoginConfig({ url, token }) {
   return CONFIG_PATH;
 }
 
-/** A user-facing error: the CLI prints its message plainly, no stack. */
-export class PvError extends Error {}
+/**
+ * A user-facing error: the CLI prints its message plainly, no stack. Carries the server's
+ * error `code` and full response `details` when it wraps an API failure, so a command can
+ * offer code-specific guidance (e.g. the `already_exists` collision paths — ADR-017).
+ */
+export class PvError extends Error {
+  constructor(message, { code, details } = {}) {
+    super(message);
+    this.code = code;
+    this.details = details;
+  }
+}
 
 /**
  * Resolve where to publish and how to authenticate. The environment wins over the config file,
@@ -89,7 +99,10 @@ export async function api(cfg, method, path, body) {
   const data = text ? safeJson(text) : {};
   if (!res.ok) {
     const msg = data?.error || text || res.statusText;
-    throw new PvError(`${msg} (HTTP ${res.status}${data?.code ? `, ${data.code}` : ""})`);
+    throw new PvError(`${msg} (HTTP ${res.status}${data?.code ? `, ${data.code}` : ""})`, {
+      code: data?.code,
+      details: data,
+    });
   }
   return data ?? {};
 }

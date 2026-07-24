@@ -144,6 +144,49 @@ describe("🔴 /api — console session tokens (ADR-004)", () => {
   });
 });
 
+describe("filename identity — (portal, filename) is the update key, not the title (ADR-017, #111)", () => {
+  type DocBody = { id: string; name: string; title: string; code?: string };
+  const read = (r: Response) => r.json() as Promise<DocBody>;
+
+  it("two files with the same title but different filenames are different documents", async () => {
+    const a = await read(await publish(aDoc({ title: "Brain", filename: "readme.md", sourceKind: "markdown", html: "# Brain" })));
+    const b = await read(await publish(aDoc({ title: "Brain", filename: "readme2.md", sourceKind: "markdown", html: "# Brain" })));
+    expect(a.id).not.toBe(b.id);
+    expect(a.name).toBe("readme.md");
+    expect(b.name).toBe("readme2.md");
+  });
+
+  it("the same filename updates in place, even when the title changes", async () => {
+    const first = await read(await publish(aDoc({ title: "Draft", filename: "report.html" })));
+    const second = await read(await publish(aDoc({ title: "Final", filename: "report.html", confirm: true })));
+    expect(second.id).toBe(first.id);
+    expect(second.title).toBe("Final");
+    expect(second.name).toBe("report.html");
+  });
+
+  it("a same-filename republish without confirm is a 409 carrying the existing id + name", async () => {
+    await publish(aDoc({ title: "One", filename: "dup.html" }));
+    const res = await publish(aDoc({ title: "Two", filename: "dup.html" }));
+    expect(res.status).toBe(409);
+    const body = await read(res);
+    expect(body.code).toBe("already_exists");
+    expect(body.name).toBe("dup.html");
+    expect(typeof body.id).toBe("string");
+  });
+
+  it("strips any directory — identity is the basename", async () => {
+    const a = await read(await publish(aDoc({ title: "X", filename: "/tmp/a/notes.md", sourceKind: "markdown", html: "# X" })));
+    expect(a.name).toBe("notes.md");
+  });
+
+  it("with no filename, defaults deterministically from the title (the MCP-without-a-file case)", async () => {
+    const a = await read(await publish(aDoc({ title: "Weekly Update" })));
+    const b = await read(await publish(aDoc({ title: "Weekly Update", confirm: true })));
+    expect(a.name).toBe("weekly-update.html");
+    expect(b.id).toBe(a.id);
+  });
+});
+
 describe("deterministic ids — republish is update-in-place, not a duplicate (#74, ADR-013)", () => {
   it("republishing the same title keeps one document with the same id", async () => {
     const first = await publish(aDoc({ title: "CDC on V2", html: "<h1>v1</h1>" }));

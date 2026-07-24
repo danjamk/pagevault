@@ -82,6 +82,7 @@ async function seedDoc(slug: string, id: string, over: Partial<DocMeta> = {}): P
   const meta: DocMeta = {
     id,
     portal: slug,
+    name: `${slug}-${id}.html`,
     title: `${slug} report ${id}`,
     sourceKind: "html",
     ownerOnly: false,

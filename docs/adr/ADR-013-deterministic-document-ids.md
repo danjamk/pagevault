@@ -1,7 +1,12 @@
 # ADR-013 — Deterministic document IDs, derived from portal + title
 
-**Status:** Accepted
+**Status:** Accepted — **superseded in part by [ADR-017](ADR-017-document-identity-is-the-filename.md)**
 **Date:** 2026-07-20
+
+> **Update (ADR-017, 2026-07-24):** the deterministic-id *mechanism* below stands unchanged.
+> Only the identity *key* moved — from the title to the **filename** — because a
+> content-derived title was invisible and collided surprisingly. Read `(portal, title)` as
+> `(portal, filename)` throughout; `title` is now display-only.
 
 ## Context
 

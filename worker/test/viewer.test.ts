@@ -10,6 +10,7 @@ const HTML = "<!doctype html><h1>Q3</h1><script>console.log(1)</script>";
 const doc = (over: Partial<DocMeta> = {}): DocMeta => ({
   id: "k3x9mq2vb7pd",
   portal: "default",
+  name: "q3-review.html",
   title: "Q3 Review",
   sourceKind: "html",
   ownerOnly: false,
