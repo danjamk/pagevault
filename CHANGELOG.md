@@ -7,6 +7,24 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.19.2] — 2026-07-23
+
+### Fixed
+- **`pagevault login` now falls back to `PAGEVAULT_URL` / `PAGEVAULT_API_TOKEN`** when its flags are
+  omitted, so `pagevault login` alone persists an already-exported environment to `config.json`
+  instead of demanding you re-type values every other command already reads. It errors only when
+  neither a flag nor the environment supplies a value. A zero-config-parity scan confirmed `login`
+  was the only command that demanded input it could infer — the rest already resolve their connection
+  from env/`config.json` or auto-target the deployment from `~/.pagevault/`.
+
+### Docs
+- **Documentation audit.** Fixed two broken "Get it running" CTAs on the product page and a stale
+  anchor in the docs map (the README section is now "Install — pick a path"); repaired two issue
+  links with the wrong relative depth; removed a dead placeholder link in the README; updated the
+  `CLAUDE.md` layout to list the operator commands and `cli/lib/ops/`; and reconciled the onboarding
+  design doc to the shipped **tier 1/2/3** model (it was on the pre-build "Tier 0 / rung" vocabulary),
+  reframing it as a historical design record that points at the current setup docs.
+
 ## [0.19.1] — 2026-07-23
 
 ### Added
