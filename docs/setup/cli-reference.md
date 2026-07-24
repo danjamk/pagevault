@@ -29,10 +29,12 @@ bundled Worker, and **writes the login config for you** so `publish` works immed
 Redeploy the Worker bundle that shipped with your installed package — after `npm update -g pagevault`.
 Keeps your KV, config, and secrets.
 
-### `pagevault login --url <url> --token <token>`
+### `pagevault login [--url <url>] [--token <token>]`
 Point the CLI at a deployment: writes `~/.pagevault/config.json` (mode `600` — it holds a bearer) and
-verifies the connection. `init` already does this for the deployment it stood up; reach for `login`
-only for a **second machine**, or **someone else's** deployment.
+verifies the connection. The flags are optional — it falls back to `PAGEVAULT_URL` /
+`PAGEVAULT_API_TOKEN` from the environment, so `pagevault login` alone persists the config you already
+have exported. `init` already does this for the deployment it stood up; reach for `login` only for a
+**second machine**, or **someone else's** deployment.
 
 ---
 

@@ -43,8 +43,9 @@ someone else's), use `login` instead:
 pagevault login --url https://you.example.com --token <PAGEVAULT_API_TOKEN>
 ```
 
-Either way, `PAGEVAULT_URL` and `PAGEVAULT_API_TOKEN` in the environment override the saved config
-per command.
+The flags are optional — `login` falls back to `PAGEVAULT_URL` / `PAGEVAULT_API_TOKEN` from the
+environment, so if those are already exported, `pagevault login` alone persists them. And either way,
+those same variables override the saved config per command.
 
 ## Commands
 

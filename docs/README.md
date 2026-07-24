@@ -5,7 +5,7 @@ Start with the question you came here to answer.
 | I want to… | Start here |
 |---|---|
 | **Understand the design** | [`architecture.md`](architecture.md), then the [`adr/`](adr/) records |
-| **Run it myself** | the [Quick Start](../README.md#quick-start), then [`setup/prerequisites.md`](setup/prerequisites.md) |
+| **Run it myself** | the [Quick Start](../README.md#install--pick-a-path), then [`setup/prerequisites.md`](setup/prerequisites.md) |
 | **See how it was built** | [`engineering/how-i-built-this.md`](engineering/how-i-built-this.md) |
 | **Ship or release it** (maintainer) | [`engineering/deploy-prod.md`](engineering/deploy-prod.md), [`engineering/state-versioning.md`](engineering/state-versioning.md) |
 | **Contribute** | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) |

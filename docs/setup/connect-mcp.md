@@ -70,7 +70,7 @@ npx mcp-remote https://share.<yourdomain>/mcp --header "Authorization: Bearer <P
 
 Point your client's stdio MCP config at that command. We deliberately do **not** ship our own stdio
 shim for this — the generic bridge already does it, and a remote server is the architecture we
-committed to ([#21](../../../issues/21) was closed for exactly this reason).
+committed to ([#21](https://github.com/danjamk/pagevault/issues/21) was closed for exactly this reason).
 
 ---
 

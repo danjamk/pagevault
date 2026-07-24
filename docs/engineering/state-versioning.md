@@ -7,7 +7,7 @@ PageVault carries **two** versions, and it's worth keeping them straight:
 | **Product version** | `package.json` `version` (semver) | the version of the *code* you're running — shown in every command header and by `make status` |
 | **Schema version** | `.pagevault.json` `schemaVersion` (integer) | the *format* of the state file — internal plumbing for migrations |
 
-This page is about the second one. (The product version and where it's surfaced is [#48](../../issues/48).)
+This page is about the second one. (The product version and where it's surfaced is [#48](https://github.com/danjamk/pagevault/issues/48).)
 
 ## Why a schema version
 
