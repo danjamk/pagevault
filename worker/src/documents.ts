@@ -4,7 +4,7 @@ import {
   reconcileGroupMembers,
   syncGroupMembers,
 } from "./access-group.js";
-import type { Env } from "./env.js";
+import { accessEnabled, type Env } from "./env.js";
 import { renderMarkdown } from "./markdown.js";
 import {
   DEFAULT_PORTAL,
@@ -187,10 +187,18 @@ export async function publishDocument(env: Env, input: PublishInput): Promise<Pu
   const extraEmails = parseEmails(input.extraEmails, "emails") ?? existing?.extraEmails;
   if (extraEmails) meta.extraEmails = extraEmails;
 
+  // On a no-Access deployment (rung 1: workers.dev, no Zero Trust) there is no login wall and
+  // no way to identify a viewer, so a members-only `/v/` document is un-openable — the only
+  // meaningful published states are "public link" or "owner-only draft". A plain publish there
+  // is public by nature, so default it to public rather than hand back a dead link (#111, PD-3).
+  // This is NOT the widening the note below guards against: on rung 1 there is no narrower
+  // openable state to widen FROM, and the `/p/` link is the whole point of the tier.
+  const defaultPublic = !accessEnabled(env) && meta.ownerOnly !== true;
+
   // Widening is never a side effect. An existing public link survives an update — that is
   // the point of updating in place — but publishing does not mint a new one unless asked.
   if (existing?.publicToken) meta.publicToken = existing.publicToken;
-  else if (input.makePublic === true) meta.publicToken = mintPublicToken();
+  else if (input.makePublic === true || defaultPublic) meta.publicToken = mintPublicToken();
 
   // Check before writing: KV rejects an oversized metadata write, and that failure would
   // surface as a document missing from every listing rather than as a bad request.

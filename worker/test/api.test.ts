@@ -1,6 +1,7 @@
 import { SELF, createExecutionContext, env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { computeDesiredViewers } from "../src/documents.js";
+import { computeDesiredViewers, publishDocument } from "../src/documents.js";
+import { accessEnabled } from "../src/env.js";
 import worker from "../src/index.js";
 import { mintSession } from "../src/session.js";
 import { type Portal, putMembers, putPortal } from "../src/store.js";
@@ -30,6 +31,41 @@ const portal = (slug: string, kind: Portal["kind"] = "restricted"): Portal => ({
   kind,
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
+});
+
+describe("rung 1 (no Access) — publish defaults to a public link, not a dead /v/ one (#111)", () => {
+  // On a no-Access deployment there is no login wall, so a members-only /v/ document is
+  // un-openable — a plain publish must come back as a public /p/ link. `publishDocument` is
+  // called directly with the Access vars blanked: SELF.fetch always runs against the configured
+  // (rung-3) pool env, so the branch only reachable when Access is absent needs a crafted env.
+  const noAccessEnv = { ...env, CF_TEAM_NAME: "", CF_ACCESS_AUD_DOCS: "" } as typeof env;
+
+  it("accessEnabled is true only when BOTH team and audience are set", () => {
+    expect(accessEnabled(env)).toBe(true);
+    expect(accessEnabled(noAccessEnv)).toBe(false);
+    expect(accessEnabled({ ...env, CF_TEAM_NAME: "" } as typeof env)).toBe(false);
+    expect(accessEnabled({ ...env, CF_ACCESS_AUD_DOCS: "" } as typeof env)).toBe(false);
+  });
+
+  it("a plain publish auto-mints a public token", async () => {
+    const { meta } = await publishDocument(noAccessEnv, { title: "Rung 1 Report", source: "<h1>hi</h1>" });
+    expect(meta.publicToken).toBeTruthy();
+  });
+
+  it("an owner-only draft stays private — no public token", async () => {
+    const { meta } = await publishDocument(noAccessEnv, {
+      title: "Rung 1 Draft",
+      source: "<h1>d</h1>",
+      ownerOnly: true,
+    });
+    expect(meta.ownerOnly).toBe(true);
+    expect(meta.publicToken).toBeUndefined();
+  });
+
+  it("with Access configured, a plain publish is NOT public by default", async () => {
+    const { meta } = await publishDocument(env, { title: "Gated Report", source: "<h1>g</h1>" });
+    expect(meta.publicToken).toBeUndefined();
+  });
 });
 
 describe("auth", () => {

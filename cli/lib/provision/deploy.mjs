@@ -244,7 +244,8 @@ export async function deploy(opts = {}) {
     }
   }
 
-  console.log(`\n${c.bold("Next:")} ${c.bold("make verify")} ${c.dim("— smoke-test the deployment and publish your first document.")}`);
+  const verifyCmd = RUNNING_FROM_REPO ? "make verify" : "pagevault verify";
+  console.log(`\n${c.bold("Next:")} ${c.bold(verifyCmd)} ${c.dim("— smoke-test the deployment and publish your first document.")}`);
   console.log(`  ${c.dim("It hands back a public /p/ link you can open immediately — no login, no Access.")}\n`);
 }
 

@@ -106,3 +106,18 @@ export interface Env {
    */
   CF_API_TOKEN?: string;
 }
+
+/**
+ * Does this deployment sit behind Cloudflare Access?
+ *
+ * Rung 1 (workers.dev, no Zero Trust) leaves `CF_TEAM_NAME` and `CF_ACCESS_AUD_DOCS` empty;
+ * provisioning fills them at rung 3. This is the single predicate that separates a public-only
+ * deployment from an email-secured one, and it must agree with `identify()`'s "no config →
+ * deny" branch in auth.ts: both team and audience are required for any Access token to verify,
+ * so both are required here. When this is false, `/v/*` has no login wall in front of it and a
+ * members-only document is un-openable — publishing defaults to a public `/p/` link instead
+ * (documents.ts), and `/v/*` answers honestly rather than crying "misconfigured" (portal.ts).
+ */
+export function accessEnabled(env: Env): boolean {
+  return Boolean(env.CF_TEAM_NAME?.trim()) && Boolean(env.CF_ACCESS_AUD_DOCS?.trim());
+}

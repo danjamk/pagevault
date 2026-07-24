@@ -2,7 +2,7 @@ import { canView, canViewPortal, emailsMatch } from "./access.js";
 import type { ViewSurface } from "./analytics.js";
 import { identify } from "./auth.js";
 import { documentPath, portalPath } from "./documents.js";
-import type { Env } from "./env.js";
+import { accessEnabled, type Env } from "./env.js";
 import {
   type DocSummary,
   type Portal,
@@ -35,6 +35,13 @@ export async function handlePortalRoute(
     const target = id === null ? portalPath(portal) : documentPath(portal, id);
     return Response.redirect(new URL(target, request.url).toString(), 302);
   }
+
+  // Rung 1 (workers.dev, no Zero Trust) has no Access in front of `/v/*`, so there is no
+  // identity to establish and no members-only document to show. Don't run the JWT path or cry
+  // "misconfigured" — say plainly that this deployment publishes public links only. Publishing
+  // now defaults to a `/p/` link on such a deployment (#111), so reaching here means an old
+  // `/v/` link or a hand-typed URL. Answer the same for every slug, so it leaks nothing.
+  if (!accessEnabled(env)) return noPortalsHere();
 
   const identity = await identify(request, env, "docs");
   const email = identity?.email ?? null;
@@ -505,8 +512,32 @@ const misconfigured = (): Response =>
       covering <code>/v</code>, not the one covering <code>/admin</code>.</li>
   <li>The Worker was deployed before the Access apps were created.</li>
 </ul>
-Run <code>make provision</code> then <code>make deploy</code>. <code>make logs</code> shows
-the failure as <code>jwt_verification_failed_behind_access</code>.`,
+Re-run <code>pagevault init</code> to re-provision Access and redeploy — it rebuilds the apps
+and sets the audience tags to match. (From a repo checkout: <code>make provision</code> then
+<code>make deploy</code>.) The Worker logs this as
+<code>jwt_verification_failed_behind_access</code>.`,
+  );
+
+/**
+ * Rung 1 has no Cloudflare Access, so `/v/*` (the members-only viewer) has nothing to gate and
+ * no way to identify a visitor. This is NOT the `misconfigured()` page — nothing is broken; the
+ * deployment simply has no login wall. Portals are a rung-3 feature. Served identically for every
+ * slug so it never reveals whether a portal or document exists.
+ */
+const noPortalsHere = (): Response =>
+  page(
+    404,
+    "Nothing to see here",
+    "This PageVault deployment publishes public links only — it has no login-gated portals.",
+    `<p>Portals — client collections behind a Cloudflare Access login — are a rung-3 feature, and
+this deployment is running at rung 1. A <code>/v/</code> link has no login wall here to check you
+against.</p>
+<ul>
+  <li>Sent a document? Ask for its public <code>/p/</code> link instead.</li>
+  <li>The operator? <code>pagevault publish</code> already hands back a public link on this
+      deployment. To gate documents behind email, add portals by re-running
+      <code>pagevault init</code> and choosing rung 3.</li>
+</ul>`,
   );
 
 /** A plain, honest error page. No branding, no cleverness. */
