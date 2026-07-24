@@ -19,7 +19,7 @@ nothing and signs up for nothing — no account, on any platform.
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-34507A) &nbsp;
 ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-34507A) &nbsp;
-![Version](https://img.shields.io/badge/version-0.19.1-34507A)
+![Version](https://img.shields.io/badge/version-0.19.2-34507A)
 
 > **Pre-1.0 and honest about it.** [Status](#status) says what works today and what
 > doesn't. This README is the setup guide — the product argument lives on the
@@ -48,8 +48,8 @@ Two honest notes on that table:
 - **Under ~5 clients, tier 3 is probably not worth it.** A shared folder per client
   is genuinely simpler. Portals earn their keep once the artifacts pile up.
 
-You can start at 1 and climb later. Every rung is additive, your documents carry
-across untouched, and rungs 1–2 undo cleanly.
+You can start at 1 and climb later. Every tier is additive, your documents carry
+across untouched, and tiers 1–2 undo cleanly.
 
 ---
 
@@ -135,8 +135,8 @@ six-digit code by email — no account, no password, nothing installed.
 narrow runtime token.
 
 The domain and the gating are separate upgrades. You can put PageVault on your own
-domain without turning on Zero Trust at all. Re-run the setup to climb a rung — it
-shows your current choices and asks only for what the new rung needs:
+domain without turning on Zero Trust at all. Re-run the setup to climb a tier — it
+shows your current choices and asks only for what the new tier needs:
 
 ```bash
 pagevault init          # re-run: pick tier 2, give it your hostname, redeploy
@@ -227,7 +227,7 @@ Pre-1.0. `1.0.0` is reserved for "a stranger can rely on this."
 ## How it compares
 
 The honest version, including the rows where the alternatives win. The
-[full field guide](#) <!-- TODO(#60) --> puts ten tools across six capability
+full field guide <!-- TODO(#60): link once the interactive field guide ships --> puts ten tools across six capability
 groups on an interactive map — and it's served through PageVault, so it doubles as
 a live sample.
 

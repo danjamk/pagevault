@@ -1,13 +1,17 @@
 # PageVault — Onboarding Experience Design
 
-**Status:** Draft · 2026-07-16
-**Relates to:** ADR-008 (progressive provisioning), #7 (CLI), #9 (provisioning),
-#10 (README), #28 (Deploy button)
+**Status:** Original onboarding design (2026-07-16), since largely realized.
+**Relates to:** [ADR-008](../adr/ADR-008-progressive-provisioning.md) (progressive provisioning).
 
-The setup path is the entire product for anyone who isn't me. If it doesn't work
-start to finish for a stranger, nothing else in this repo matters. This document
-designs that path before we build more of it — so each piece (`#7/#9/#28/#10`)
-gets built against one map instead of in isolation.
+> **This is a design record, not the current how-to.** The tier model below is kept in sync with
+> what shipped, but the operational specifics further down (the manual step-by-step, the "gaps," the
+> "what we build first" order) are the *original plan* — since realized as the CLI (`pagevault init`),
+> the [agent runbook](../setup/ai-guided-setup.md), and the [prerequisites doc](../setup/prerequisites.md),
+> or dropped (the one-click Deploy button, #28). For the **current** setup path, start at the
+> [README](../../README.md#is-this-for-you) and [`docs/setup/`](../setup/).
+
+The setup path is the entire product for anyone who isn't me. If it doesn't work start to finish for
+a stranger, nothing else in this repo matters. This document designed that path before it was built.
 
 ---
 
@@ -33,91 +37,90 @@ At the hub, two independent choices:
 
 ```
 Medium ┐
-Show-  ├──→  THE REPO  ──→  TIER?   Tier 0  publish public links   (no domain / ZT / card)
-case   │     (docs)         │       Tier 1  client portals         (domain + ZT + Access)
-repo   ┘                    │
-                            └──→  PATH?   1. Clone      developer, full control  ◀ FOCUS
-                                          2. Deploy button (#28)  one-click, Tier-0 only
-                                          3. npm (#7)   npx, no clone
-                                          4. LLM-guided  rides on top of any above  ◀ FOCUS
+Show-  ├──→  THE REPO  ──→  TIER?   1  Sharing something   public /p/ links         (no domain / ZT / card)
+case   │     (docs)         │       2  Sharing privately   your domain, email-gated  (Zero Trust, card on file)
+repo   ┘                    │       3  Running a practice  per-client portals
+                            │
+                            └──→  PATH?   1. npm         `pagevault init`, no clone    ◀ default
+                                          2. clone       developer, full control
+                                          3. LLM-guided  rides on top of either
 ```
 
-- **The tier axis is the honest gate.** Tier 0 is genuinely free and instant.
-  Tier 1 costs a domain and a credit card on file (Cloudflare requires one to
-  enable Zero Trust, even on the free plan — confirmed 2026-07). We state that
-  cost plainly rather than burying it.
-- **The path axis is just "how much terminal do you want to touch."** The paths
-  share ~80% — same prerequisites, same provisioning core, same verification,
-  same teardown. They differ in the wrapper and the first sixty seconds.
+- **The tier axis is the honest gate.** Tier 1 is genuinely free and instant. The real jump is
+  1 → 2: Cloudflare wants a credit card on file before it will enable Zero Trust, even on the free
+  plan (confirmed 2026-07). We state that cost plainly rather than burying it. Tier 3 (portals) is a
+  data model on top of tier 2 — no new cost.
+- **The path axis is just "how much terminal do you want to touch."** The paths share ~80% — same
+  prerequisites, same provisioning core, same verification, same teardown. They differ in the wrapper
+  and the first sixty seconds. (The one-click Deploy button once considered here was dropped — it
+  couldn't set the runtime secret or do Access, so it dead-ended at an unusable tier 1.)
 
 ---
 
 ## The upgrade ladder
 
-The two tiers are really **three rungs**, and the middle one is the unlock: you
-can put your own domain on a Tier-0 deployment *without* Access, Zero Trust, or a
-credit card. "Use my domain" and "turn on portals" are separate upgrades, and only
-the last one crosses into Tier 1.
+Three tiers, and the middle one splits into two half-steps: you can put your own domain on a tier-1
+deployment *without* Access, Zero Trust, or a card. "Use my domain" and "gate it to named people" are
+separate upgrades, and only the second crosses the card-on-file line.
 
-| Rung | What you get | What it adds | New prerequisite | Reversible? |
+| Tier | What you get | What it adds | New prerequisite | Reversible? |
 |---|---|---|---|---|
-| **1 · Publish** *(Tier 0)* | Deploy to `*.workers.dev`, publish HTML, share `/p/` links, read/search via MCP | — | CF account (**no card**), Node 22, `wrangler login` | n/a |
-| **2 · Your domain** *(Tier 0)* | The same, served on `pagevault.you.com` | a custom-domain route | a domain **in the account** | yes — drop the route, redeploy |
-| **3 · Portals** *(Tier 1)* | Client collections, the owner console, email-secured `/v` | two Access apps, viewer group, One-Time PIN | Zero Trust (**needs a card**), a scoped API token | Access is reversible; **Zero Trust is the one-way door** |
+| **1 · Sharing something** | Deploy to `*.workers.dev`, publish HTML/Markdown, share `/p/` links, read/search via MCP | — | CF account (**no card**), Node 22 | n/a |
+| **2 · Sharing it privately** | The same on `pagevault.you.com`, gated to named emails (One-Time PIN), the owner console | a custom-domain route, then two Access apps + a viewer group | a domain **in the account**; Zero Trust (**a card on file**), a scoped API token | the domain/route is reversible; **Zero Trust is the one-way door** |
+| **3 · Running a practice** | Per-client portals — permissions on the client, not the document | the portal data model on top of tier 2 | same as tier 2 | yes — portals are just data |
 
 Two things make the ladder work:
 
-- **Every rung is additive.** The KV namespace, portals, and documents carry
-  across untouched — you never rebuild, you only add. Climb a rung when you have a
-  reason, not before.
-- **Only rung 3 is a commitment.** Rungs 1 and 2 cost nothing and undo cleanly.
-  Zero Trust is the single step that can't be automated away or cleanly reversed,
-  so it comes last, and only when portals are actually wanted.
+- **Every tier is additive.** The KV namespace, portals, and documents carry across untouched — you
+  never rebuild, you only add. Climb when you have a reason, not before.
+- **The real commitment is turning on Zero Trust — the 1 → 2 jump.** Publishing on your own domain
+  without gating is reversible; Zero Trust is the single step that can't be automated away or cleanly
+  reversed, so it comes only when private access is actually wanted. Tier 3 (portals) adds no cost or
+  irreversible step over tier 2 — it's a data model.
 
-Notes that don't fit the table: a custom domain is *required* for rung 3 because
-Cloudflare Access cannot protect a `*.workers.dev` host. Seats (one per distinct
-viewer, 50 free) are consumed only at rung 3, on login — rungs 1–2 authenticate
-nobody. This ladder is what makes "one-click install, then upgrade when you need
-to" a real promise rather than a slogan.
-
----
-
-## The four paths
-
-1. **Clone** *(focus)* — `git clone`, then the scripts. Full control, the
-   reference implementation, what every other path is a convenience over.
-2. **Deploy button** (#28) — one click clones the repo into the visitor's
-   Cloudflare account and deploys. Reaches **Tier 0 only** — it cannot do the
-   Access provisioning, so it hands off to the script for Tier 1.
-3. **npm** (#7) — `npx pagevault` / `npm i -g pagevault`. Clone-without-cloning
-   for people who don't want the repo checked out. Wraps the same core.
-4. **LLM-guided** *(focus)* — not a separate build. It's a quality bar on the docs
-   and tools that lets an agent drive paths 1–3 (see below).
+Notes that don't fit the table: a custom domain is *required* before you can gate anything, because
+Cloudflare Access cannot protect a `*.workers.dev` host. Seats (one per distinct viewer, 50 free) are
+consumed only from tier 2, on login — tier 1 authenticates nobody. This ladder is what makes
+"install, then upgrade when you need to" a real promise rather than a slogan.
 
 ---
 
-## Focus 1 — the clone path at Tier 0 (the reference journey)
+## The paths (as shipped)
+
+1. **npm** *(default)* — `npm i -g pagevault && pagevault init`. Provisions and deploys with no repo
+   checkout; the package carries a prebuilt Worker. The on-ramp most people take.
+2. **clone** — `git clone`, then `make`. Full control, the reference implementation, for reading or
+   changing the code. Every other path is a convenience over the same core.
+3. **LLM-guided** — not a separate build. It's a quality bar on the docs and tools that lets an agent
+   drive the npm or clone path (see below), realized as [`ai-guided-setup.md`](../setup/ai-guided-setup.md).
+
+*(The one-click Deploy button (#28) explored in the original design was dropped — it couldn't set the
+runtime secret or do Access provisioning, so it dead-ended at an unusable tier 1.)*
+
+---
+
+## Focus 1 — the clone path at tier 1 (the reference journey)
 
 Ground zero to a shared link, no domain, no Zero Trust, no card:
 
 1. **Prerequisites** — a Cloudflare account, Node 22, git. Nothing bought.
 2. `git clone …` and `pnpm install`.
 3. `wrangler login` — OAuth into their Cloudflare account.
-4. **Verify** — `node scripts/preflight.mjs` in a Tier-0 mode confirms the account
-   and token before anything is created. (Preflight exists; a Tier-0 profile of it
+4. **Verify** — `node scripts/preflight.mjs` in a tier 1 mode confirms the account
+   and token before anything is created. (Preflight exists; a tier 1 profile of it
    is a gap — see Core.)
 5. **Create KV** — `wrangler kv namespace create PAGEVAULT`.
 6. **Minimal config** — KV id + owner email. No Access AUDs, no team name, no
-   custom domain. `workers.dev` enabled. (Today's `wrangler.jsonc` is Tier-1
-   shaped: `workers_dev: false` and Access vars required. A Tier-0 config profile
+   custom domain. `workers.dev` enabled. (Today's `wrangler.jsonc` is tier 2
+   shaped: `workers_dev: false` and Access vars required. A tier 1 config profile
    is a gap.)
 7. **Set the secret** — `wrangler secret put PAGEVAULT_API_TOKEN`.
 8. **Deploy** — `wrangler deploy`.
 9. **Publish** — connect the MCP with the token (or the CLI), publish a document,
    get a `/p/` link.
-10. **Open the link** — it renders, no login. Tier 0 done.
+10. **Open the link** — it renders, no login. tier 1 done.
 
-The routes that need Access (`/v`, `/admin`) fail closed at Tier 0, which is
+The routes that need Access (`/v`, `/admin`) fail closed at tier 1, which is
 correct — you aren't using them yet. When you want them, you level up.
 
 ### Make is the interface
@@ -136,7 +139,8 @@ person runs and an LLM can run identically:
   infrastructure — hit the live Worker, confirm KV is bound, confirm a
   publish→read round-trips. The "did the deploy actually work" gate.
 - `make test` · `make destroy` — as today.
-- `make upgrade` — climb a rung (see #7).
+- climbing a tier — re-run `make deploy` (or `pagevault init`); it reads the tier from
+  `.pagevault.json` and provisions only what the new tier adds.
 
 The pairing matters: `preflight` catches a broken *environment* before you spend a
 deploy; `verify` catches a broken *deployment* after. Two payoffs beyond that: a
@@ -176,10 +180,10 @@ person with an LLM at the wheel — riding the clone path, not a new one.
 
 | Piece | State |
 |---|---|
-| **Prerequisites doc** — CF account, Node, (Tier 1: domain, card) | gap — needs writing (#10) |
-| **`preflight.mjs`** — read-only account verification | exists; needs a Tier-0 profile |
-| **Tier-0 deploy** — minimal config + `wrangler deploy`, no Access | **gap** — no helper today |
-| **`provision.mjs`** — Tier-1: KV, group, two Access apps, OTP, config | exists; hardening in #9 |
+| **Prerequisites doc** — CF account, Node, (tier 2: domain, card) | gap — needs writing (#10) |
+| **`preflight.mjs`** — read-only account verification | exists; needs a tier 1 profile |
+| **tier 1 deploy** — minimal config + `wrangler deploy`, no Access | **gap** — no helper today |
+| **`provision.mjs`** — tier 2: KV, group, two Access apps, OTP, config | exists; hardening in #9 |
 | **`destroy.mjs`** — teardown / reset loop | exists |
 | **Agent runbook** — `llms.txt` / `AGENT.md` | gap |
 
@@ -190,28 +194,28 @@ are mostly packaging.
 
 ## What we build first
 
-**Clone path + LLM-legible docs + Tier 0.** Rationale:
+**Clone path + LLM-legible docs + tier 1.** Rationale:
 
 - It's what already works and what I use, so it's the least speculative.
 - It's the substrate the others optimize: npm is clone-without-cloning; the button
-  is a clone-less Tier-0 deploy. Design clone well and they get easier.
+  is a clone-less tier 1 deploy. Design clone well and they get easier.
 - It's what makes the LLM path real — the LLM path is the clone path with good
   docs and drivable tools.
-- Tier 0 is testable **today**, on the clean account, with nothing purchased.
+- tier 1 is testable **today**, on the clean account, with nothing purchased.
 
-Sequence: (1) a Tier-0 config profile + deploy path, (2) the prerequisites doc and
+Sequence: (1) a tier 1 config profile + deploy path, (2) the prerequisites doc and
 the clone runbook, written LLM-legibly, (3) the agent runbook, (4) then the button
-(#28) and npm (#7) as packaging over the proven core, (5) Tier-1 hardening (#9) as
+(#28) and npm (#7) as packaging over the proven core, (5) tier 2 hardening (#9) as
 the deliberate level-up.
 
 ---
 
 ## Open questions
 
-- **Tier-0 config**: a second committed config profile, a flag on `provision`, or a
+- **tier 1 config**: a second committed config profile, a flag on `provision`, or a
   documented hand-edit? A profile is cleanest; decide before building.
 - **`llms.txt` vs `AGENT.md` vs both** — and how much the agent should *do* versus
   *guide*. Probably: guide by default, do on request.
-- **Where the button lands a stranger** — Tier 0 only, with an explicit "here's how
+- **Where the button lands a stranger** — tier 1 only, with an explicit "here's how
   to level up" pointer to the script. Confirm the button can prompt for the secret
   (open question on #28).
