@@ -14,7 +14,7 @@
 //
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, releaseTag, BUNDLE_PATH, applyBundleMode, generatedConfigPath, templatePath } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, releaseTag, BUNDLE_PATH, applyBundleMode, generatedConfigPath, templatePath, runHint, RUNNING_FROM_REPO } from "./context.mjs";
 
 const CONFIG_IN = templatePath();
 const CONFIG_OUT = generatedConfigPath();
@@ -24,7 +24,7 @@ export async function writeTier0Config(opts = {}) {
 
   loadCloudToken();
   const ctx = loadContext();
-  if (!ctx.ownerEmail) die("No .pagevault.json yet.", "Run `make setup` first.");
+  if (!ctx.ownerEmail) die("No .pagevault.json yet.", `Run \`${runHint("setup", "init")}\` first.`);
 
   const { ownerEmail } = ctx;
   const host = ctx.rung >= 2 ? ctx.host : ""; // rung 1 publishes on workers.dev; rung 2 on the host
@@ -42,7 +42,7 @@ export async function writeTier0Config(opts = {}) {
   if (kvId) {
     ok(`KV namespace ${c.dim(kvId)} ${c.dim("(--kv)")}`);
   } else {
-    if (!ctx.accountId) die("No account pinned.", "Run `make preflight` first — it pins the account.");
+    if (!ctx.accountId) die("No account pinned.", `Run \`${runHint("preflight", "init")}\` first — it pins the account.`);
     const res = await cfApi(`/accounts/${ctx.accountId}/storage/kv/namespaces?per_page=100`);
     const namespaces = res.ok ? res.result ?? [] : [];
     const live = ctx.kvId ? namespaces.find((n) => n.id === ctx.kvId) : null;
@@ -79,7 +79,7 @@ export async function writeTier0Config(opts = {}) {
 
   let oauthKvId = ctx.oauthKvId;
   {
-    if (!ctx.accountId) die("No account pinned.", "Run `make preflight` first — it pins the account.");
+    if (!ctx.accountId) die("No account pinned.", `Run \`${runHint("preflight", "init")}\` first — it pins the account.`);
     const res = await cfApi(`/accounts/${ctx.accountId}/storage/kv/namespaces?per_page=100`);
     const namespaces = res.ok ? res.result ?? [] : [];
     const live = oauthKvId ? namespaces.find((n) => n.id === oauthKvId) : null;
@@ -151,7 +151,11 @@ export async function writeTier0Config(opts = {}) {
 
   // Bundle mode (ADR-014): deploy the shipped prebuilt Worker instead of bundling from src.
   if (opts.bundle) {
-    if (!existsSync(BUNDLE_PATH)) die("Bundle mode needs the prebuilt Worker.", "Run `make bundle` first.");
+    if (!existsSync(BUNDLE_PATH))
+      die(
+        "Bundle mode needs the prebuilt Worker.",
+        RUNNING_FROM_REPO ? "Run `make bundle` first." : "Reinstall pagevault — the Worker bundle ships with the package.",
+      );
     generated = applyBundleMode(generated, BUNDLE_PATH);
     ok(`Bundle mode: deploying ${c.dim(BUNDLE_PATH)}`);
   }

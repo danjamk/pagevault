@@ -20,7 +20,7 @@ import { pathToFileURL } from "node:url";
 import {
   c, ok, info, warn, die, loadCloudToken, loadContext, saveContext, cfApi, cfErr, acct, shortId,
   fromEnv, writeEnvLocalVar, isInteractive, banner, releaseTag, BUNDLE_PATH, applyBundleMode,
-  generatedConfigPath, templatePath,
+  generatedConfigPath, templatePath, runHint, RUNNING_FROM_REPO,
 } from "./context.mjs";
 
 const CONFIG_IN = templatePath();
@@ -44,11 +44,11 @@ export async function provisionAccess(opts = {}) {
   }
 
   const token = loadCloudToken();
-  if (!token) die("No Cloudflare token.", "Run `make setup` first — it captures and saves one.");
+  if (!token) die("No Cloudflare token.", `Run \`${runHint("setup", "init")}\` first — it captures and saves one.`);
 
   const { host, ownerEmail } = ctx;
-  if (!host || !host.includes(".")) die("Rung 3 needs a hostname.", "Run `make setup` and choose rung 3 with a host.");
-  if (!ownerEmail || !ownerEmail.includes("@")) die("Rung 3 needs an owner email.", "Run `make setup`.");
+  if (!host || !host.includes(".")) die("Rung 3 needs a hostname.", `Run \`${runHint("setup", "init")}\` and choose rung 3 with a host.`);
+  if (!ownerEmail || !ownerEmail.includes("@")) die("Rung 3 needs an owner email.", `Run \`${runHint("setup", "init")}\`.`);
 
   // --- Account: verify the token reaches the account setup pinned ------------
 
@@ -58,7 +58,7 @@ export async function provisionAccess(opts = {}) {
   if (!account) {
     die(
       ctx.accountId ? "This token doesn't reach the pinned account." : "This token reaches no account.",
-      "Re-run `make setup` (it pins the account), or check the token.",
+      `Re-run \`${runHint("setup", "init")}\` (it pins the account), or check the token.`,
     );
   }
   ok(`Account: ${acct(account)}`);
@@ -77,7 +77,7 @@ export async function provisionAccess(opts = {}) {
       `  1. Open  ${c.bold(`https://one.dash.cloudflare.com/${account.id}`)}`,
       "  2. Choose a team name (becomes <team>.cloudflareaccess.com)",
       "  3. Select the FREE plan",
-      "  4. Re-run `make deploy` — it reads the team name back automatically",
+      `  4. Re-run \`${runHint("deploy", "upgrade")}\` — it reads the team name back automatically`,
     ]);
   }
   // auth_domain comes back as the FULL domain ("acme.cloudflareaccess.com"). The Worker builds
@@ -221,7 +221,7 @@ export async function provisionAccess(opts = {}) {
     info(`  If the deploy fails with error 10089, it is not enabled yet — ${analyticsUrl}`);
   } else {
     ok("View tracking: off — no Analytics Engine binding");
-    info(`  Turn it on later: enable it at ${c.dim(analyticsUrl)}, then \`make provision ANALYTICS=on\`.`);
+    info(`  Turn it on later: enable it at ${c.dim(analyticsUrl)}, then \`${runHint("provision ANALYTICS=on", "init")}\`.`);
   }
 
   // --- One-time PIN: the zero-onboarding mechanism ---------------------------
@@ -342,7 +342,7 @@ export async function provisionAccess(opts = {}) {
     }
     if (!runtimeToken) {
       warn("No scoped runtime token yet — adding a client to a portal won't grant Access until it's set.");
-      console.log(`  ${c.dim("Add it anytime:")} ${c.bold("echo 'CF_RUNTIME_TOKEN=…' >> .env.local")} ${c.dim("then re-run")} ${c.bold("make deploy")}.`);
+      console.log(`  ${c.dim("Add it anytime:")} ${c.bold("echo 'CF_RUNTIME_TOKEN=…' >> .env.local")} ${c.dim("then re-run")} ${c.bold(runHint("deploy", "upgrade"))}.`);
     }
   }
 
@@ -395,7 +395,11 @@ export async function provisionAccess(opts = {}) {
 
   // Bundle mode (ADR-014): deploy the shipped prebuilt Worker instead of bundling from src.
   if (opts.bundle) {
-    if (!existsSync(BUNDLE_PATH)) die("Bundle mode needs the prebuilt Worker.", "Run `make bundle` first.");
+    if (!existsSync(BUNDLE_PATH))
+      die(
+        "Bundle mode needs the prebuilt Worker.",
+        RUNNING_FROM_REPO ? "Run `make bundle` first." : "Reinstall pagevault — the Worker bundle ships with the package.",
+      );
     generated = applyBundleMode(generated, BUNDLE_PATH);
     ok(`Bundle mode: deploying ${c.dim(BUNDLE_PATH)}`);
   }

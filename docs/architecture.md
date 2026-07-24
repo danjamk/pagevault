@@ -396,8 +396,9 @@ the CLI's `rm`, not a link-only revoke).
 Two rules the tools must enforce:
 
 - **An agent must not be able to clobber a client deliverable in one tool call.**
-  Publishing over an existing `(portal, title)` returns a diff summary and requires
-  an explicit `confirm: true`.
+  Publishing over an existing `(portal, filename)` returns a diff summary and requires
+  an explicit `confirm: true`. Identity is the filename, not the title (ADR-017); two
+  documents may share a title.
 - **The model must not infer the portal from conversation.** With one portal, resolve
   silently. With two or more and no default, **error and list them** — inferring
   "this is probably the RealPlus one" from chat is exactly the failure that leaks

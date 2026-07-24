@@ -12,7 +12,7 @@ import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import {
   c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, isInteractive, cfApi, cfAccounts, cfErr, slug,
-  writeEnvLocalVar, fromEnv, acct, shortId, banner, chooseBearer, generatedConfigPath, RUNNING_FROM_REPO,
+  writeEnvLocalVar, fromEnv, acct, shortId, banner, chooseBearer, generatedConfigPath, RUNNING_FROM_REPO, runHint,
 } from "./context.mjs";
 import { provisionAccess } from "./provision.mjs";
 import { writeTier0Config } from "./tier0.mjs";
@@ -23,19 +23,19 @@ const CONFIG_OUT = generatedConfigPath();
 export async function deploy(opts = {}) {
   loadCloudToken();
   const ctx = loadContext();
-  if (!ctx.rung || !ctx.ownerEmail) die("No .pagevault.json yet.", "Run `make setup` first.");
+  if (!ctx.rung || !ctx.ownerEmail) die("No .pagevault.json yet.", `Run \`${runHint("setup", "init")}\` first.`);
 
   console.log(banner("deploy", `(rung ${ctx.rung} → ${shortId(ctx.accountId)})`));
 
   // --- 0. WHERE? Verify the pinned account, name it once, confirm it ---------
 
   const accounts = await cfAccounts();
-  if (accounts.length === 0) die("No Cloudflare token, or it reaches no account.", "Run `make preflight` — it names the problem.");
-  if (!ctx.accountId) die("No account pinned yet.", "Run `make setup` first — it pins the account.");
+  if (accounts.length === 0) die("No Cloudflare token, or it reaches no account.", `Run \`${runHint("preflight", "init")}\` — it names the problem.`);
+  if (!ctx.accountId) die("No account pinned yet.", `Run \`${runHint("setup", "init")}\` first — it pins the account.`);
   const target = accounts.find((a) => a.id === ctx.accountId);
   if (!target) {
     die(`Your token reaches ${accounts.map((a) => shortId(a.id)).join(", ")}, not the pinned ${shortId(ctx.accountId)}.`,
-      "Use the token for the pinned account, or re-pin with `make setup`.");
+      `Use the token for the pinned account, or re-pin with \`${runHint("setup", "init")}\`.`);
   }
 
   const targetUrl = ctx.rung >= 2 && ctx.host ? `https://${ctx.host}` : "*.workers.dev";
@@ -113,7 +113,7 @@ export async function deploy(opts = {}) {
     process.stderr.write(err.stderr ?? "");
     if (/workers\.dev subdomain/i.test(output)) {
       die("This account still has no workers.dev subdomain.",
-        "Odd — the step above should have registered one. Re-run `make deploy`.");
+        `Odd — the step above should have registered one. Re-run \`${runHint("deploy", "upgrade")}\`.`);
     }
     // 10089 — the ANALYTICS binding is in the config but Analytics Engine is off on the
     // account. Provisioning asks before adding the binding, so reaching here means it was
@@ -122,7 +122,7 @@ export async function deploy(opts = {}) {
     if (/10089/.test(output) || /enable Analytics Engine/i.test(output)) {
       die(
         "Analytics Engine is not enabled on this account, but the Worker config binds it.",
-        `Enable it at https://dash.cloudflare.com/${ctx.accountId ?? ""}/workers/analytics-engine and re-run, or drop view tracking with \`make provision ANALYTICS=off\`.`,
+        `Enable it at https://dash.cloudflare.com/${ctx.accountId ?? ""}/workers/analytics-engine and re-run, or drop view tracking with \`${runHint("provision ANALYTICS=off", "init")}\`.`,
       );
     }
     die("Deploy failed — see wrangler's output above.");
@@ -178,7 +178,7 @@ export async function deploy(opts = {}) {
       "  This looks like a CI deploy into a fresh Worker. Minting a random bearer here would strand it",
       "  on a throwaway runner — your CLI and MCP clients would never learn it. Provide the bearer instead:",
       "    • set PAGEVAULT_API_TOKEN as a GitHub Environment secret, or",
-      "    • run `make deploy` once locally (it mints and saves one to .env.local).",
+      `    • run \`${runHint("deploy", "init")}\` once locally (it mints and saves the bearer).`,
     ]);
   } else if (bearer.action === "set") {
     const put = await setBearer(bearer.value);
@@ -240,11 +240,12 @@ export async function deploy(opts = {}) {
       ok("CF_API_TOKEN (scoped runtime secret) is already set.");
     } else {
       warn("No CF_RUNTIME_TOKEN in .env.local — email-grant sync is off until CF_API_TOKEN is set.");
-      console.log(`  ${c.dim("Provision printed how to create it. Add it, then re-run `make deploy`.")}`);
+      console.log(`  ${c.dim(`Provision printed how to create it. Add it, then re-run \`${runHint("deploy", "upgrade")}\`.`)}`);
     }
   }
 
-  console.log(`\n${c.bold("Next:")} ${c.bold("make verify")} ${c.dim("— smoke-test the deployment and publish your first document.")}`);
+  const verifyCmd = RUNNING_FROM_REPO ? "make verify" : "pagevault verify";
+  console.log(`\n${c.bold("Next:")} ${c.bold(verifyCmd)} ${c.dim("— smoke-test the deployment and publish your first document.")}`);
   console.log(`  ${c.dim("It hands back a public /p/ link you can open immediately — no login, no Access.")}\n`);
 }
 

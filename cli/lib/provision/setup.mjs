@@ -15,7 +15,7 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, versions } from "node:process";
 import { pathToFileURL } from "node:url";
-import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cfApi, cfAccounts, acct, tokenSetupFlow, banner } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cfApi, cfAccounts, acct, tokenSetupFlow, banner, runHint } from "./context.mjs";
 
 /**
  * Configure this deployment (rung, owner, host, pinned account) into `.pagevault.json`.
@@ -115,7 +115,7 @@ export async function setup(opts = {}) {
     console.log(`${c.cyan("The token")} — this is ${c.bold("where")} PageVault deploys.\n`);
     const saved = await tokenSetupFlow();
     if (!saved) {
-      console.log(`\n${c.bold("Next:")} save the token, then run ${c.bold(opts.next ?? "make setup")} again.\n`);
+      console.log(`\n${c.bold("Next:")} save the token, then run ${c.bold(opts.next ?? runHint("setup", "init"))} again.\n`);
       return { ready: false };
     }
     token = loadCloudToken(); // pick up what we just wrote to .env.local

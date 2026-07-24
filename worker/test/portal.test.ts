@@ -2,6 +2,7 @@ import { SELF, env } from "cloudflare:test";
 import { SignJWT, type JWK, exportJWK, generateKeyPair } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetJWKSCache } from "../src/auth.js";
+import { handlePortalRoute } from "../src/portal.js";
 import { type DocMeta, type Portal, type PortalKind, putDoc, putMembers, putPortal } from "../src/store.js";
 
 /**
@@ -81,6 +82,7 @@ async function seedDoc(slug: string, id: string, over: Partial<DocMeta> = {}): P
   const meta: DocMeta = {
     id,
     portal: slug,
+    name: `${slug}-${id}.html`,
     title: `${slug} report ${id}`,
     sourceKind: "html",
     ownerOnly: false,
@@ -146,6 +148,42 @@ describe("🔴 cross-portal isolation, as a URL", () => {
   it("the owner sees both", async () => {
     expect((await SELF.fetch(`${HOST}/v/realplus`, { headers: await as(OWNER) })).status).toBe(200);
     expect((await SELF.fetch(`${HOST}/v/acme`, { headers: await as(OWNER) })).status).toBe(200);
+  });
+});
+
+describe("rung 1 (no Access) — /v/ is honest, not 'misconfigured' (#111)", () => {
+  // On a no-Access deployment /v/ has no login wall and no identity to establish. It must NOT
+  // present the rung-3 "misconfigured" page (which would be a lie: nothing is broken). Call
+  // handlePortalRoute directly with the Access vars blanked — SELF.fetch runs the configured env.
+  const noAccessEnv = { ...env, CF_TEAM_NAME: "", CF_ACCESS_AUD_DOCS: "" } as typeof env;
+
+  it("serves a plain 'public links only' page (404), not the 500 misconfigured page", async () => {
+    const res = await handlePortalRoute(new Request(`${HOST}/v/anything`), noAccessEnv, "anything", null);
+    const body = await res.text();
+    expect(res.status).toBe(404);
+    expect(body).not.toContain("misconfigured");
+    expect(body).toContain("public links only");
+  });
+
+  it("still shows misconfigured (500) when Access IS configured but no JWT arrives", async () => {
+    const res = await handlePortalRoute(new Request(`${HOST}/v/anything`), env, "anything", null);
+    expect(res.status).toBe(500);
+    expect(await res.text()).toContain("misconfigured");
+  });
+
+  it("leaks nothing about which portals exist", async () => {
+    await putPortal(env, portal("realplus", "restricted", "RealPlus"));
+    const res = await handlePortalRoute(new Request(`${HOST}/v/realplus`), noAccessEnv, "realplus", null);
+    const body = await res.text();
+    expect(body).not.toContain("realplus");
+    expect(body).not.toContain("RealPlus");
+  });
+
+  it("a PUBLIC portal still redirects to /pub — public portals work without Access", async () => {
+    await putPortal(env, portal("marketing", "public", "Marketing"));
+    const res = await handlePortalRoute(new Request(`${HOST}/v/marketing`), noAccessEnv, "marketing", null);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("/pub/marketing");
   });
 });
 

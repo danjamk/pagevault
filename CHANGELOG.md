@@ -7,6 +7,43 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-07-24
+
+### Changed
+- **A document's identity is now its filename, not its title (ADR-017).** Publishing keyed identity
+  on the title, which is derived from content (`<title>` / `# H1`) — so two files with the same
+  heading collided into one document, and copying a file to a new name to fork it failed. Identity is
+  now `(portal, filename)`: the CLI sources it from the file's basename (`--name` overrides), and the
+  MCP `publish_document` tool takes a `filename` param it manufactures. `title` is display-only, so
+  two documents may share one. ADR-013's deterministic-id mechanism is unchanged (the #74 fork race
+  stays fixed); only the hashed key moved.
+
+  **Breaking:** document ids — and their `/p/` and `/v/` URLs — now derive from the filename, so a
+  new publish of an existing document lands at a new URL. Old documents keep their URLs and stay
+  readable (a name is synthesized on read), but re-publishing them forks rather than updates in place
+  until re-published under the new scheme. No data migration (nothing shared yet — ADR-017).
+
+### Added
+- **`pagevault publish --name <filename>`** overrides the identity / update key (default: the file's
+  basename). The `list` table gains a `FILE` column and `read` a `file` line, so the update key is
+  always visible.
+- **Collision handling.** A same-filename publish without `--confirm` now prints the three ways
+  forward — replace in place, publish as a distinct document (`--name`), or change only the link
+  (`mint <id>`) — with the existing id. The MCP `Conflict` message says the same.
+
+### Fixed
+- **Rung-1 publish handed back an un-openable link (#111).** On a no-Access deployment,
+  `pagevault publish` defaulted to a members-only `/v/` document nothing could open, and the viewer
+  showed a false "Cloudflare Access misconfigured" page. Publishing on a no-Access deployment now
+  defaults to a public `/p/` link, and `/v/` there serves an honest "public links only" page instead
+  of the rung-3 error.
+- **The installed CLI told you to run `make` (#111).** `init`'s sign-off and the provisioning error
+  messages referenced `make deploy` / `make provision` / `make setup` / `make preflight`, which an
+  installed user doesn't have. They now show the `pagevault` equivalent from an install and keep
+  `make` from a repo checkout.
+- **Pre-ADR-017 documents read gracefully.** `getMeta` / `listDocs` synthesize a filename for
+  documents that predate the change, so an in-place upgrade keeps listing and reading them.
+
 ## [0.19.2] — 2026-07-23
 
 ### Fixed

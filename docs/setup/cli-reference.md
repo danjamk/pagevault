@@ -41,18 +41,21 @@ have exported. `init` already does this for the deployment it stood up; reach fo
 ## Publish & manage documents
 
 ### `pagevault publish <file.html|.md> [flags]`
-Upload a file and print its URL. The title comes from the HTML `<title>` (or a markdown `# H1`, or the
+Upload a file and print its URL. **A document's identity is its filename** (ADR-017): re-publishing
+the same file updates it in place at the same URL; a differently-named file is a new document, even
+with the same title. The display title comes from the HTML `<title>` (or a markdown `# H1`, or the
 filename) unless you pass `--title`.
 
 | Flag | Effect |
 |---|---|
 | `--portal <slug>` | publish into a client portal (default portal otherwise) |
-| `--title <t>` · `--summary <s>` · `--tags a,b` | metadata |
+| `--name <filename>` | override the identity/update key (default: the file's basename) |
+| `--title <t>` · `--summary <s>` · `--tags a,b` | metadata (`--title` is display only, not the key) |
 | `--emails a@b,c@d` | grant these people (email-gated) — additive, never revokes |
 | `--public` | also mint a no-login `/p/` link and print *that* (zero Access seats) |
 | `--owner-only` | a draft only you can see |
 | `--source-kind html\|markdown` | override the extension-based guess |
-| `--confirm` | required to replace an existing document with the same title in place |
+| `--confirm` | required to replace an existing document with the same filename in place |
 
 ### `pagevault list [--portal s] [--tag t] [--json]`
 Your documents, newest first.

@@ -31,6 +31,7 @@ const portal = (kind: PortalKind, slug = "realplus"): Portal => ({
 const doc = (over: Partial<DocMeta> = {}): DocMeta => ({
   id: "k3x9mq2vb7pd",
   portal: "realplus",
+  name: "q3-review.html",
   title: "Q3 Review",
   sourceKind: "html",
   ownerOnly: false,

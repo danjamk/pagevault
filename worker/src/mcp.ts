@@ -152,7 +152,7 @@ const INSTRUCTIONS = [
   "   the document with no login. Minting or rotating one is a WIDENING action — confirm with the",
   "   user first and tell them what it means. Public links cost no Cloudflare Access seats.",
   "",
-  "3. Publishing over an existing document with the same title REPLACES it in place at the same",
+  "3. Publishing over an existing document with the same filename REPLACES it in place at the same",
   "   URL. That needs confirm: true, and you must show the user what is being replaced first.",
 ].join("\n");
 
@@ -190,6 +190,7 @@ const RELEASES_URL = "https://github.com/danjamk/pagevault/releases/latest";
 const DOC_OUT_SHAPE = {
   id: z.string(),
   portal: z.string(),
+  name: z.string(),
   title: z.string(),
   summary: z.string().optional(),
   url: z.string(),
@@ -236,7 +237,7 @@ function buildServer(env: Env, origin: string): McpServer {
     "publish_document",
     {
       title: "Publish document",
-      // Overwrites an existing deliverable in place when the title matches (with confirm), so a
+      // Overwrites an existing deliverable in place when the filename matches (with confirm), so a
       // host should confirm rather than auto-run. Not idempotent: each call can change content.
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
       description: [
@@ -245,11 +246,21 @@ function buildServer(env: Env, origin: string): McpServer {
         "Portal selection (see server instructions — never guess): one portal → used automatically;",
         "several with no default → this tool errors and lists them, so ASK THE USER which client it is for.",
         "",
-        "Publishing over an existing document with the same title REPLACES it in place at the same URL;",
-        "that requires confirm: true, and you must show the user what is being replaced first.",
+        "Identity is the FILENAME, not the title (ADR-017). Publishing over an existing document with the",
+        "same filename REPLACES it in place at the same URL; that requires confirm: true, and you must show",
+        "the user what is being replaced first. Use a different filename to publish a distinct document.",
       ].join("\n"),
       inputSchema: {
-        title: z.string().describe("Human-readable title. Also the update key within a portal."),
+        title: z.string().describe("Human-readable display title, shown in the portal index. NOT the update key."),
+        filename: z
+          .string()
+          .optional()
+          .describe(
+            "The document's filename — its IDENTITY and update key within the portal (e.g. 'q3-review.md'). " +
+              "You have no file on disk, so MANUFACTURE a stable, descriptive filename with an extension and " +
+              "REUSE it to update the same document in place. Same (portal, filename) = the same document; a " +
+              "different filename = a different document. Omit to derive one from the title.",
+          ),
         html: z
           .string()
           .describe(
@@ -274,7 +285,7 @@ function buildServer(env: Env, origin: string): McpServer {
         confirm: z
           .boolean()
           .optional()
-          .describe("Required to overwrite an existing document with the same title."),
+          .describe("Required to overwrite an existing document with the same filename."),
         sourceKind: z
           .enum(["html", "markdown"])
           .optional()
@@ -289,6 +300,7 @@ function buildServer(env: Env, origin: string): McpServer {
       outputSchema: {
         id: z.string(),
         portal: z.string(),
+        name: z.string(),
         title: z.string(),
         url: z.string(),
         created: z.boolean(),
@@ -302,6 +314,7 @@ function buildServer(env: Env, origin: string): McpServer {
       try {
         const { meta, created, portal, sync } = await publishDocument(env, {
           title: args.title,
+          filename: args.filename,
           source: args.html,
           portal: args.portal,
           summary: args.summary,
@@ -323,6 +336,7 @@ function buildServer(env: Env, origin: string): McpServer {
         return structured(
           [
             `${created ? "Published" : "Updated in place"}: ${meta.title}`,
+            `Name:   ${meta.name}`,
             `URL:    ${url}`,
             `Portal: ${meta.portal}`,
             // The stored size, so a stub is obvious at a glance — no read_document round-trip (#99).
@@ -335,6 +349,7 @@ function buildServer(env: Env, origin: string): McpServer {
           {
             id: meta.id,
             portal: meta.portal,
+            name: meta.name,
             title: meta.title,
             url,
             created,
@@ -919,6 +934,7 @@ function buildServer(env: Env, origin: string): McpServer {
 
 const describe = (doc: {
   id: string;
+  name: string;
   title: string;
   summary?: string | undefined;
   portal: string;
@@ -928,7 +944,7 @@ const describe = (doc: {
 }): string =>
   [
     `${doc.title}${doc.ownerOnly ? "  [draft]" : ""}`,
-    `  id: ${doc.id} · portal: ${doc.portal} · ${doc.createdAt.slice(0, 10)}`,
+    `  file: ${doc.name} · id: ${doc.id} · portal: ${doc.portal} · ${doc.createdAt.slice(0, 10)}`,
     ...(doc.summary ? [`  ${doc.summary}`] : []),
     ...(doc.tags?.length ? [`  tags: ${doc.tags.join(", ")}`] : []),
   ].join("\n");
@@ -988,6 +1004,7 @@ const structured = (body: string, structuredContent: Record<string, unknown>, li
 const docOut = (doc: DocSummary, url: string): Record<string, unknown> => ({
   id: doc.id,
   portal: doc.portal,
+  name: doc.name,
   title: doc.title,
   ...(doc.summary ? { summary: doc.summary } : {}),
   url,

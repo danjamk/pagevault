@@ -1,6 +1,7 @@
 import { SELF, createExecutionContext, env } from "cloudflare:test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { computeDesiredViewers } from "../src/documents.js";
+import { computeDesiredViewers, publishDocument } from "../src/documents.js";
+import { accessEnabled } from "../src/env.js";
 import worker from "../src/index.js";
 import { mintSession } from "../src/session.js";
 import { type Portal, putMembers, putPortal } from "../src/store.js";
@@ -30,6 +31,41 @@ const portal = (slug: string, kind: Portal["kind"] = "restricted"): Portal => ({
   kind,
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
+});
+
+describe("rung 1 (no Access) — publish defaults to a public link, not a dead /v/ one (#111)", () => {
+  // On a no-Access deployment there is no login wall, so a members-only /v/ document is
+  // un-openable — a plain publish must come back as a public /p/ link. `publishDocument` is
+  // called directly with the Access vars blanked: SELF.fetch always runs against the configured
+  // (rung-3) pool env, so the branch only reachable when Access is absent needs a crafted env.
+  const noAccessEnv = { ...env, CF_TEAM_NAME: "", CF_ACCESS_AUD_DOCS: "" } as typeof env;
+
+  it("accessEnabled is true only when BOTH team and audience are set", () => {
+    expect(accessEnabled(env)).toBe(true);
+    expect(accessEnabled(noAccessEnv)).toBe(false);
+    expect(accessEnabled({ ...env, CF_TEAM_NAME: "" } as typeof env)).toBe(false);
+    expect(accessEnabled({ ...env, CF_ACCESS_AUD_DOCS: "" } as typeof env)).toBe(false);
+  });
+
+  it("a plain publish auto-mints a public token", async () => {
+    const { meta } = await publishDocument(noAccessEnv, { title: "Rung 1 Report", source: "<h1>hi</h1>" });
+    expect(meta.publicToken).toBeTruthy();
+  });
+
+  it("an owner-only draft stays private — no public token", async () => {
+    const { meta } = await publishDocument(noAccessEnv, {
+      title: "Rung 1 Draft",
+      source: "<h1>d</h1>",
+      ownerOnly: true,
+    });
+    expect(meta.ownerOnly).toBe(true);
+    expect(meta.publicToken).toBeUndefined();
+  });
+
+  it("with Access configured, a plain publish is NOT public by default", async () => {
+    const { meta } = await publishDocument(env, { title: "Gated Report", source: "<h1>g</h1>" });
+    expect(meta.publicToken).toBeUndefined();
+  });
 });
 
 describe("auth", () => {
@@ -105,6 +141,49 @@ describe("🔴 /api — console session tokens (ADR-004)", () => {
       headers: { Authorization: `Bearer ${stale}` },
     });
     expect(res.status).toBe(401);
+  });
+});
+
+describe("filename identity — (portal, filename) is the update key, not the title (ADR-017, #111)", () => {
+  type DocBody = { id: string; name: string; title: string; code?: string };
+  const read = (r: Response) => r.json() as Promise<DocBody>;
+
+  it("two files with the same title but different filenames are different documents", async () => {
+    const a = await read(await publish(aDoc({ title: "Brain", filename: "readme.md", sourceKind: "markdown", html: "# Brain" })));
+    const b = await read(await publish(aDoc({ title: "Brain", filename: "readme2.md", sourceKind: "markdown", html: "# Brain" })));
+    expect(a.id).not.toBe(b.id);
+    expect(a.name).toBe("readme.md");
+    expect(b.name).toBe("readme2.md");
+  });
+
+  it("the same filename updates in place, even when the title changes", async () => {
+    const first = await read(await publish(aDoc({ title: "Draft", filename: "report.html" })));
+    const second = await read(await publish(aDoc({ title: "Final", filename: "report.html", confirm: true })));
+    expect(second.id).toBe(first.id);
+    expect(second.title).toBe("Final");
+    expect(second.name).toBe("report.html");
+  });
+
+  it("a same-filename republish without confirm is a 409 carrying the existing id + name", async () => {
+    await publish(aDoc({ title: "One", filename: "dup.html" }));
+    const res = await publish(aDoc({ title: "Two", filename: "dup.html" }));
+    expect(res.status).toBe(409);
+    const body = await read(res);
+    expect(body.code).toBe("already_exists");
+    expect(body.name).toBe("dup.html");
+    expect(typeof body.id).toBe("string");
+  });
+
+  it("strips any directory — identity is the basename", async () => {
+    const a = await read(await publish(aDoc({ title: "X", filename: "/tmp/a/notes.md", sourceKind: "markdown", html: "# X" })));
+    expect(a.name).toBe("notes.md");
+  });
+
+  it("with no filename, defaults deterministically from the title (the MCP-without-a-file case)", async () => {
+    const a = await read(await publish(aDoc({ title: "Weekly Update" })));
+    const b = await read(await publish(aDoc({ title: "Weekly Update", confirm: true })));
+    expect(a.name).toBe("weekly-update.html");
+    expect(b.id).toBe(a.id);
   });
 });
 

@@ -4,7 +4,7 @@ import {
   reconcileGroupMembers,
   syncGroupMembers,
 } from "./access-group.js";
-import type { Env } from "./env.js";
+import { accessEnabled, type Env } from "./env.js";
 import { renderMarkdown } from "./markdown.js";
 import {
   DEFAULT_PORTAL,
@@ -23,6 +23,7 @@ import {
   listPortals,
   metadataFits,
   docId,
+  defaultDocName,
   mintPublicToken,
   normalizeEmail,
   putDoc,
@@ -44,6 +45,7 @@ import {
 export const MAX_SOURCE_BYTES = 10 * 1024 * 1024;
 
 export const MAX_TITLE_CHARS = 200;
+export const MAX_NAME_CHARS = 200;
 export const MAX_SUMMARY_CHARS = 300;
 export const MAX_TAGS = 16;
 export const MAX_TAG_CHARS = 64;
@@ -76,7 +78,7 @@ export class Misconfigured extends Error {
 /**
  * ⭐ An agent must not be able to clobber a client deliverable in one tool call.
  *
- * Publishing over an existing `(portal, title)` refuses unless the caller explicitly says
+ * Publishing over an existing `(portal, filename)` refuses unless the caller explicitly says
  * `confirm: true`, and the refusal carries enough detail for a human to decide. The model
  * has to come back and ask.
  */
@@ -85,7 +87,7 @@ export class Conflict extends Error {
     readonly existing: DocMeta,
     readonly incomingBytes: number,
   ) {
-    super(`A document titled "${existing.title}" already exists in portal "${existing.portal}"`);
+    super(`A document named "${existing.name}" already exists in portal "${existing.portal}"`);
   }
 
   /** What the model should show the user before it asks. */
@@ -93,22 +95,30 @@ export class Conflict extends Error {
     const delta = this.incomingBytes - this.existing.bytes;
     const sign = delta >= 0 ? "+" : "";
     return [
-      `"${this.existing.title}" already exists in portal "${this.existing.portal}".`,
+      `A document named "${this.existing.name}" already exists in portal "${this.existing.portal}".`,
       ``,
       `  id:       ${this.existing.id}`,
+      `  title:    ${this.existing.title}`,
       `  updated:  ${this.existing.updatedAt}`,
       `  size:     ${this.existing.bytes} bytes → ${this.incomingBytes} bytes (${sign}${delta})`,
       ``,
-      `Publishing again REPLACES it in place, keeping the same URL — so anyone holding the`,
-      `link sees the new version. The old content is not recoverable.`,
+      `Re-publishing with the same filename REPLACES it in place, keeping the same URL — so anyone`,
+      `holding the link sees the new version. The old content is not recoverable.`,
       ``,
-      `Ask the user, then call publish_document again with confirm: true.`,
+      `Ask the user. To replace it, call publish_document again with confirm: true. To keep both,`,
+      `publish under a different filename.`,
     ].join("\n");
   }
 }
 
 export interface PublishInput {
   title: string;
+  /**
+   * The document's filename — the IDENTITY key within the portal (ADR-017). Optional: when
+   * omitted (the MCP-without-a-file case) it defaults to a slug of the title plus the source
+   * extension, so a caller that only passes a title still gets a stable, deterministic id.
+   */
+  filename?: string | undefined;
   source: string;
   portal?: string | undefined;
   summary?: string | undefined;
@@ -154,22 +164,26 @@ export async function publishDocument(env: Env, input: PublishInput): Promise<Pu
 
   const portal = await resolvePortal(env, input.portal);
   const title = parseTitle(input.title);
+  const sourceKind: SourceKind = input.sourceKind ?? "html";
+  // Identity is the FILENAME (ADR-017), not the title: the CLI passes the file's basename, MCP
+  // the `filename` param, and a caller with neither falls back to a slug of the title plus the
+  // source extension. Two files with the same heading but different names are different docs.
+  const name = parseFilename(input.filename) ?? deriveDefaultFilename(title, sourceKind);
 
-  // Create-or-update, keyed on (portal, title) via a DETERMINISTIC id (ADR-013): the id is a
-  // hash of (portal, normalized title), so iterating on a report overwrites the same keys in
-  // place — the link stays current — and a duplicate is unrepresentable, not merely rejected.
-  // No `list()`, so none of KV's eventual-consistency race (#74). The `getMeta` is only the
-  // confirm guard; even a stale read there overwrites in place rather than forking a duplicate.
-  const id = await docId(portal.slug, title);
+  // Create-or-update, keyed on (portal, name) via a DETERMINISTIC id (ADR-013 mechanism, ADR-017
+  // key): the id hashes (portal, normalized filename), so re-publishing the same filename
+  // overwrites the same keys in place — the link stays current — and a duplicate is
+  // unrepresentable, not merely rejected. No `list()`, so none of KV's eventual-consistency race
+  // (#74). The `getMeta` is only the confirm guard; even a stale read overwrites in place.
+  const id = await docId(portal.slug, name);
   const existing = await getMeta(env, id);
   if (existing && input.confirm !== true) throw new Conflict(existing, bytes);
-
-  const sourceKind: SourceKind = input.sourceKind ?? "html";
 
   const now = new Date().toISOString();
   const meta: DocMeta = {
     id,
     portal: portal.slug,
+    name,
     title,
     sourceKind,
     ownerOnly: input.ownerOnly ?? existing?.ownerOnly ?? false,
@@ -187,10 +201,18 @@ export async function publishDocument(env: Env, input: PublishInput): Promise<Pu
   const extraEmails = parseEmails(input.extraEmails, "emails") ?? existing?.extraEmails;
   if (extraEmails) meta.extraEmails = extraEmails;
 
+  // On a no-Access deployment (rung 1: workers.dev, no Zero Trust) there is no login wall and
+  // no way to identify a viewer, so a members-only `/v/` document is un-openable — the only
+  // meaningful published states are "public link" or "owner-only draft". A plain publish there
+  // is public by nature, so default it to public rather than hand back a dead link (#111, PD-3).
+  // This is NOT the widening the note below guards against: on rung 1 there is no narrower
+  // openable state to widen FROM, and the `/p/` link is the whole point of the tier.
+  const defaultPublic = !accessEnabled(env) && meta.ownerOnly !== true;
+
   // Widening is never a side effect. An existing public link survives an update — that is
   // the point of updating in place — but publishing does not mint a new one unless asked.
   if (existing?.publicToken) meta.publicToken = existing.publicToken;
-  else if (input.makePublic === true) meta.publicToken = mintPublicToken();
+  else if (input.makePublic === true || defaultPublic) meta.publicToken = mintPublicToken();
 
   // Check before writing: KV rejects an oversized metadata write, and that failure would
   // surface as a document missing from every listing rather than as a bad request.
@@ -604,6 +626,32 @@ export function parseSourceKind(value: unknown): SourceKind {
     throw new BadRequest("invalid_field", `"sourceKind" must be "html" or "markdown"`);
   }
   return value;
+}
+
+/**
+ * The document's filename — its identity key (ADR-017). Strips any directory, trims, and
+ * bounds the length. Returns `undefined` when absent or blank, so `publishDocument` can fall
+ * back to a title-derived default. Case is preserved for display; `docId` lowercases for the
+ * hash, so `README.md` and `readme.md` are the same document.
+ */
+export function parseFilename(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  // Basename only — identity is the filename, never the path it happened to live at.
+  const name = requireString(value, "filename").trim().split(/[/\\]/).pop()?.trim() ?? "";
+  if (name.length === 0) return undefined;
+  if (name.length > MAX_NAME_CHARS) {
+    throw new BadRequest("invalid_field", `"filename" exceeds ${MAX_NAME_CHARS} characters`);
+  }
+  return name;
+}
+
+/**
+ * The fallback filename when a caller gives none (MCP with no file on disk): a slug of the
+ * title plus the source extension. Deterministic, so an assistant that only ever passes a
+ * title still updates the same document in place on re-publish — today's behavior, preserved.
+ */
+export function deriveDefaultFilename(title: string, sourceKind: SourceKind): string {
+  return defaultDocName(title, sourceKind);
 }
 
 export function parseTags(value: unknown): string[] | undefined {

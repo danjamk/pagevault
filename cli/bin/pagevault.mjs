@@ -7,6 +7,7 @@
 // See https://github.com/danjamk/pagevault.
 //
 import { existsSync, readFileSync } from "node:fs";
+import { basename } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { api, apiText, requireConfig, saveLoginConfig, waitReadable, PvError } from "../lib/client.mjs";
@@ -76,30 +77,50 @@ async function main() {
 
 async function publish(pos, flags) {
   const file = pos[0];
-  if (!file) throw new PvError("Usage: pagevault publish <file.html|.md> [--portal s] [--title t] [--public] …");
+  if (!file) throw new PvError("Usage: pagevault publish <file.html|.md> [--portal s] [--name f] [--title t] [--public] …");
   if (!existsSync(file)) throw new PvError(`No such file: ${file}`);
 
   const cfg = requireConfig();
   const html = readFileSync(file, "utf8");
+  // Identity is the filename (ADR-017): the file's basename, or --name to override it.
+  const filename = typeof flags.name === "string" ? flags.name : basename(file);
 
-  const res = await api(cfg, "POST", "/docs", {
-    title: typeof flags.title === "string" ? flags.title : deriveTitle(html, file),
-    html,
-    sourceKind: sourceKindFor(file, flags["source-kind"]),
-    portal: typeof flags.portal === "string" ? flags.portal : undefined,
-    summary: typeof flags.summary === "string" ? flags.summary : undefined,
-    tags: splitList(flags.tags),
-    emails: splitList(flags.emails),
-    public: flags.public === true,
-    ownerOnly: flags["owner-only"] === true,
-    confirm: flags.confirm === true,
-  });
+  let res;
+  try {
+    res = await api(cfg, "POST", "/docs", {
+      title: typeof flags.title === "string" ? flags.title : deriveTitle(html, file),
+      filename,
+      html,
+      sourceKind: sourceKindFor(file, flags["source-kind"]),
+      portal: typeof flags.portal === "string" ? flags.portal : undefined,
+      summary: typeof flags.summary === "string" ? flags.summary : undefined,
+      tags: splitList(flags.tags),
+      emails: splitList(flags.emails),
+      public: flags.public === true,
+      ownerOnly: flags["owner-only"] === true,
+      confirm: flags.confirm === true,
+    });
+  } catch (err) {
+    // A same-filename collision is a decision, not a dead end: spell out the three ways forward,
+    // using the id the server handed back with the 409. See ADR-017.
+    if (err instanceof PvError && err.code === "already_exists" && err.details?.id) {
+      const { id, name, portal } = err.details;
+      throw new PvError(
+        `A document named "${name}" already exists in portal "${portal}".\n` +
+          `  Replace it in place:        pagevault publish ${file} --confirm\n` +
+          `  Publish as a separate doc:  pagevault publish ${file} --name <other-filename>\n` +
+          `  Change only its link:       pagevault mint ${id}`,
+      );
+    }
+    throw err;
+  }
 
   // Don't hand back a link the deployment can't serve yet.
   const readable = await waitReadable(cfg, res.id);
 
-  // Human context → stderr, so stdout stays a clean URL.
-  note(`Published "${res.id}" to portal "${res.portal}"${res.ownerOnly ? " (draft — owner-only)" : ""}.`);
+  // Human context → stderr, so stdout stays a clean URL. Echo the resolved filename + title so
+  // identity is never invisible (ADR-017): the operator sees exactly what the update key is.
+  note(`Published "${res.title}" (${res.name}) to portal "${res.portal}"${res.ownerOnly ? " — draft, owner-only" : ""}.`);
   if (res.extraEmails?.length) note(`Granted to: ${res.extraEmails.join(", ")}`);
   if (res.publicUrl) {
     note("⚠ Public link: anyone who has it can open this document, no login. It burns no Access seat.");
@@ -125,12 +146,13 @@ async function list(flags) {
 
   const rows = docs.map((d) => [
     d.id,
+    truncate(d.name ?? "", 28),
     d.portal,
-    truncate(d.title, 44),
+    truncate(d.title, 40),
     (d.createdAt || "").slice(0, 10),
-    d.ownerOnly ? "draft" : d.publicToken ? "public" : "",
+    d.ownerOnly ? "draft" : d.public ? "public" : "",
   ]);
-  out(table(["ID", "PORTAL", "TITLE", "CREATED", ""], rows));
+  out(table(["ID", "FILE", "PORTAL", "TITLE", "CREATED", ""], rows));
 }
 
 // The read side — the portal is memory, not an outbox. These mirror the MCP tools so the
@@ -156,6 +178,7 @@ async function read(pos, flags) {
   const lines = [
     `${meta.title}`,
     `  id        ${meta.id}`,
+    `  file      ${meta.name ?? ""}`,
     `  portal    ${meta.portal}`,
     `  format    ${meta.sourceKind ?? "html"}`,
     `  created   ${(meta.createdAt || "").slice(0, 10)}`,
@@ -406,9 +429,10 @@ Set up & deploy:
   pagevault login [--url <url>] [--token <token>]   point at a deployment (falls back to env; init does this)
 
 Publish & manage documents:
-  pagevault publish <file.html|.md> [--portal s] [--title t] [--summary s]
+  pagevault publish <file.html|.md> [--portal s] [--name f] [--title t] [--summary s]
                                 [--tags a,b] [--emails a@b,c@d] [--source-kind html|markdown]
                                 [--public] [--owner-only] [--confirm]
+                                --name sets the update key (default: the filename); --title is display only
   pagevault list [--portal s] [--tag t] [--json]
   pagevault read <id> [--source] [--json]
   pagevault search <portal> <query …> [--limit N] [--json]

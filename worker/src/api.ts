@@ -60,7 +60,8 @@ export function json(body: unknown, status = 200): Response {
   });
 }
 
-const fail = (status: number, code: string, error: string) => json({ error, code }, status);
+const fail = (status: number, code: string, error: string, extra?: Record<string, unknown>) =>
+  json({ error, code, ...extra }, status);
 
 export async function handleApi(request: Request, env: Env): Promise<Response> {
   // Defense in depth, ahead of the bearer check.
@@ -133,7 +134,16 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
     return fail(404, "not_found", `No such endpoint: ${pathname}`);
   } catch (err) {
-    if (err instanceof Conflict) return fail(409, "already_exists", err.message);
+    if (err instanceof Conflict) {
+      // Surface the existing id + name so the CLI can offer the real next steps (--confirm to
+      // replace, --name to fork, mint to change only the link). The message stays generic; the
+      // CLI-specific guidance is the CLI's to build. See ADR-017.
+      return fail(409, "already_exists", err.message, {
+        id: err.existing.id,
+        name: err.existing.name,
+        portal: err.existing.portal,
+      });
+    }
     if (err instanceof BadRequest) {
       const status = err.code === "too_large" ? 413 : 400;
       return fail(status, err.code, err.message);
@@ -201,6 +211,7 @@ async function createDoc(request: Request, env: Env): Promise<Response> {
 
   const { meta, created, portal, sync } = await publishDocument(env, {
     title: parseTitle(body["title"]),
+    filename: typeof body["filename"] === "string" ? body["filename"] : undefined,
     source: requireString(body["html"] ?? body["source"], "html"),
     portal: typeof body["portal"] === "string" ? body["portal"] : undefined,
     summary: parseSummary(body["summary"]),
@@ -495,6 +506,8 @@ function publishResult(meta: DocMeta, portal: Portal, base: string) {
   const result: Record<string, unknown> = {
     id: meta.id,
     portal: meta.portal,
+    name: meta.name,
+    title: meta.title,
     // Always print where it landed. This — not a required --portal flag — is what catches a
     // client report filed into the wrong client's portal. See ADR-005.
     //
