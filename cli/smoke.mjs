@@ -11,13 +11,14 @@
 // broken package cannot be published.
 
 import { execSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const cliDir = dirname(fileURLToPath(import.meta.url));
-const expected = JSON.parse(readFileSync(join(cliDir, "package.json"), "utf8")).version;
+const pkg = JSON.parse(readFileSync(join(cliDir, "package.json"), "utf8"));
+const expected = pkg.version;
 // The PRODUCT version (root package.json) — what an installed deploy reports. As of 0.19.0 the npm
 // package version above is kept EQUAL to it (one number: `pagevault --version` matches /health). The
 // two are still read from their own sources here, so this asserts each is wired to the right place —
@@ -38,9 +39,15 @@ let tarball;
 let temp;
 let failure = null;
 try {
-  // 1. Pack exactly what `npm publish` would ship.
-  const packed = JSON.parse(execSync("npm pack --json", { cwd: cliDir, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }));
-  tarball = join(cliDir, packed[0].filename);
+  // 1. Pack exactly what `npm publish` would ship. Derive the tarball name (`<name>-<version>.tgz`)
+  //    instead of parsing `npm pack --json`: npm 11 changed that output from an array `[{filename}]`
+  //    to an object keyed by package name (`{ pagevault: {...} }`), and this smoke runs as
+  //    `prepublishOnly` under whatever npm ran `publish`. The registry naming convention is stable,
+  //    so the derived name is version-proof; `npm pack`'s own stdout (the filename) is ignored.
+  const tarballName = `${pkg.name.replace(/^@/, "").replace(/\//g, "-")}-${pkg.version}.tgz`;
+  execSync("npm pack", { cwd: cliDir, stdio: ["ignore", "ignore", "inherit"] });
+  tarball = join(cliDir, tarballName);
+  if (!existsSync(tarball)) throw new Error(`npm pack did not produce ${tarballName} in ${cliDir}`);
 
   // 2. Install the tarball into a throwaway dir — a stranger's machine, not our repo.
   temp = mkdtempSync(join(tmpdir(), "pagevault-smoke-"));
