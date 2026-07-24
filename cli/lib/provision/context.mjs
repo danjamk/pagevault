@@ -30,6 +30,13 @@ export const CONTEXT_FILE = ".pagevault.json";
 // repo-root state is stranded, and no migration is needed: a clone keeps using its cwd files.
 export const RUNNING_FROM_REPO = !fileURLToPath(import.meta.url).includes(`${sep}node_modules${sep}`);
 
+/**
+ * Show the right incantation for the reader's install (ADR-014): `make <makeCmd>` from a repo
+ * checkout, `pagevault <cliCmd>` from an installed package. So a message never tells an installed
+ * user to run a `make` target they don't have. Mirrors the switch in `destroy.mjs`/`verify.mjs`.
+ */
+export const runHint = (makeCmd, cliCmd) => (RUNNING_FROM_REPO ? `make ${makeCmd}` : `pagevault ${cliCmd}`);
+
 /** The directory holding operator state. See the note above. */
 export function stateDir() {
   if (process.env.PAGEVAULT_HOME) return process.env.PAGEVAULT_HOME;
@@ -201,7 +208,12 @@ export function loadContext() {
   try {
     return migrate(JSON.parse(readFileSync(file, "utf8")));
   } catch (err) {
-    die(err.message, "`git pull` to update the code, or delete .pagevault.json and re-run `make setup`.");
+    die(
+      err.message,
+      RUNNING_FROM_REPO
+        ? "`git pull` to update the code, or delete .pagevault.json and re-run `make setup`."
+        : "`npm update -g pagevault` to update, then re-run `pagevault init`.",
+    );
   }
 }
 
