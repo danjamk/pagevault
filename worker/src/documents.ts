@@ -23,6 +23,7 @@ import {
   listPortals,
   metadataFits,
   docId,
+  defaultDocName,
   mintPublicToken,
   normalizeEmail,
   putDoc,
@@ -650,13 +651,7 @@ export function parseFilename(value: unknown): string | undefined {
  * title still updates the same document in place on re-publish — today's behavior, preserved.
  */
 export function deriveDefaultFilename(title: string, sourceKind: SourceKind): string {
-  const slug =
-    title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, MAX_NAME_CHARS - 5) || "document";
-  return `${slug}.${sourceKind === "markdown" ? "md" : "html"}`;
+  return defaultDocName(title, sourceKind);
 }
 
 export function parseTags(value: unknown): string[] | undefined {
