@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -184,6 +184,30 @@ test("saveLoginConfig round-trips through loadConfig and writes 0600", () => {
   assert.equal(cfg.url, "https://share.example.com"); // trailing slash trimmed
   assert.equal(cfg.token, "tok123");
   assert.equal(statSync(p).mode & 0o777, 0o600); // it holds a bearer
+});
+
+test("login falls back to PAGEVAULT_URL / PAGEVAULT_API_TOKEN when the flags are omitted", () => {
+  const home = mkdtempSync(join(tmpdir(), "pv-login-env-"));
+  // No flags — url + token come from the environment. Point at a refused port so the post-save
+  // connection check fails fast and offline; the save is what we're asserting, and it happens first.
+  const r = spawnSync(process.execPath, [BIN, "login"], {
+    encoding: "utf8",
+    env: { ...process.env, HOME: home, PAGEVAULT_HOME: home, PAGEVAULT_URL: "http://127.0.0.1:1", PAGEVAULT_API_TOKEN: "envtok" },
+  });
+  assert.equal(r.status, 0, r.stderr); // a failed verify is non-fatal; login still persisted the config
+  const cfg = JSON.parse(readFileSync(join(home, "config.json"), "utf8"));
+  assert.equal(cfg.url, "http://127.0.0.1:1");
+  assert.equal(cfg.token, "envtok");
+});
+
+test("login with neither flags nor env errors with its usage", () => {
+  const home = mkdtempSync(join(tmpdir(), "pv-login-none-"));
+  const r = spawnSync(process.execPath, [BIN, "login"], {
+    encoding: "utf8",
+    env: { ...process.env, HOME: home, PAGEVAULT_HOME: home, PAGEVAULT_URL: "", PAGEVAULT_API_TOKEN: "" },
+  });
+  assert.equal(r.status, 1);
+  assert.match(`${r.stdout}${r.stderr}`, /Usage: pagevault login/);
 });
 
 test("PAGEVAULT_HOME isolates the login config from HOME", () => {

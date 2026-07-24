@@ -319,10 +319,16 @@ async function exportTree(pos, flags) {
 }
 
 async function login(flags) {
-  const url = typeof flags.url === "string" ? flags.url.replace(/\/+$/, "") : "";
-  const token = typeof flags.token === "string" ? flags.token : "";
+  // Flags win, but fall back to the same env vars every other command already honors — so
+  // `PAGEVAULT_URL=… PAGEVAULT_API_TOKEN=… pagevault login` persists your current environment to
+  // config.json without re-typing it. Error only when neither a flag nor the env supplies a value.
+  const url = (typeof flags.url === "string" ? flags.url : process.env.PAGEVAULT_URL || "").replace(/\/+$/, "");
+  const token = typeof flags.token === "string" ? flags.token : process.env.PAGEVAULT_API_TOKEN || "";
   if (!url || !token) {
-    throw new PvError("Usage: pagevault login --url https://share.example.com --token <PAGEVAULT_API_TOKEN>");
+    throw new PvError(
+      "Usage: pagevault login [--url https://share.example.com] [--token <PAGEVAULT_API_TOKEN>]\n" +
+        "Provide both as flags, or set PAGEVAULT_URL and PAGEVAULT_API_TOKEN and run `pagevault login`.",
+    );
   }
 
   // The same writer `pagevault init` uses, so an install and an explicit login leave identical
@@ -397,7 +403,7 @@ function usage() {
 Set up & deploy:
   pagevault init [--yes]              stand PageVault up on your own Cloudflare account (no repo)
   pagevault upgrade [--yes]           redeploy the bundled Worker (after 'npm update -g pagevault')
-  pagevault login --url <url> --token <token>   point at a deployment (init does this for you)
+  pagevault login [--url <url>] [--token <token>]   point at a deployment (falls back to env; init does this)
 
 Publish & manage documents:
   pagevault publish <file.html|.md> [--portal s] [--title t] [--summary s]
