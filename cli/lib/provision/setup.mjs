@@ -15,7 +15,90 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, versions } from "node:process";
 import { pathToFileURL } from "node:url";
-import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cfApi, cfAccounts, acct, tokenSetupFlow, banner, runHint } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cfApi, cfAccounts, acct, tokenSetupFlow, banner, runHint, argValue, fromEnv } from "./context.mjs";
+
+/**
+ * The active zones (domains) the pinned account owns — so the rung-2 hostname prompt can suggest
+ * them instead of demanding you remember and type a full hostname. Only visible when a cloud token
+ * is already saved (a re-run, which is exactly when you climb to rung 2); a true first run has no
+ * token yet and this returns [], falling back to the free-text prompt.
+ */
+async function accountZones(ctx) {
+  if (!isInteractive() || !loadCloudToken()) return [];
+  try {
+    const z = await cfApi("/zones?per_page=50");
+    if (!z.ok) return [];
+    return (z.result ?? [])
+      .filter((x) => x.status === "active" && (!ctx.accountId || x.account?.id === ctx.accountId))
+      .map((x) => x.name);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Resolve the rung-2+ hostname: `--host` / env win outright; otherwise suggest the account's
+ * domains — the sole one as a default (`pagevault.<zone>`), or a numbered pick when there are
+ * several. Falls back to a plain prompt when no domain is visible (first run, no token yet).
+ */
+async function resolveHost({ ctx, rl }) {
+  const forced = argValue("--host") ?? fromEnv("HOST");
+  if (forced) return forced;
+
+  const zones = await accountZones(ctx);
+  if (zones.length && isInteractive()) {
+    if (zones.length === 1) {
+      const suggested = ctx.host || `pagevault.${zones[0]}`;
+      const ans = (await rl.question(`  Hostname to serve on? ${c.dim(`[${suggested}]`)}: `)).trim();
+      return ans || suggested;
+    }
+    console.log(`  Domains in this account — pick one, or type a full hostname:`);
+    zones.forEach((z, i) => console.log(`    ${c.bold(String(i + 1))}  pagevault.${z}`));
+    const ans = (await rl.question(`  Which? ${c.dim("[1]")} `)).trim() || "1";
+    const n = Number(ans);
+    return Number.isInteger(n) && zones[n - 1] ? `pagevault.${zones[n - 1]}` : ans;
+  }
+
+  // No domain visible yet — the plain prompt (keeps any saved host as the default).
+  return resolve({
+    flag: "--host",
+    ctxValue: ctx.host,
+    promptText: "Hostname to serve on (e.g. pagevault.you.com)",
+    rl,
+    fallback: ctx.host,
+  });
+}
+
+/**
+ * The tier the user is choosing between (ADR-018): "public" or "secured". `--tier` wins; otherwise
+ * prompt, defaulting from the saved rung (3 → secured, else public). `--rung` is handled by the
+ * caller as a direct escape and never reaches here.
+ */
+async function resolveTier({ ctx, rl }) {
+  const flag = (argValue("--tier") || "").toLowerCase();
+  if (flag.startsWith("pub")) return "public";
+  if (flag.startsWith("sec")) return "secured";
+  const def = (ctx.rung ?? 1) >= 3 ? "secured" : "public";
+  if (!isInteractive() || !rl) return def;
+  const ans = (await rl.question(`  Which tier — ${c.bold("Public")} or ${c.bold("Secured")}? ${c.dim(`[${def}]`)} `)).trim().toLowerCase();
+  if (!ans) return def;
+  if ("secured".startsWith(ans)) return "secured";
+  if ("public".startsWith(ans)) return "public";
+  die(`"${ans}" — choose "public" or "secured".`);
+}
+
+/**
+ * Within Public, a domain is optional (ADR-018): `--host`/env means yes; a saved host defaults to
+ * yes; otherwise ask. Non-interactive falls back to whether a host is already saved.
+ */
+async function wantsDomain({ ctx, rl }) {
+  if (argValue("--host") || fromEnv("HOST")) return true;
+  const def = ctx.host ? "y" : "n";
+  if (!isInteractive() || !rl) return def === "y";
+  const ans = (await rl.question(`  Serve on your own domain? ${c.dim(`(optional) [${def === "y" ? "Y/n" : "y/N"}]`)} `)).trim().toLowerCase();
+  if (!ans) return def === "y";
+  return ans === "y" || ans === "yes";
+}
 
 /**
  * Configure this deployment (rung, owner, host, pinned account) into `.pagevault.json`.
@@ -44,31 +127,21 @@ export async function setup(opts = {}) {
   // --- Teach, on the first run only ------------------------------------------
 
   if (firstRun) {
-    console.log(`\n${c.bold("The ladder")} — start low, climb anytime. This is not a one-way door;`);
-    console.log(`your documents carry across every rung.\n`);
-    console.log(`  ${c.bold("1")}  Publish    public links on *.workers.dev      ${c.dim("free · nothing to buy")}`);
-    console.log(`  ${c.bold("2")}  + domain   the same, on your own hostname     ${c.dim("a domain in your CF account")}`);
-    console.log(`  ${c.bold("3")}  Portals    client collections, email-secured  ${c.dim("a domain + Zero Trust (a card)")}`);
-    console.log(`\n  ${c.dim("Most people start at 1. You can run this again to move up whenever you like.")}\n`);
+    console.log(`\n${c.bold("Two tiers")} — start Public, add security when you need it. Not a one-way`);
+    console.log(`door; your documents carry across untouched.\n`);
+    console.log(`  ${c.bold("Public")}   public links anyone with the URL can open   ${c.dim("free · no card")}`);
+    console.log(`           ${c.dim("optionally on your own domain")}`);
+    console.log(`  ${c.bold("Secured")}  private — named people, client portals      ${c.dim("a domain + Zero Trust (a card)")}`);
+    console.log(`\n  ${c.dim("Most people start Public. Re-run this anytime to add a domain or turn on security.")}\n`);
   } else {
-    info(`Current: rung ${c.bold(ctx.rung)}${ctx.host ? ` · ${ctx.host}` : ""}${ctx.ownerEmail ? ` · ${ctx.ownerEmail}` : ""}`);
+    const tierName = (ctx.rung ?? 1) >= 3 ? "Secured" : "Public";
+    info(`Current: ${c.bold(tierName)}${ctx.host ? ` · ${ctx.host}` : ""}${ctx.ownerEmail ? ` · ${ctx.ownerEmail}` : ""}`);
     console.log(`  ${c.dim("Press enter to keep a value, or type a new one to change it.")}\n`);
   }
 
   const rl = createInterface({ input: stdin, output: stdout });
 
   // --- Resolve the intent (flag → env → current → prompt) --------------------
-
-  const rung = Number(
-    await resolve({
-      flag: "--rung",
-      ctxValue: ctx.rung,
-      promptText: "Start at which rung? (1 publish · 2 domain · 3 portals)",
-      rl,
-      fallback: ctx.rung ?? 1,
-    }),
-  );
-  if (![1, 2, 3].includes(rung)) die(`"${rung}" is not a rung. Choose 1, 2, or 3.`);
 
   const ownerEmail = (
     await resolve({
@@ -82,18 +155,28 @@ export async function setup(opts = {}) {
   )?.toLowerCase();
   if (!ownerEmail || !ownerEmail.includes("@")) die("A valid owner email is required.");
 
+  // Tier + domain → internal rung (ADR-018). Public is rung 1 (workers.dev) or 2 (with a domain);
+  // Secured is rung 3 (Zero Trust + portals). `--rung 1|2|3` stays as the non-interactive escape.
   let host = ctx.host ?? "";
-  if (rung >= 2) {
-    host = await resolve({
-      flag: "--host",
-      ctxValue: ctx.host,
-      promptText: "Hostname to serve on (e.g. pagevault.you.com)",
-      rl,
-      fallback: ctx.host,
-    });
-    if (!host || !host.includes(".")) die("Rung 2+ needs a hostname, e.g. pagevault.you.com");
-  } else if (host) {
-    info(`Rung 1 ignores the saved host (${host}) — you'll publish on *.workers.dev.`);
+  let rung;
+  const rungFlag = Number(argValue("--rung"));
+  if ([1, 2, 3].includes(rungFlag)) {
+    rung = rungFlag;
+    if (rung >= 2) {
+      host = await resolveHost({ ctx, rl });
+      if (!host || !host.includes(".")) die("A domain is required, e.g. pagevault.you.com");
+    } else host = "";
+  } else if ((await resolveTier({ ctx, rl })) === "secured") {
+    host = await resolveHost({ ctx, rl });
+    if (!host || !host.includes(".")) die("Secured needs a domain, e.g. pagevault.you.com");
+    rung = 3;
+  } else if (await wantsDomain({ ctx, rl })) {
+    host = await resolveHost({ ctx, rl });
+    rung = host && host.includes(".") ? 2 : 1;
+  } else {
+    if (host) info(`Public without a domain — publishing on *.workers.dev (saved host ${host} ignored).`);
+    host = "";
+    rung = 1;
   }
 
   rl.close();
@@ -148,31 +231,8 @@ export async function setup(opts = {}) {
   saveContext({ ...loadContext(), accountId: account.id, accountName: account.name });
   ok(`Deploys to: ${acct(account)}`);
 
-  // --- Own a domain here? Offer the rung-2 bump ------------------------------
-  //
-  // Changing your mind about the rung is an INTENT decision, so it lives in setup — not in
-  // preflight, whose one job is to verify the rung you chose. Rung 1 only; 2 and 3 already
-  // picked a host.
-  if (rung < 2 && isInteractive()) {
-    const z = await cfApi("/zones?per_page=50");
-    const zones = (z.ok ? z.result ?? [] : []).filter((x) => x.account?.id === account.id && x.status === "active");
-    if (zones.length) {
-      console.log();
-      console.log(`You own ${zones.length === 1 ? "a domain" : "domains"} here: ${c.bold(zones.map((x) => x.name).join(", "))}`);
-      const rl3 = createInterface({ input: stdin, output: stdout });
-      const yes = (await rl3.question(`Publish on it instead of *.workers.dev? (rung 2) [y/N] `)).trim().toLowerCase();
-      if (yes === "y" || yes === "yes") {
-        const suggested = `pagevault.${zones[0].name}`;
-        const h = (await rl3.question(`Hostname? [${suggested}] `)).trim() || suggested;
-        rl3.close();
-        saveContext({ ...loadContext(), rung: 2, host: h });
-        ok(`Switched to rung 2 — ${c.bold(h)}`);
-        console.log(`\n${c.bold("Next:")} ${c.bold(opts.next ?? "make preflight")}\n`);
-        return { ready: false };
-      }
-      rl3.close();
-    }
-  }
+  // The domain decision now lives in the Public prompt above (ADR-018 — a domain is an option
+  // inside Public, asked with the account's zones suggested), so there is no post-pin upsell.
 
   return { ready: true };
 }

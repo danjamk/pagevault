@@ -29,7 +29,7 @@ const LEGACY_STATE = ".pagevault-provision.json";
 const GROUP_NAME = "pagevault-viewers";
 
 export async function provisionAccess(opts = {}) {
-  console.log(banner("provision Access", "(rung 3)"));
+  console.log(banner("provision Access", "(Secured)"));
 
   // --- Context: one file, migrating the legacy provision state in once -------
 
