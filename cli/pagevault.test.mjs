@@ -116,14 +116,18 @@ test("an unknown command exits 1 and points at help", () => {
 });
 
 test("sync-access is dispatched, and --reap refuses non-interactively without --yes", () => {
+  // Isolate HOME/PAGEVAULT_HOME: `run` alone would leak the operator's real ~/.pagevault/config.json,
+  // so a machine that has run `login` would let plain sync-access reach a live deployment and exit 0.
+  const home = mkdtempSync(join(tmpdir(), "pv-sync-"));
+
   // --reap guards before config, so a non-TTY run without --yes fails on the guard, not the network.
-  const reaped = run("sync-access", "--reap");
+  const reaped = runIn(home, "sync-access", "--reap");
   assert.equal(reaped.status, 1);
   assert.match(reaped.text, /Refusing to --reap/);
   assert.doesNotMatch(reaped.text, /Unknown command/);
 
   // Plain sync-access reaches the command (config error), proving it's wired into the switch.
-  const plain = run("sync-access");
+  const plain = runIn(home, "sync-access");
   assert.equal(plain.status, 1);
   assert.doesNotMatch(plain.text, /Unknown command/);
 });

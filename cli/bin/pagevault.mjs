@@ -75,6 +75,21 @@ async function main() {
   }
 }
 
+/**
+ * The publish flags the user actually passed, rebuilt as a command string — so a collision's
+ * "replace" suggestion carries their intent (`--public`, `--emails`, …) instead of dropping it.
+ */
+function passedPublishFlags(flags) {
+  const parts = [];
+  for (const key of ["portal", "name", "title", "summary", "tags", "emails", "source-kind"]) {
+    const v = flags[key];
+    if (typeof v === "string") parts.push(`--${key} ${/\s/.test(v) ? JSON.stringify(v) : v}`);
+  }
+  if (flags.public === true) parts.push("--public");
+  if (flags["owner-only"] === true) parts.push("--owner-only");
+  return parts.join(" ");
+}
+
 async function publish(pos, flags) {
   const file = pos[0];
   if (!file) throw new PvError("Usage: pagevault publish <file.html|.md> [--portal s] [--name f] [--title t] [--public] …");
@@ -101,16 +116,29 @@ async function publish(pos, flags) {
       confirm: flags.confirm === true,
     });
   } catch (err) {
-    // A same-filename collision is a decision, not a dead end: spell out the three ways forward,
-    // using the id the server handed back with the 409. See ADR-017.
+    // A same-filename collision is a decision, not a dead end. Echo back the flags the user
+    // passed, so the "replace" command carries their intent (a bare `--confirm` would silently
+    // drop the `--public` they just asked for). And when they DID ask to make it public, lead
+    // with `mint` — adding the link, no re-upload, is almost certainly what they meant. ADR-017.
     if (err instanceof PvError && err.code === "already_exists" && err.details?.id) {
       const { id, name, portal } = err.details;
-      throw new PvError(
-        `A document named "${name}" already exists in portal "${portal}".\n` +
-          `  Replace it in place:        pagevault publish ${file} --confirm\n` +
-          `  Publish as a separate doc:  pagevault publish ${file} --name <other-filename>\n` +
-          `  Change only its link:       pagevault mint ${id}`,
-      );
+      const opts = passedPublishFlags(flags);
+      const replace = `pagevault publish ${file}${opts ? ` ${opts}` : ""} --confirm`;
+      const mint = `pagevault mint ${id}`;
+      const fork = `pagevault publish ${file} --name <other-filename>`;
+      const lines =
+        flags.public === true
+          ? [
+              `  Make it public (no re-upload):   ${mint}`,
+              `  Replace its contents too:        ${replace}`,
+              `  Publish as a separate document:  ${fork}`,
+            ]
+          : [
+              `  Replace its contents:            ${replace}`,
+              `  Publish as a separate document:  ${fork}`,
+              `  Change only its link:            ${mint}`,
+            ];
+      throw new PvError(`A document named "${name}" already exists in portal "${portal}".\n${lines.join("\n")}`);
     }
     throw err;
   }
