@@ -50,6 +50,8 @@ async function main() {
       return list(flags);
     case "read":
       return read(positional, flags);
+    case "link":
+      return link(positional, flags);
     case "search":
       return search(positional, flags);
     case "mint":
@@ -212,12 +214,27 @@ async function read(pos, flags) {
     `  created   ${(meta.createdAt || "").slice(0, 10)}`,
     `  updated   ${(meta.updatedAt || "").slice(0, 10)}`,
     `  access    ${visibility}`,
+    // The shareable URL, built by the server (public /p/ link if any, else the portal viewer URL).
+    `  link      ${meta.publicUrl || meta.url || ""}`,
   ];
   if (meta.tags?.length) lines.push(`  tags      ${meta.tags.join(", ")}`);
   if (meta.summary) lines.push(`  summary   ${meta.summary}`);
-  if (meta.publicToken) lines.push(`  public    ${cfg.url}/p/${meta.publicToken}`);
-  lines.push("", "Body: pagevault read " + id + " --source");
+  lines.push("", `Body: pagevault read ${id} --source   ·   URL only: pagevault link ${id}`);
   out(lines.join("\n"));
+}
+
+async function link(pos) {
+  const id = pos[0];
+  if (!id) throw new PvError("Usage: pagevault link <id>   (prints the shareable URL to stdout)");
+  const cfg = requireConfig();
+  const meta = await api(cfg, "GET", `/docs/${encodeURIComponent(id)}`);
+  // One URL → stdout, nothing else, so `pagevault link <id> | pbcopy` just works. A public doc
+  // hands back its /p/ capability link; otherwise the portal viewer URL (login required).
+  const url = meta.publicUrl || meta.url;
+  if (!url) throw new PvError(`No URL for "${id}" — check the id with \`pagevault list\`.`);
+  if (meta.ownerOnly) note("⚠ This is an owner-only draft — it opens for no one until you publish it.");
+  else if (!meta.publicUrl) note("Note: this link requires login (portal members). For a public link: pagevault mint " + id);
+  out(url);
 }
 
 async function search(pos, flags) {
@@ -463,6 +480,7 @@ Publish & manage documents:
                                 --name sets the update key (default: the filename); --title is display only
   pagevault list [--portal s] [--tag t] [--json]
   pagevault read <id> [--source] [--json]
+  pagevault link <id>                 print the shareable URL to stdout (| pbcopy)
   pagevault search <portal> <query …> [--limit N] [--json]
   pagevault mint <id>                 mint a public /p/ link for an existing document
   pagevault revoke <id>               kill a document's public link (keeps the document)

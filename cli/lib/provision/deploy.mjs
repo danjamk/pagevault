@@ -25,7 +25,7 @@ export async function deploy(opts = {}) {
   const ctx = loadContext();
   if (!ctx.rung || !ctx.ownerEmail) die("No .pagevault.json yet.", `Run \`${runHint("setup", "init")}\` first.`);
 
-  console.log(banner("deploy", `(rung ${ctx.rung} → ${shortId(ctx.accountId)})`));
+  console.log(banner("deploy", `(${ctx.rung >= 3 ? "Secured" : "Public"} → ${shortId(ctx.accountId)})`));
 
   // --- 0. WHERE? Verify the pinned account, name it once, confirm it ---------
 

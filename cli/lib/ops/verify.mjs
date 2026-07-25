@@ -88,8 +88,16 @@ export async function verifyCmd({ json = false } = {}) {
   if (!live) {
     record("worker_live", false);
     say(`\n  ${c.red("✗")} The route isn't serving our Worker yet.`);
-    say(`\n  ${c.dim("workers.dev routes can take a minute or two to go live on a brand-new subdomain —")}`);
-    say(`  ${c.dim("this is propagation, not a broken deploy. Give it a moment, then re-run")} ${c.bold("pagevault verify")}.\n`);
+    if ((ctx.rung ?? 1) >= 2) {
+      // Rung 2/3 is a CUSTOM domain: the delay is edge-certificate provisioning, not workers.dev
+      // propagation. Different cause, different wait — say so, or it reads as a broken deploy.
+      say(`\n  ${c.dim("A custom domain provisions its own TLS certificate, which can take a few minutes on a")}`);
+      say(`  ${c.dim("brand-new hostname — this is provisioning, not a broken deploy. Give it a moment, then")}`);
+      say(`  ${c.dim("re-run")} ${c.bold("pagevault verify")}${c.dim(". If it is still failing after ~15 minutes, check the domain in the Cloudflare dashboard.")}\n`);
+    } else {
+      say(`\n  ${c.dim("workers.dev routes can take a minute or two to go live on a brand-new subdomain —")}`);
+      say(`  ${c.dim("this is propagation, not a broken deploy. Give it a moment, then re-run")} ${c.bold("pagevault verify")}.\n`);
+    }
     return finish(false, { reason: "route_not_live" });
   }
   record("worker_live", true);
@@ -104,12 +112,12 @@ export async function verifyCmd({ json = false } = {}) {
     if (rung >= 3) {
       const rootOk = status === 302 && loc.endsWith("/admin");
       record("root", rootOk, `${status}${loc ? ` → ${loc}` : ""}`);
-      rootOk ? say(`  ${c.green("✓")} Root redirects to /admin`) : say(`  ${c.yellow("!")} Root returned ${status}${loc ? ` → ${loc}` : ""} (expected 302 → /admin at rung 3)`);
+      rootOk ? say(`  ${c.green("✓")} Root redirects to /admin`) : say(`  ${c.yellow("!")} Root returned ${status}${loc ? ` → ${loc}` : ""} (expected 302 → /admin when Secured)`);
     } else {
       record("root", status === 200, String(status));
       status === 200
         ? say(`  ${c.green("✓")} Root serves the landing page`)
-        : say(`  ${c.yellow("!")} Root returned ${status} (expected 200 landing at rung ${rung})`);
+        : say(`  ${c.yellow("!")} Root returned ${status} (expected 200 landing on a Public deployment)`);
     }
   }
 

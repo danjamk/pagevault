@@ -100,19 +100,19 @@
   </div>
 </section>
 
-<!-- 3 · THREE WAYS TO RUN IT -->
+<!-- 3 · TWO WAYS TO RUN IT (Public / Secured) -->
 <section style="background:var(--pv-surface-2)">
   <div class="wrap" style="padding:84px 28px">
     <p class="eyebrow">Start where you are</p>
-    <h2 style="font-size:clamp(26px,3.6vw,38px);line-height:1.13;font-weight:600;letter-spacing:-0.02em;color:var(--pv-ink);max-width:20ch">Three ways to run it.</h2>
-    <p style="font-size:17px;line-height:1.6;color:var(--pv-text-2);margin:18px 0 0;max-width:64ch">Each is a superset of the one before it. Start at the left, climb when you have a reason. Your documents carry across untouched.</p>
+    <h2 style="font-size:clamp(26px,3.6vw,38px);line-height:1.13;font-weight:600;letter-spacing:-0.02em;color:var(--pv-ink);max-width:20ch">Two ways to run it.</h2>
+    <p style="font-size:17px;line-height:1.6;color:var(--pv-text-2);margin:18px 0 0;max-width:64ch">Public is free and needs no card. Secured adds your own domain and a login wall — Cloudflare Zero Trust, a card on file, no bill. Start Public; your documents carry across untouched when you climb.</p>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;margin-top:40px">
       <div style="display:flex;flex-direction:column;background:var(--pv-surface);border:1px solid var(--pv-border);border-radius:16px;padding:28px 26px">
-        <div style="display:flex;align-items:center;gap:8px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--pv-lv-link);margin-bottom:16px"><span style="font-variant-numeric:tabular-nums">01</span> Rung one</div>
+        <div style="display:flex;align-items:center;gap:8px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--pv-lv-link);margin-bottom:16px">Public</div>
         <h3 style="font-size:22px;font-weight:600;letter-spacing:-0.01em;color:var(--pv-ink)">Just share it</h3>
         <p style="font-size:14px;font-weight:500;color:var(--pv-lv-link);margin:8px 0 0">Free. No card. About ten minutes.</p>
-        <p style="font-size:15px;line-height:1.55;color:var(--pv-text-2);margin:16px 0 20px">Deploy to your own Cloudflare account and publish. You get an unguessable link that anyone you send it to can open — no login, no install, nothing to sign up for.</p>
+        <p style="font-size:15px;line-height:1.55;color:var(--pv-text-2);margin:16px 0 20px">Deploy to your own Cloudflare account and publish. You get an unguessable link that anyone you send it to can open — no login, no install, nothing to sign up for. Optionally on your own domain.</p>
         <ul style="list-style:none;margin:0 0 20px;padding:0;display:flex;flex-direction:column;gap:10px">
           <li style="display:flex;gap:10px;font-size:14px;color:var(--pv-text)"><span style="color:var(--pv-accent);flex:none">—</span>Renders HTML and Markdown properly</li>
           <li style="display:flex;gap:10px;font-size:14px;color:var(--pv-text)"><span style="color:var(--pv-accent);flex:none">—</span>Publish from the terminal or straight from a chat</li>
@@ -123,8 +123,8 @@
       </div>
 
       <div style="display:flex;flex-direction:column;background:var(--pv-surface);border:1px solid var(--pv-border);border-radius:16px;padding:28px 26px">
-        <div style="display:flex;align-items:center;gap:8px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--pv-lv-team);margin-bottom:16px"><span style="font-variant-numeric:tabular-nums">02</span> Rung two</div>
-        <h3 style="font-size:22px;font-weight:600;letter-spacing:-0.01em;color:var(--pv-ink)">Share it privately</h3>
+        <div style="display:flex;align-items:center;gap:8px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--pv-lv-team);margin-bottom:16px">Secured</div>
+        <h3 style="font-size:22px;font-weight:600;letter-spacing:-0.01em;color:var(--pv-ink)">Lock it to named people</h3>
         <p style="font-size:14px;font-weight:500;color:var(--pv-lv-team);margin:8px 0 0">Your domain. Named people only.</p>
         <p style="font-size:15px;line-height:1.55;color:var(--pv-text-2);margin:16px 0 20px">Put it on <code style="font-size:.88em;color:var(--pv-code-tx);background:var(--pv-code-bg);border:1px solid var(--pv-code-bd);border-radius:5px;padding:1px 6px">share.you.com</code> and gate documents to specific email addresses. Your reader gets a six-digit code by email and reads the document. No account, no password, no app.</p>
         <ul style="list-style:none;margin:0 0 20px;padding:0;display:flex;flex-direction:column;gap:10px">
@@ -132,21 +132,22 @@
           <li style="display:flex;gap:10px;font-size:14px;color:var(--pv-text)"><span style="color:var(--pv-accent);flex:none">—</span>Grants are additive — add one person to one report without rebuilding anything</li>
           <li style="display:flex;gap:10px;font-size:14px;color:var(--pv-text)"><span style="color:var(--pv-accent);flex:none">—</span>Identity handled by Cloudflare Access; one Worker function decides what's visible</li>
         </ul>
-        <p style="margin:auto 0 0;padding-top:16px;border-top:1px solid var(--pv-border-2);font-size:13px;color:var(--pv-muted)">For one person protecting their own work. Needs a domain and a card on file to enable Cloudflare Zero Trust — free plan, no bill.</p>
+        <p style="margin:auto 0 0;padding-top:16px;border-top:1px solid var(--pv-border-2);font-size:13px;color:var(--pv-muted)">For protecting your own work — or running a whole practice (below). Needs a domain and a card on file to enable Cloudflare Zero Trust — free plan, no bill.</p>
       </div>
 
-      <div style="display:flex;flex-direction:column;background:var(--pv-surface);border:1px solid var(--pv-border);border-radius:16px;padding:28px 26px">
-        <div style="display:flex;align-items:center;gap:8px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--pv-lv-public);margin-bottom:16px"><span style="font-variant-numeric:tabular-nums">03</span> Rung three</div>
-        <h3 style="font-size:22px;font-weight:600;letter-spacing:-0.01em;color:var(--pv-ink)">Run a practice</h3>
-        <p style="font-size:14px;font-weight:500;color:var(--pv-lv-public);margin:8px 0 0">The client is the unit, not the link.</p>
-        <p style="font-size:15px;line-height:1.55;color:var(--pv-text-2);margin:16px 0 20px">A portal is one durable URL per client. Every artifact lands there, tagged and dated and gated to their people. And the collection reads back — six months later, your agent can search it.</p>
-        <ul style="list-style:none;margin:0 0 20px;padding:0;display:flex;flex-direction:column;gap:10px">
-          <li style="display:flex;gap:10px;font-size:14px;color:var(--pv-text)"><span style="color:var(--pv-accent);flex:none">—</span>Add someone to a client's team: one change, not fourteen</li>
-          <li style="display:flex;gap:10px;font-size:14px;color:var(--pv-text)"><span style="color:var(--pv-accent);flex:none">—</span>Everything you've ever sent a client, in one place they can browse</li>
-          <li style="display:flex;gap:10px;font-size:14px;color:var(--pv-text)"><span style="color:var(--pv-accent);flex:none">—</span>Cross-portal leakage is impossible by construction, not by convention</li>
-        </ul>
-        <p style="margin:auto 0 0;padding-top:16px;border-top:1px solid var(--pv-border-2);font-size:13px;color:var(--pv-muted)">For consultants, fractional execs, solo operators. Honest limit: under about five clients, a shared folder is simpler — portals earn their keep once the artifacts pile up.</p>
-      </div>
+    </div>
+
+    <!-- Running a practice — the payoff of Secured, not a third tier -->
+    <div style="display:flex;flex-direction:column;background:var(--pv-surface);border:1px solid var(--pv-border);border-radius:16px;padding:28px 26px;margin-top:18px">
+      <div style="display:flex;align-items:center;gap:8px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--pv-lv-public);margin-bottom:16px">Secured · running a practice</div>
+      <h3 style="font-size:22px;font-weight:600;letter-spacing:-0.01em;color:var(--pv-ink)">The client is the unit, not the link</h3>
+      <p style="font-size:15px;line-height:1.55;color:var(--pv-text-2);margin:16px 0 20px;max-width:72ch">A portal is one durable URL per client. Every artifact lands there, tagged and dated and gated to their people. And the collection reads back — six months later, your agent can search it.</p>
+      <ul style="list-style:none;margin:0 0 20px;padding:0;display:flex;flex-direction:column;gap:10px">
+        <li style="display:flex;gap:10px;font-size:14px;color:var(--pv-text)"><span style="color:var(--pv-accent);flex:none">—</span>Add someone to a client's team: one change, not fourteen</li>
+        <li style="display:flex;gap:10px;font-size:14px;color:var(--pv-text)"><span style="color:var(--pv-accent);flex:none">—</span>Everything you've ever sent a client, in one place they can browse</li>
+        <li style="display:flex;gap:10px;font-size:14px;color:var(--pv-text)"><span style="color:var(--pv-accent);flex:none">—</span>Cross-portal leakage is impossible by construction, not by convention</li>
+      </ul>
+      <p style="padding-top:16px;border-top:1px solid var(--pv-border-2);font-size:13px;color:var(--pv-muted)">For consultants, fractional execs, solo operators. Honest limit: under about five clients, a shared folder is simpler — portals earn their keep once the artifacts pile up.</p>
     </div>
 
     <!-- Sharing simulator -->

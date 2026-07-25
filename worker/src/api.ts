@@ -104,7 +104,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
     const doc = /^\/docs\/([^/]+)$/.exec(rest);
     if (doc?.[1]) {
-      if (request.method === "GET") return await getDocHandler(env, doc[1]);
+      if (request.method === "GET") return await getDocHandler(request, env, doc[1]);
       if (request.method === "PATCH") return await patchDocHandler(request, env, doc[1]);
       if (request.method === "DELETE") return await deleteDocHandler(env, doc[1]);
       return fail(405, "method_not_allowed", `${request.method} not allowed on ${pathname}`);
@@ -240,10 +240,20 @@ async function listDocsHandler(request: Request, env: Env): Promise<Response> {
   return json({ docs });
 }
 
-async function getDocHandler(env: Env, id: string): Promise<Response> {
+async function getDocHandler(request: Request, env: Env, id: string): Promise<Response> {
   const meta = await getMeta(env, id);
   if (!meta) return fail(404, "not_found", `No such document: ${id}`);
-  return json(meta);
+  // Include the ready-to-open URL(s), built server-side the way publish does — the portal's kind
+  // decides /v vs /pub, which a caller can't know from meta alone. Lets `pagevault link` / `read`
+  // (and any /api client) hand back a URL without a second round-trip.
+  const portal = await getPortal(env, meta.portal);
+  const base = baseUrl(request, env);
+  const body: Record<string, unknown> = {
+    ...meta,
+    url: portal ? `${base}${documentPath(portal, id)}` : `${base}/v/${encodeURIComponent(meta.portal)}/${id}`,
+  };
+  if (meta.publicToken) body["publicUrl"] = `${base}/p/${meta.publicToken}`;
+  return json(body);
 }
 
 /**

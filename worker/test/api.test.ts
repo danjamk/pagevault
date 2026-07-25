@@ -144,6 +144,24 @@ describe("🔴 /api — console session tokens (ADR-004)", () => {
   });
 });
 
+describe("GET /api/docs/{id} — returns a ready-to-open URL (powers `pagevault link`)", () => {
+  const get = (id: string) => SELF.fetch(`${HOST}/api/docs/${id}`, { headers: auth() });
+
+  it("includes `url`, and `publicUrl` for a public document", async () => {
+    const pub = (await (await publish(aDoc({ title: "Linkable", filename: "linkable.html", public: true }))).json()) as { id: string };
+    const got = (await (await get(pub.id)).json()) as { url: string; publicUrl?: string };
+    expect(got.url).toMatch(/\/(v|pub)\//);
+    expect(got.publicUrl).toMatch(/\/p\//);
+  });
+
+  it("a non-public document has `url` but no `publicUrl`", async () => {
+    const priv = (await (await publish(aDoc({ title: "Private", filename: "private.html" }))).json()) as { id: string };
+    const got = (await (await get(priv.id)).json()) as { url: string; publicUrl?: string };
+    expect(got.url).toMatch(/\/v\//);
+    expect(got.publicUrl).toBeUndefined();
+  });
+});
+
 describe("filename identity — (portal, filename) is the update key, not the title (ADR-017, #111)", () => {
   type DocBody = { id: string; name: string; title: string; code?: string };
   const read = (r: Response) => r.json() as Promise<DocBody>;

@@ -27,6 +27,7 @@ export async function statusCmd({ json = false, out = (s) => process.stdout.writ
           version: VERSION,
           schemaVersion: ctx.schemaVersion ?? SCHEMA_VERSION,
           configured: ctx.rung !== undefined,
+          tier: ctx.rung === undefined ? null : ctx.rung >= 3 ? "secured" : "public",
           rung: ctx.rung ?? null,
           ownerEmail: ctx.ownerEmail ?? null,
           account: ctx.accountId ? { name: ctx.accountName ?? null, id: ctx.accountId } : null,
@@ -53,7 +54,7 @@ export async function statusCmd({ json = false, out = (s) => process.stdout.writ
     return;
   }
 
-  row("Rung", String(ctx.rung));
+  row("Tier", ctx.rung >= 3 ? "Secured" : ctx.host ? "Public · own domain" : "Public");
   row("Owner", ctx.ownerEmail);
   row("Account", ctx.accountName ? `${ctx.accountName} ${c.dim(`(${String(ctx.accountId ?? "").slice(0, 8)})`)}` : ctx.accountId);
   if (ctx.host) row("Host", ctx.host);
