@@ -7,6 +7,30 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-07-24
+
+### Changed
+- **Two user-facing tiers — Public and Secured ([ADR-018](docs/adr/ADR-018-public-and-secured-tiers.md)).**
+  `init` asks "Public or Secured?" instead of "rung 1 · 2 · 3": Public offers an optional domain
+  (suggesting the account's zones), Secured requires a domain and Zero Trust. The internal `rung`
+  (1/2/3) is retained as an implementation detail — the deploy/provision machinery is unchanged.
+  `status`, the deploy/provision banners, and `verify` all speak tiers now; `--tier public|secured`
+  is the preferred flag, `--rung 1|2|3` stays as the non-interactive escape. The README and product
+  page are reframed to match (three tier-card images dropped for a feature table; "running a
+  practice" becomes a use of Secured, not a third tier).
+
+### Added
+- **`pagevault link <id>`** — print a document's shareable URL to stdout, pipeable (`| pbcopy`).
+  `GET /api/docs/{id}` now returns `url` (the viewer URL, built with the portal's kind) and
+  `publicUrl` (the `/p/` link when the document has one); `read` gains a `link` line.
+- **`init` suggests the account's domains** at the hostname prompt — the sole domain as a default,
+  or a numbered pick when there are several.
+
+### Fixed
+- **`verify`'s "route isn't serving" message is tier-aware.** On a custom domain it now blames
+  edge-certificate provisioning (a few minutes on a fresh hostname) rather than workers.dev
+  propagation, so a just-deployed domain no longer reads as a broken deploy.
+
 ## [0.20.0] — 2026-07-24
 
 ### Changed
