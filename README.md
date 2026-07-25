@@ -9,17 +9,9 @@ from Claude, ChatGPT, Gemini, Copilot, or any MCP-capable tool, without leaving 
 where you made it. Self-hosted on Cloudflare's free tier. Whoever you send it to installs
 nothing and signs up for nothing — no account, on any platform.
 
-<p align="center">
-  <a href="#1--sharing-something"><img alt="Tier 1 — Sharing something" src="docs/images/card-tier-1-sharing.png" width="250"></a>
-  &nbsp;
-  <a href="#2--sharing-it-privately"><img alt="Tier 2 — Sharing it privately" src="docs/images/card-tier-2-private.png" width="250"></a>
-  &nbsp;
-  <a href="#3--running-a-practice"><img alt="Tier 3 — Running a practice" src="docs/images/card-tier-3-practice.png" width="250"></a>
-</p>
-
 ![License: MIT](https://img.shields.io/badge/License-MIT-34507A) &nbsp;
 ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-34507A) &nbsp;
-![Version](https://img.shields.io/badge/version-0.19.2-34507A)
+![Version](https://img.shields.io/badge/version-0.21.0-34507A)
 
 > **Pre-1.0 and honest about it.** [Status](#status) says what works today and what
 > doesn't. This README is the setup guide — the product argument lives on the
@@ -29,33 +21,38 @@ nothing and signs up for nothing — no account, on any platform.
 
 ## Is this for you?
 
-Three ways people run PageVault. Pick the one that sounds like you — the setup
-sections below follow the same order, and each is a superset of the one above it.
+Two tiers, and picking one is really a single question: **does anyone need to be
+stopped at the door?**
 
-| | You are | You get | It costs |
-|---|---|---|---|
-| **1** | **Sharing something** — you made a report in a chat and need to hand it to someone | Deploy, publish, share unguessable `/p/` links that anyone can open | free · **no card** |
-| **2** | **Sharing it privately** — your own work, your own domain, only named people | The same, on `you.com`, with documents gated to specific email addresses | a domain · **a card on file** |
-| **3** | **Running a practice** — a consultant or solo operator with recurring clients | Per-client portals, permissions on the client not the document, and an agent that can search the collection back | same as 2 |
+- **Just handing someone a report** you made in a chat — a proposal, an analysis, a
+  one-off? You want **Public**: a URL anyone you send it to can open, no login,
+  nothing to install. Optionally on your own domain.
+- **Sharing your own work with named people** — a document only the CFO and CEO
+  should open? You want **Secured**: access gated to specific email addresses.
+- **Running a practice** with recurring clients? Still Secured, plus **portals** —
+  one durable URL per client, permissions on the *client* instead of the document,
+  and an agent that searches the collection back months later.
 
-Two honest notes on that table:
+| What you get | Public | Secured |
+|---|:---:|:---:|
+| Share a `/p/` URL anyone can open | ✅ | ✅ |
+| Your own domain | optional | ✅ |
+| Documents gated to named emails | — | ✅ |
+| Per-client portals + agent read-back | — | ✅ |
+| **Cost** | free · no card | a domain · a card on file |
 
-- **The real jump is 1 → 2, not 2 → 3.** Private sharing needs Cloudflare Zero
-  Trust, and Cloudflare wants a card on file before it will turn that on — even
-  though the free plan is free and you won't be billed. That's the seam, and
-  pretending otherwise would waste your time. Portals, on top of it, are just a
-  data model.
-- **Under ~5 clients, tier 3 is probably not worth it.** A shared folder per client
-  is genuinely simpler. Portals earn their keep once the artifacts pile up.
-
-You can start at 1 and climb later. Every tier is additive, your documents carry
-across untouched, and tiers 1–2 undo cleanly.
+**The one real jump is Public → Secured.** Secured runs on Cloudflare Zero Trust, and
+Cloudflare wants a card on file before it will turn that on — the free plan is free and
+you won't be billed, but that's the seam, and pretending otherwise would waste your
+time. Portals on top of it are just a data model. Start Public; climb when you actually
+need the door. Your documents carry across untouched, and Public undoes cleanly.
 
 ---
 
-## 1 · Sharing something
+## 1 · Public
 
-Public links, `workers.dev`, no domain, no Zero Trust, no card. ~10 minutes.
+Public links anyone with the URL can open — on `workers.dev`, or your own domain. No
+Zero Trust, no card. ~10 minutes.
 
 **You need:** a [Cloudflare account](https://dash.cloudflare.com/sign-up) ·
 Node 22+ · a Cloudflare API token.
@@ -72,17 +69,17 @@ the ladder never means re-scoping:
 
 | Type | Permission | Access | Needed for |
 |---|---|---|---|
-| Account | Workers Scripts | Edit | tier 1 · deploy |
-| Account | Workers KV Storage | Edit | tier 1 · documents |
-| Account | Account Settings | Read | tier 1 · identify the account |
-| Zone | Workers Routes | Edit | tier 2 · custom domain |
-| Zone | DNS | Edit | tier 2 · the domain record |
-| Account | Access: Apps and Policies | Edit | tier 2 · gated access |
-| Account | Access: Organizations, Identity Providers, and Groups | Edit | tier 2 · **the viewer group lives here — easy to miss** |
+| Account | Workers Scripts | Edit | Public · deploy |
+| Account | Workers KV Storage | Edit | Public · documents |
+| Account | Account Settings | Read | Public · identify the account |
+| Zone | Workers Routes | Edit | domain · custom domain |
+| Zone | DNS | Edit | domain · the domain record |
+| Account | Access: Apps and Policies | Edit | Secured · gated access |
+| Account | Access: Organizations, Identity Providers, and Groups | Edit | Secured · **the viewer group lives here — easy to miss** |
 
 ### Install — pick a path
 
-Three ways to stand PageVault up. They end in the same place; the tier steps here pick up
+Three ways to stand PageVault up. They end in the same place; the setup steps here pick up
 from a deployed PageVault.
 
 | | Pick this when | How |
@@ -103,7 +100,7 @@ Cloudflare, remembers where it landed in `~/.pagevault/`, and points the CLI at 
 works with no extra step. Later, `pagevault upgrade` redeploys after `npm update -g pagevault`.
 
 **git clone** runs the same engine from source (`make` calls the same code the CLI does), and it's
-the path every tier here is also tested on. **Hand it to your LLM** isn't a third mechanism: the
+the path both tiers here are also tested on. **Hand it to your LLM** isn't a third mechanism: the
 runbook picks npm or clone and walks you through that one — give your assistant this URL and answer
 its questions:
 
@@ -125,21 +122,21 @@ yet. When you want them, climb.
 
 ---
 
-## 2 · Sharing it privately
+## 2 · Secured
 
-Your own domain, and documents that only named people can open. They get a
+Your own domain, and documents only named people can open. They get a
 six-digit code by email — no account, no password, nothing installed.
 
 **Adds:** a domain [in the same Cloudflare account](docs/setup/prerequisites.md#a-domain-in-the-same-cloudflare-account)
 · Cloudflare Zero Trust enabled (**a card on file; nothing is charged**) · a second,
 narrow runtime token.
 
-The domain and the gating are separate upgrades. You can put PageVault on your own
-domain without turning on Zero Trust at all. Re-run the setup to climb a tier — it
-shows your current choices and asks only for what the new tier needs:
+The domain and the gating are separate steps. A domain alone keeps you Public, on your
+own hostname; turning on Zero Trust is what makes you Secured. Re-run setup to change
+either — it shows your current choices and asks only for what's new:
 
 ```bash
-pagevault init          # re-run: pick tier 2, give it your hostname, redeploy
+pagevault init          # re-run: choose Secured, give it your hostname, redeploy
 ```
 
 Once Access is on:
@@ -159,9 +156,7 @@ permission on purpose: a compromised Worker can edit one Access group and nothin
 else — never your KV, never your other Workers.
 See [ADR-002](docs/adr/ADR-002-seat-bounding.md).
 
----
-
-## 3 · Running a practice
+### Running a practice — portals
 
 Permissions move from the document to the **client**. A portal is one durable URL
 per client; every artifact lands there, gated to their people. Adding someone to a
