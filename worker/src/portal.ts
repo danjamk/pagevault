@@ -12,6 +12,7 @@ import {
   listDocs,
 } from "./store.js";
 import { log } from "./log.js";
+import { THEME } from "./theme.js";
 import { renderShell } from "./viewer.js";
 
 /**
@@ -232,23 +233,9 @@ function renderPortalPage(portal: Portal, docs: DocSummary[], isOwner: boolean):
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(portal.name)}</title>
 <style>
-  /* The neutral white/cool-grey + signal-blue system (#67). Tokens keep light/dark honest;
-     no webfont, no logo — a portal is still the client's work, not our product, above the fold. */
-  :root {
-    color-scheme: light dark;
-    --paper: #f5f6f8; --surface: #ffffff; --ink: #1a1d21; --muted: #5b6470;
-    --accent: #2f6fed; --border: #e3e6ea; --hover: #eef1f5;
-    --chip-bg: rgba(47,111,237,.10); --chip-fg: #2f6fed;
-    --draft-bg: rgba(91,100,112,.12); --draft-fg: #5b6470;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --paper: #16181c; --surface: #20242a; --ink: #e6e8eb; --muted: #9aa3ad;
-      --accent: #5b8cf5; --border: #2a2e35; --hover: #1e2228;
-      --chip-bg: rgba(91,140,245,.16); --chip-fg: #8fb0f7;
-      --draft-bg: rgba(154,163,173,.16); --draft-fg: #9aa3ad;
-    }
-  }
+  /* The #67 system, from theme.ts — this page is where it was designed, and every other HTML
+     surface now draws the same tokens. No webfont, no logo: a portal is still the client's work,
+     not our product, above the fold. */${THEME}
   *, *::before, *::after { box-sizing: border-box; }
   body {
     margin: 0; padding: 2.5rem 1.25rem 4rem;
@@ -547,15 +534,17 @@ function page(status: number, title: string, lead: string, detail: string): Resp
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
 <style>
+${THEME}
   body { margin:0; padding:3rem 1.25rem; font:16px/1.6 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;
-         color:#1e1610; background:#fbf6ec; }
+         color:var(--ink); background:var(--paper); }
   .wrap { max-width:40rem; margin:0 auto; }
   h1 { font-size:1.5rem; margin:0 0 .5rem; }
-  .lead { color:#4a3a28; }
-  code { background:#f0ece0; padding:.1rem .3rem; border-radius:3px; font-size:.9em; }
-  pre { background:#1e1610; color:#f4ebd6; padding:1rem; border-radius:6px; overflow-x:auto;
-        font-size:.8125rem; line-height:1.5; }
+  .lead { color:var(--muted); }
+  code { background:var(--code-bg); padding:.1rem .3rem; border-radius:3px; font-size:.9em; }
+  pre { background:var(--code-bg); color:var(--ink); border:1px solid var(--border); padding:1rem;
+        border-radius:6px; overflow-x:auto; font-size:.8125rem; line-height:1.5; }
   pre code { background:none; padding:0; color:inherit; }
+  a { color:var(--accent); }
   ul { padding-left:1.2rem; } li { margin:.4rem 0; }
 </style></head><body><div class="wrap">
 <h1>${esc(title)}</h1>

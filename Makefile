@@ -71,7 +71,24 @@ check-sandbox: ## Fail the build if the iframe is ever granted our origin (ADR-0
 		echo "✓ no allow-same-origin in worker/src"; \
 	fi
 
-check: check-sandbox ## Typecheck + test — the pre-PR gate, and what CI runs
+check-palette: ## Fail the build if a retired amber/cream hex reappears in the Worker (#122)
+# The console moved to the neutral + signal-blue system (#67), but the landing, error, viewer and
+# OAuth pages kept the old amber identity for months — the favicon and the landing page disagreed
+# on a single page load. Tokens now live in worker/src/theme.ts; these hexes are how the drift
+# looked, so a plain grep is enough to stop it recurring. Add a token, don't paste a colour.
+# Amber/cream only. #34507a — the older brand blue — is deliberately NOT here: it survives in
+# markdown.ts as the link colour for rendered DOCUMENT body copy, where a quieter navy beats the
+# chrome's signal blue. Chrome vs document is the line; that one is a design call, not drift.
+	@if grep -rniE '#(fbf6ec|f0ece0|f4ebd6|1e1610|4a3a28|d8cdb0|7d6b52|14110c|efe7d6|a99c82|e0a24a|b9822f|f6f2e9|241d12|6c624d)' worker/src; then \
+		echo ""; \
+		echo "✗ A retired amber/cream hex is back in worker/src. See #122."; \
+		echo "  The palette lives in worker/src/theme.ts — use a var(--token), not a literal."; \
+		exit 1; \
+	else \
+		echo "✓ no retired palette hexes in worker/src"; \
+	fi
+
+check: check-sandbox check-palette ## Typecheck + test — the pre-PR gate, and what CI runs
 	@$(NVM) && pnpm check
 
 ##@ Cloudflare account

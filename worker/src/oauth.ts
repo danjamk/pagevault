@@ -2,6 +2,7 @@ import type { AuthRequest, ClientInfo, OAuthHelpers } from "@cloudflare/workers-
 import { identify, timingSafeEqual } from "./auth.js";
 import type { Env } from "./env.js";
 import { normalizeEmail } from "./store.js";
+import { THEME } from "./theme.js";
 
 /**
  * `/admin/authorize` — the OAuth consent screen (ADR-006 / #22, ADR-012).
@@ -126,21 +127,23 @@ function consentPage(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Authorize — PageVault MCP</title>
 <style>
-  body { margin:0; padding:3rem 1.25rem; background:#fbf6ec; color:#1e1610;
+${THEME}
+  body { margin:0; padding:3rem 1.25rem; background:var(--paper); color:var(--ink);
          font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; }
   .wrap { max-width:26rem; margin:0 auto; }
   h1 { font-size:1.35rem; margin:0 0 .25rem; }
-  .lead { color:#4a3a28; margin:0 0 1.5rem; }
-  .client { font-weight:600; color:#34507a; }
-  .row { font-size:.875rem; color:#7d6b52; margin:.25rem 0; }
+  .lead { color:var(--muted); margin:0 0 1.5rem; }
+  .client { font-weight:600; color:var(--accent); }
+  .row { font-size:.875rem; color:var(--muted); margin:.25rem 0; }
   form { margin-top:1.5rem; display:flex; flex-direction:column; gap:.6rem; }
-  label { font-size:.8125rem; font-weight:600; color:#4a3a28; }
-  input { padding:.6rem .75rem; border:1px solid #d8cdb0; border-radius:4px;
-          background:#fff; font:inherit; }
-  button { padding:.6rem .75rem; border:0; border-radius:4px; background:#34507a;
+  label { font-size:.8125rem; font-weight:600; color:var(--ink); }
+  input { padding:.6rem .75rem; border:1px solid var(--border); border-radius:4px;
+          background:var(--surface); color:var(--ink); font:inherit; }
+  input:focus { outline:2px solid var(--accent); outline-offset:1px; border-color:transparent; }
+  button { padding:.6rem .75rem; border:0; border-radius:4px; background:var(--accent);
            color:#fff; font:inherit; font-weight:600; cursor:pointer; }
-  .err { color:#a11; font-size:.875rem; margin-top:.5rem; }
-  .note { margin-top:1.5rem; font-size:.75rem; color:#7d6b52; }
+  .err { color:var(--danger); font-size:.875rem; margin-top:.5rem; }
+  .note { margin-top:1.5rem; font-size:.75rem; color:var(--muted); }
 </style>
 </head>
 <body>

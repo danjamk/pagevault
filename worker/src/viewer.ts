@@ -5,6 +5,7 @@ import { fingerprint, log } from "./log.js";
 import { renderPdf } from "./pdf.js";
 import type { DocMeta } from "./store.js";
 import { getDoc, getMeta, getRawSource } from "./store.js";
+import { THEME } from "./theme.js";
 
 /**
  * The iframe sandbox.
@@ -362,24 +363,28 @@ export async function renderShell(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(meta.title)}</title>
 <style nonce="${nonce}">
+${THEME}
   *, *::before, *::after { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
     display: flex; flex-direction: column;
     font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    color: #1e1610; background: #fbf6ec;
+    color: var(--ink); background: var(--paper);
   }
   header {
     display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap;
-    padding: .75rem 1.25rem; border-bottom: 1px solid #d8cdb0; background: #fff;
+    padding: .75rem 1.25rem; border-bottom: 1px solid var(--border); background: var(--surface);
   }
   h1 { font-size: 1rem; font-weight: 600; margin: 0; }
-  .back { color: #34507a; text-decoration: none; font-size: .875rem; }
+  .back { color: var(--accent); text-decoration: none; font-size: .875rem; }
   .back:hover { text-decoration: underline; }
   .controls { margin-left: auto; display: flex; align-items: center; gap: .6rem; }
-  .meta { color: #7d6b52; font-size: .8125rem; }
-  .ctl { font: inherit; font-size: .8125rem; color: #34507a; background: #fff; border: 1px solid #d8cdb0; border-radius: 5px; padding: .15rem .55rem; text-decoration: none; cursor: pointer; }
-  .ctl:hover { background: #fbf6ec; }
+  .meta { color: var(--muted); font-size: .8125rem; }
+  .ctl { font: inherit; font-size: .8125rem; color: var(--accent); background: var(--surface); border: 1px solid var(--border); border-radius: 5px; padding: .15rem .55rem; text-decoration: none; cursor: pointer; }
+  .ctl:hover { background: var(--hover); border-color: var(--accent); }
+  /* The artifact's own canvas stays WHITE in both schemes, deliberately. A document was authored
+     against a light background and we do not restyle its insides (ADR-007) — tinting the frame
+     dark would leave the author's black-on-white content sitting in a dark well. */
   iframe { flex: 1 1 auto; width: 100%; border: 0; background: #fff; }
 </style>
 </head>
