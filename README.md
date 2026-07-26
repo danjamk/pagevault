@@ -163,8 +163,9 @@ per client; every artifact lands there, gated to their people. Adding someone to
 client's team is one write, not fourteen.
 
 ```bash
+pagevault portal-create acme --name "Acme Corp" --kind restricted
 pagevault publish q3-review.html --portal acme
-pagevault share acme cfo@acme.com
+pagevault share acme cfo@acme.com          # and --remove when they leave
 pagevault search acme "migration decision"
 ```
 

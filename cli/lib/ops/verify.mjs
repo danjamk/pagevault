@@ -15,9 +15,60 @@
 // in that mode the narration is suppressed so stdout carries only the JSON.
 //
 import { readFileSync, existsSync } from "node:fs";
-import { c, ok, warn, die, loadContext, fromEnv, banner, mcpCall, EXPECTED_MCP_TOOLS } from "../provision/context.mjs";
+import { Resolver, lookup } from "node:dns/promises";
+import { platform } from "node:process";
+import { c, ok, warn, die, loadContext, fromEnv, banner, mcpCall, runHint, EXPECTED_MCP_TOOLS } from "../provision/context.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** How to drop a cached NXDOMAIN, per platform. */
+const DNS_FLUSH = {
+  darwin: "sudo dscacheutil -flushcache && sudo killall -HUP mDNSResponder",
+  linux: "sudo resolvectl flush-caches",
+  win32: "ipconfig /flushdns",
+};
+
+/**
+ * Why isn't this hostname answering? Distinguishes two failures that look identical from here and
+ * have completely different fixes.
+ *
+ * `lookup()` goes through the SYSTEM resolver — the same path fetch, curl and every browser use,
+ * and the one that caches a negative answer. The `Resolver` queries a public nameserver directly,
+ * which is what `dig` does. When the second succeeds and the first fails, the record exists and the
+ * machine is remembering that it didn't: a stale NXDOMAIN, which no amount of waiting on Cloudflare
+ * will clear.
+ *
+ * That is not hypothetical — it is what a destroy → rebuild on the same hostname produces, which is
+ * exactly the path this command is most used on. See #123.
+ *
+ * Returns "ok" | "local_cache" | "nowhere" | "unknown".
+ */
+export async function diagnoseDns(hostname) {
+  const publicly = await (async () => {
+    try {
+      const r = new Resolver({ timeout: 3000, tries: 2 });
+      r.setServers(["1.1.1.1", "8.8.8.8"]);
+      const [v4, v6] = await Promise.allSettled([r.resolve4(hostname), r.resolve6(hostname)]);
+      return v4.status === "fulfilled" || v6.status === "fulfilled";
+    } catch {
+      return false;
+    }
+  })();
+
+  const locally = await (async () => {
+    try {
+      await lookup(hostname);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  if (locally && publicly) return "ok";
+  if (publicly && !locally) return "local_cache";
+  if (!publicly && !locally) return "nowhere";
+  return "unknown";
+}
 
 /** @param {{ json?: boolean }} [opts] */
 export async function verifyCmd({ json = false } = {}) {
@@ -88,6 +139,36 @@ export async function verifyCmd({ json = false } = {}) {
   if (!live) {
     record("worker_live", false);
     say(`\n  ${c.red("✗")} The route isn't serving our Worker yet.`);
+
+    // Before blaming provisioning, check whether this machine can even resolve the name. A stale
+    // NXDOMAIN presents exactly like a route that hasn't come up, and the advice below — wait, then
+    // go look at the dashboard — is the wrong advice for it (#123).
+    const dns = await diagnoseDns(new URL(base).hostname);
+    if (dns === "local_cache") {
+      record("dns", false, "local_cache");
+      say(`\n  ${c.yellow("!")} ${c.bold("This is a local DNS cache, not a deploy problem.")}`);
+      say(`  ${c.dim("The hostname resolves at a public resolver but not on this machine — so something")}`);
+      say(`  ${c.dim("here is still remembering that it didn't exist. Common right after a teardown and")}`);
+      say(`  ${c.dim("rebuild on the same hostname. Waiting will not fix it; flushing will:")}`);
+      say(`\n     ${c.bold(DNS_FLUSH[platform] ?? DNS_FLUSH.linux)}\n`);
+      say(`  ${c.dim("Then re-run")} ${c.bold("pagevault verify")}${c.dim(".")}\n`);
+      return finish(false, { reason: "dns_local_cache" });
+    }
+    record("dns", dns === "ok", dns);
+
+    // Nothing was ever deployed here, or it was torn down. `deployedUrl` is written by a successful
+    // deploy and stripped by destroy (#118), so its absence plus a hostname that resolves nowhere is
+    // conclusive — and telling someone to wait for a certificate on a Worker that does not exist is
+    // the same wrong-cause failure as the DNS one above. We only got here via the `ctx.host`
+    // fallback, since an empty base is caught earlier.
+    if (dns === "nowhere" && !ctx.deployedUrl) {
+      say(`\n  ${c.yellow("!")} ${c.bold("Nothing is deployed at this hostname.")}`);
+      say(`  ${c.dim(`${base} resolves nowhere, and this checkout has no record of a deploy —`)}`);
+      say(`  ${c.dim("so this is a deployment that has not been built yet, or one that was torn down.")}`);
+      say(`\n     ${c.bold(runHint("deploy", "init"))}\n`);
+      return finish(false, { reason: "not_deployed" });
+    }
+
     if ((ctx.rung ?? 1) >= 2) {
       // Rung 2/3 is a CUSTOM domain: the delay is edge-certificate provisioning, not workers.dev
       // propagation. Different cause, different wait — say so, or it reads as a broken deploy.

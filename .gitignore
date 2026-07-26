@@ -7,10 +7,12 @@ cli/LICENSE
 .idea/
 
 # Claude workspace artifacts
-# skills/ are symlinks into the private ~/yukon/claude-shared — local only,
-# they would be dangling links for anyone who clones this.
+# Most skills/ entries are symlinks into the private ~/yukon/claude-shared — local only,
+# they would be dangling links for anyone who clones this. `lifecycle` is the exception:
+# it is a real, self-contained file about THIS project's release ritual, so it ships.
 .claude/settings.local.json
-.claude/skills/
+.claude/skills/*
+!.claude/skills/lifecycle/
 CLAUDE.local.md
 COMMIT_MESSAGE.md
 PR_COMMENT.md

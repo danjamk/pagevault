@@ -44,7 +44,8 @@ new dependency is genuinely the right call, open an issue and make the argument.
 ```bash
 make setup     # install deps and check your environment (Node 22)
 make dev       # run the Worker locally against Miniflare
-make test      # vitest + @cloudflare/vitest-pool-workers
+make test      # vitest + @cloudflare/vitest-pool-workers, and the node --test suites
+make test-e2e  # the CLI driven against a real Worker (boots its own wrangler dev)
 make help      # every target
 ```
 

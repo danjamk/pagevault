@@ -49,6 +49,11 @@ test: ## Run the test suite
 test-security: ## Run only canView() + identity — the suite where a bug is an incident
 	@$(NVM) && pnpm test:security
 
+test-e2e: ## Drive the real CLI against a real Worker (wrangler dev + Miniflare KV)
+# Included in `make test` by the cli/*.test.mjs glob above; this target is for running it alone.
+# It boots its own Worker on a free port with a throwaway KV — it cannot reach a real deployment.
+	@$(NVM) && node --test cli/e2e.test.mjs
+
 check-sandbox: ## Fail the build if the iframe is ever granted our origin (ADR-007)
 # `allow-scripts` combined with same-origin is functionally NO SANDBOX: with scripts
 # enabled the frame can reach into the parent and remove the attribute outright. It is
@@ -66,7 +71,24 @@ check-sandbox: ## Fail the build if the iframe is ever granted our origin (ADR-0
 		echo "✓ no allow-same-origin in worker/src"; \
 	fi
 
-check: check-sandbox ## Typecheck + test — the pre-PR gate, and what CI runs
+check-palette: ## Fail the build if a retired amber/cream hex reappears in the Worker (#122)
+# The console moved to the neutral + signal-blue system (#67), but the landing, error, viewer and
+# OAuth pages kept the old amber identity for months — the favicon and the landing page disagreed
+# on a single page load. Tokens now live in worker/src/theme.ts; these hexes are how the drift
+# looked, so a plain grep is enough to stop it recurring. Add a token, don't paste a colour.
+# Amber/cream only. #34507a — the older brand blue — is deliberately NOT here: it survives in
+# markdown.ts as the link colour for rendered DOCUMENT body copy, where a quieter navy beats the
+# chrome's signal blue. Chrome vs document is the line; that one is a design call, not drift.
+	@if grep -rniE '#(fbf6ec|f0ece0|f4ebd6|1e1610|4a3a28|d8cdb0|7d6b52|14110c|efe7d6|a99c82|e0a24a|b9822f|f6f2e9|241d12|6c624d)' worker/src; then \
+		echo ""; \
+		echo "✗ A retired amber/cream hex is back in worker/src. See #122."; \
+		echo "  The palette lives in worker/src/theme.ts — use a var(--token), not a literal."; \
+		exit 1; \
+	else \
+		echo "✓ no retired palette hexes in worker/src"; \
+	fi
+
+check: check-sandbox check-palette ## Typecheck + test — the pre-PR gate, and what CI runs
 	@$(NVM) && pnpm check
 
 ##@ Cloudflare account
@@ -86,6 +108,9 @@ provision: ## Rung 3: create the KV namespace, Access group, and two Access apps
 
 deploy: ## Deploy the Worker — rung-aware (Tier 0, or provision at rung 3)
 	@$(NVM) && node cli/lib/provision/deploy.mjs
+
+seed: ## Publish a realistic document set to the LIVE deployment, through the CLI (asks first)
+	@$(NVM) && node scripts/seed-live.mjs
 
 verify: ## Smoke-test the live deployment (run after deploy)
 	@$(NVM) && node cli/bin/pagevault.mjs verify

@@ -1,4 +1,5 @@
 import type { Env } from "./env.js";
+import { MARK_SVG, THEME } from "./theme.js";
 
 /**
  * Two small trusted pages served from our own origin: the quiet root landing (shown at `/`
@@ -16,26 +17,11 @@ import type { Env } from "./env.js";
 
 const PROJECT_URL = "https://github.com/danjamk/pagevault";
 
-const APERTURE = `<svg viewBox="0 0 100 100" width="30" height="30" aria-hidden="true">
-  <circle cx="50" cy="50" r="44" fill="none" stroke="var(--amber-dim)" stroke-width="4"/>
-  <g fill="var(--amber)">
-    <path d="M50 10 A40 40 0 0 1 84 30 L50 50 Z" opacity=".9"/>
-    <path d="M84 30 A40 40 0 0 1 84 70 L50 50 Z" opacity=".7"/>
-    <path d="M84 70 A40 40 0 0 1 50 90 L50 50 Z" opacity=".55"/>
-    <path d="M50 90 A40 40 0 0 1 16 70 L50 50 Z" opacity=".7"/>
-    <path d="M16 70 A40 40 0 0 1 16 30 L50 50 Z" opacity=".85"/>
-    <path d="M16 30 A40 40 0 0 1 50 10 L50 50 Z" opacity="1"/>
-  </g>
-</svg>`;
-
-// The PageVault mark: the leaning-v knocked out of a blue rounded square (the current brand;
-// APERTURE above is the retired amber aperture, still on the landing body until that's refreshed).
-// Shared so the console <link>, the landing <link>, and the /favicon.ico route all draw from one
-// source — which is what a remote MCP client (claude.ai) fetches for the connector's icon.
-export const FAVICON_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
-  '<rect x="2" y="2" width="28" height="28" rx="8" fill="#2F6FED"/>' +
-  '<path d="M9.5 10 L16 22.5 L22.5 10" transform="translate(2.5 0) skewX(-7)" stroke="#fff" stroke-width="4.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+// Re-exported so the existing importers (the console <link>, the /favicon.ico route) keep working
+// while the mark itself lives with the palette it belongs to. The landing page below now draws its
+// wordmark from the SAME constant the favicon uses — until this change the tab showed the blue
+// leaning-v while the page body showed the retired amber aperture, on one page load.
+export const FAVICON_SVG = MARK_SVG;
 
 /**
  * `/favicon.ico` and `/favicon.svg` — served from our own origin so a remote MCP client shows
@@ -59,31 +45,25 @@ function shell(title: string, inner: string, status: number): Response {
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title}</title>
 <link rel="icon" href="data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}">
-<style nonce="${nonce}">
-  :root {
-    --bg:#14110c; --ink:#efe7d6; --muted:#a99c82; --amber:#e0a24a; --amber-dim:#b9822f;
-    --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
-  }
-  @media (prefers-color-scheme: light) {
-    :root { --bg:#f6f2e9; --ink:#241d12; --muted:#6c624d; --amber:#b9822f; --amber-dim:#9a6c25; }
-  }
+<style nonce="${nonce}">${THEME}
   html,body { height:100%; }
   body {
-    margin:0; background:var(--bg); color:var(--ink);
-    font:16px/1.6 var(--sans); -webkit-font-smoothing:antialiased;
+    margin:0; background:var(--paper); color:var(--ink);
+    font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif; -webkit-font-smoothing:antialiased;
     display:flex; align-items:center; justify-content:center; padding:1.5rem;
   }
   main { max-width:26rem; text-align:center; }
   .mark { display:inline-flex; align-items:center; gap:.55rem; margin-bottom:1.6rem; }
-  .mark span { font:600 13px/1 var(--sans); letter-spacing:.14em; color:var(--muted); text-transform:uppercase; }
+  .mark svg { width:30px; height:30px; }
+  .mark span { font:600 13px/1 system-ui,sans-serif; letter-spacing:.14em; color:var(--muted); text-transform:uppercase; }
   h1 { font-size:1.35rem; letter-spacing:-.01em; margin:0 0 .6rem; }
   p { color:var(--muted); margin:0; }
-  a { color:var(--amber); text-decoration:none; }
+  a { color:var(--accent); text-decoration:none; }
   a:hover { text-decoration:underline; }
   .foot { margin-top:2rem; font-size:.82rem; }
 </style>
 </head><body><main>
-  <div class="mark">${APERTURE}<span>PageVault</span></div>
+  <div class="mark">${MARK_SVG}<span>PageVault</span></div>
   ${inner}
 </main></body></html>`;
   return new Response(html, {

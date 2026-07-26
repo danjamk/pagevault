@@ -28,6 +28,31 @@ const WORKER_NAME = "pagevault";
 const GROUP_NAME = "pagevault-viewers";
 const PROVISION_STATE = ".pagevault-provision.json";
 
+/**
+ * The keys in `.pagevault.json` that name a Cloudflare object this teardown just deleted. Every
+ * one of them is DISCOVERED state — read back from the API while building — as opposed to the
+ * operator's INTENT (rung, ownerEmail, host, accountId, analytics), which is what makes a rebuild
+ * re-runnable and must survive.
+ *
+ * `team` is deliberately absent: Zero Trust itself is left alone, so the team name stays true.
+ */
+const DISCOVERED_KEYS = ["kvId", "oauthKvId", "deployedUrl", "audDocs", "audAdmin", "groupId"];
+
+/**
+ * Drop the state that named things we just deleted, keeping the operator's intent.
+ *
+ * Pure, and exported, because the version of this that shipped was guarded by `tier < 3` — so a
+ * Secured teardown left `.pagevault.json` naming a deleted KV namespace, a dead URL, two dead
+ * Access AUDs and a dead group, and `status` reported a deployment that no longer existed. The
+ * rung-3 branch it relied on cleaned `.pagevault-provision.json`, a file current provisioning does
+ * not even write, so it was a no-op on every modern deployment. See #118.
+ */
+export function stripDiscoveredState(ctx) {
+  const out = { ...ctx };
+  for (const key of DISCOVERED_KEYS) delete out[key];
+  return out;
+}
+
 /** @param {{ keepData?: boolean }} [opts] */
 export async function destroyCmd({ keepData = false } = {}) {
   const KEEP_DATA = keepData;
@@ -165,19 +190,20 @@ export async function destroyCmd({ keepData = false } = {}) {
     unlinkSync(CONFIG_OUT);
     ok(`Removed ${CONFIG_OUT}`);
   }
-  if (tier >= 3 && !KEEP_DATA && existsSync(provisionStatePath)) {
+  // Legacy state file. Current provisioning writes everything into .pagevault.json, so this only
+  // fires for a deployment built by an older PageVault — which is exactly why it must not be the
+  // thing that gates the cleanup below.
+  if (!KEEP_DATA && existsSync(provisionStatePath)) {
     unlinkSync(provisionStatePath);
     ok(`Removed ${PROVISION_STATE}`);
   }
-  // Rung 1/2: keep .pagevault.json — it's your intent (rung, email, host) and re-runnable — but
-  // strip the now-dead discovered state, so a later deploy builds fresh rather than reusing a KV id
-  // that no longer exists.
-  if (tier < 3 && !KEEP_DATA && existsSync(contextPath)) {
+  // Keep .pagevault.json — it's your intent (rung, email, host) and re-runnable — but strip the
+  // state that named what we just deleted, so a later deploy builds fresh and `status` doesn't
+  // report a deployment that is gone. Every rung, not just 1 and 2 (#118).
+  if (!KEEP_DATA && existsSync(contextPath)) {
     const ctx = JSON.parse(readFileSync(contextPath, "utf8"));
-    delete ctx.kvId;
-    delete ctx.deployedUrl;
-    writeFileSync(contextPath, `${JSON.stringify(ctx, null, 2)}\n`);
-    ok(`Cleared the stale KV id and URL from ${CONTEXT_FILE} ${c.dim("(kept your rung, email, host)")}`);
+    writeFileSync(contextPath, `${JSON.stringify(stripDiscoveredState(ctx), null, 2)}\n`);
+    ok(`Cleared the dead ids and URL from ${CONTEXT_FILE} ${c.dim("(kept your rung, email, host, account)")}`);
   }
 
   // --- What we deliberately do NOT touch -------------------------------------
@@ -190,7 +216,10 @@ export async function destroyCmd({ keepData = false } = {}) {
     console.log(`  · ${c.bold("Access seats")} — anyone who logged in still holds one.`);
     console.log(`    ${c.dim("Zero Trust → Team & Resources → Users → Remove, if you want them back.")}`);
   }
-  const rebuild = RUNNING_FROM_REPO ? (tier >= 3 ? "'make provision'" : "'make deploy'") : "'pagevault init'";
+  // `make deploy` at EVERY rung, not `make provision` at rung 3: provision writes the config and
+  // creates the Access apps, then stops without deploying the Worker or setting the secrets. Deploy
+  // is rung-aware and calls provisionAccess() itself, so it is the complete answer. See #119.
+  const rebuild = RUNNING_FROM_REPO ? "'make deploy'" : "'pagevault init'";
   console.log(`\n${c.bold("Clean.")} ${rebuild} will build it again from what's left.\n`);
 
   rl.close();

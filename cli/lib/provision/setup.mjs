@@ -127,8 +127,10 @@ export async function setup(opts = {}) {
   // --- Teach, on the first run only ------------------------------------------
 
   if (firstRun) {
+    // "your documents carry across untouched" was true and still is — but it was heard as "your
+    // links keep working", which is false the moment the hostname changes. Say what carries. (#121)
     console.log(`\n${c.bold("Two tiers")} — start Public, add security when you need it. Not a one-way`);
-    console.log(`door; your documents carry across untouched.\n`);
+    console.log(`door; every document carries across, keeping its name and its place.\n`);
     console.log(`  ${c.bold("Public")}   public links anyone with the URL can open   ${c.dim("free · no card")}`);
     console.log(`           ${c.dim("optionally on your own domain")}`);
     console.log(`  ${c.bold("Secured")}  private — named people, client portals      ${c.dim("a domain + Zero Trust (a card)")}`);
@@ -185,6 +187,18 @@ export async function setup(opts = {}) {
 
   saveContext({ ...ctx, rung, ownerEmail, host });
   ok(`Saved to ${c.bold(".pagevault.json")}`);
+
+  // Moving hostname retires every URL you have already handed out. The documents survive — same
+  // ids, same names — but the links do not, and nothing used to say so before the deploy. This is
+  // the moment to mention it, while it is still a decision rather than a surprise. See #121.
+  const previousHost = ctx.deployedUrl ? new URL(ctx.deployedUrl).host : ctx.host;
+  if (previousHost && previousHost !== (host || previousHost)) {
+    console.log();
+    warn(`This moves PageVault from ${c.bold(previousHost)} to ${c.bold(host)}.`);
+    console.log(`  ${c.dim("Your documents carry across untouched — but every link you have already shared")}`);
+    console.log(`  ${c.dim(`points at ${previousHost} and will stop resolving. Re-send the new ones after deploy:`)}`);
+    console.log(`     ${c.bold("pagevault list")} ${c.dim("then")} ${c.bold("pagevault link <id>")}`);
+  }
 
   // --- The token: WHERE it deploys -------------------------------------------
   //
