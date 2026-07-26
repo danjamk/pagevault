@@ -166,6 +166,17 @@ const CORPUS = [
     proves: "a /p/ capability link opens with no login and burns no Access seat",
   },
   {
+    // A SECOND restricted portal, and the only reason it exists: cross-portal isolation is prime
+    // directive #5, and one restricted portal cannot test it. An Acme member must be refused here.
+    // `notes` is no substitute — it is `kind: "public"`, so canView grants everyone by design.
+    portal: "globex",
+    file: "examples/remote-image-test.md",
+    title: "Globex Migration Notes",
+    summary: "A second client. Nothing in here may ever appear under Acme.",
+    tags: "type:notes",
+    proves: "cross-portal isolation — an Acme member must be DENIED this, not merely not shown it",
+  },
+  {
     portal: "notes",
     file: "examples/welcome.html",
     title: "Why HTML is the best universal document format",
@@ -193,6 +204,7 @@ if (!JSON_MODE && !process.argv.includes("--yes") && process.stdin.isTTY) {
 
 const portals = [
   ["acme", "Acme Corp", "restricted", "Data platform engagement. Deliverables and decision records, newest first."],
+  ["globex", "Globex", "restricted", "A second client, so cross-portal isolation is actually testable."],
   ["notes", "Notes", "public", "Public writing. No login, no seat, no wall."],
 ];
 for (const [slug, name, kind, description] of portals) {
@@ -261,7 +273,9 @@ if (JSON_MODE) {
     say(`  ${c.bold("5.")} ${c.bold("Secured only")} — the identity checks, which need a browser:`);
     say(`       ${c.dim("· open")} ${c.cyan(`${url}/v/acme`)} ${c.dim("logged out → an Access login wall, not the portal")}`);
     say(`       ${c.dim("· log in as the owner  → all 6 documents, the draft badged")}`);
-    say(`       ${c.dim("· log in as a client   → 5 documents, NO draft, and no other portal")}`);
+    say(`       ${c.dim("· log in as a client   → 5 documents, NO draft")}`);
+    say(`       ${c.dim("· as that client, open")} ${c.cyan(`${url}/v/globex`)} ${c.dim("→ DENIED (prime directive #5)")}`);
+    say(`       ${c.dim("  /v/notes is NOT this test — that portal is kind:public, so everyone sees it")}`);
     say(`       ${c.dim("· the console:")} ${c.cyan(`${url}/admin`)} ${c.dim("→ version footer matches your build")}`);
     if (draft) say(`       ${c.dim("· the draft's URL, as a client → denied, not merely hidden:")}\n         ${c.dim(draft.url)}`);
     say();

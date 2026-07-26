@@ -214,6 +214,36 @@ test("login with neither flags nor env errors with its usage", () => {
   assert.match(`${r.stdout}${r.stderr}`, /Usage: pagevault login/);
 });
 
+test("stripDiscoveredState drops every id destroy deleted, and keeps the operator's intent", async () => {
+  const { stripDiscoveredState } = await import("./lib/ops/destroy.mjs");
+
+  // A real rung-3 context, as written by provisioning. Everything in the first group names a
+  // Cloudflare object that a teardown deletes; everything in the second is intent, and a rebuild
+  // needs all of it. The shipped version guarded on `tier < 3`, so a Secured teardown kept the lot
+  // and `status` went on reporting a deployment that no longer existed (#118).
+  const stripped = stripDiscoveredState({
+    kvId: "kv1", oauthKvId: "kv2", deployedUrl: "https://x.example.com",
+    audDocs: "aud1", audAdmin: "aud2", groupId: "grp1",
+    rung: 3, ownerEmail: "you@example.com", host: "x.example.com",
+    accountId: "acc1", accountName: "Acct", analytics: true, team: "some-team", schemaVersion: 1,
+  });
+
+  for (const dead of ["kvId", "oauthKvId", "deployedUrl", "audDocs", "audAdmin", "groupId"]) {
+    assert.ok(!(dead in stripped), `${dead} names a deleted object and must not survive`);
+  }
+  assert.deepEqual(stripped, {
+    rung: 3, ownerEmail: "you@example.com", host: "x.example.com",
+    accountId: "acc1", accountName: "Acct", analytics: true, team: "some-team", schemaVersion: 1,
+  });
+
+  // `team` stays on purpose: destroy leaves Zero Trust itself alone, so the name is still true.
+  assert.equal(stripped.team, "some-team");
+  // Pure — the caller's object is untouched.
+  const original = { kvId: "kv1", rung: 1 };
+  stripDiscoveredState(original);
+  assert.equal(original.kvId, "kv1");
+});
+
 test("PAGEVAULT_HOME isolates the login config from HOME", () => {
   // The whole point of PAGEVAULT_HOME is holding several deployments on one machine: config.json must
   // follow it, not HOME, or two PAGEVAULT_HOME dirs would fight over ~/.pagevault/config.json.

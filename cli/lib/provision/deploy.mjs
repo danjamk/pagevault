@@ -16,7 +16,7 @@ import {
 } from "./context.mjs";
 import { provisionAccess } from "./provision.mjs";
 import { writeTier0Config } from "./tier0.mjs";
-import { saveLoginConfig } from "../client.mjs";
+import { saveLoginConfig, loadConfig, CONFIG_PATH } from "../client.mjs";
 
 const CONFIG_OUT = generatedConfigPath();
 
@@ -213,7 +213,29 @@ export async function deploy(opts = {}) {
   if (!RUNNING_FROM_REPO && url && bearerValue) {
     const path = saveLoginConfig({ url, token: bearerValue });
     ok(`Saved ${path} — ${c.bold("pagevault publish")} is ready, no ${c.bold("login")} step needed.`);
+  } else if (RUNNING_FROM_REPO && url) {
+    // We deliberately do NOT repoint a repo run's login config (see above) — but a config left by
+    // an earlier install silently WINS over the deployment we just built, so `pagevault publish`
+    // from this checkout would write somewhere else entirely. That is a wrong-deployment write, and
+    // it is worth a loud line rather than a confusing "Could not reach <host you never mentioned>"
+    // at first publish. See #120.
+    const configured = loadConfig({}).url; // file only — env is per-command and not ours to judge
+    if (configured && configured !== url) {
+      console.log();
+      warn(`${c.bold("pagevault")}'s document commands still point at a different deployment.`);
+      console.log(`  ${c.dim("just deployed")}  ${c.bold(url)}`);
+      console.log(`  ${c.dim("config.json  ")}  ${configured} ${c.dim(`(${CONFIG_PATH})`)}`);
+      console.log(`\n  ${c.dim("From a repo, deploy leaves that file alone on purpose. To point the CLI here:")}`);
+      console.log(`     ${c.bold(`pagevault login --url ${url} --token $PAGEVAULT_API_TOKEN`)}`);
+      console.log(`  ${c.dim("or set PAGEVAULT_URL / PAGEVAULT_API_TOKEN per command.")}`);
+    }
   }
+
+  // What is readable without a login? On a Secured deployment that is worth saying out loud, because
+  // a document published while the deployment was Public keeps its /p/ capability link forever — and
+  // rightly so: revoking it silently would break a URL already sitting in a client's inbox. But the
+  // operator should not have to discover that themselves after turning security on. See #121.
+  if (ctx.rung >= 3 && url) await reportPublicDocuments(url, bearerValue ?? fromEnv("PAGEVAULT_API_TOKEN"));
 
   // --- 5. rung 3: the scoped runtime secret (CF_API_TOKEN) -------------------
   //
@@ -247,6 +269,40 @@ export async function deploy(opts = {}) {
   const verifyCmd = RUNNING_FROM_REPO ? "make verify" : "pagevault verify";
   console.log(`\n${c.bold("Next:")} ${c.bold(verifyCmd)} ${c.dim("— smoke-test the deployment and publish your first document.")}`);
   console.log(`  ${c.dim("It hands back a public /p/ link you can open immediately — no login, no Access.")}\n`);
+}
+
+/**
+ * On a Secured deployment, name the documents that still open with no login.
+ *
+ * Advisory only: it never fails a deploy, and it stays quiet when there is nothing to say. The
+ * point is the Public → Secured climb, where documents published under the old tier keep the
+ * `/p/` links they were given (worker/src/documents.ts) — correct behaviour that is nonetheless
+ * invisible at exactly the moment the operator believes they have just secured everything.
+ */
+async function reportPublicDocuments(url, bearer) {
+  if (!bearer) return;
+  let docs;
+  try {
+    const res = await fetch(`${url}/api/docs`, {
+      headers: { Authorization: `Bearer ${bearer}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return; // the route may still be coming up; this is advisory, not a gate
+    ({ docs } = await res.json());
+  } catch {
+    return;
+  }
+
+  const open = (docs ?? []).filter((d) => d.public);
+  if (!open.length) return;
+
+  console.log();
+  warn(`${c.bold(String(open.length))} document${open.length === 1 ? "" : "s"} on this deployment still open with ${c.bold("no login")}:`);
+  for (const d of open.slice(0, 8)) console.log(`     ${c.dim("·")} ${d.name ?? d.title} ${c.dim(`(${d.portal})`)}`);
+  if (open.length > 8) console.log(`     ${c.dim(`… and ${open.length - 8} more`)}`);
+  console.log(`\n  ${c.dim("Public links survive a tier change on purpose — revoking one would break a URL you")}`);
+  console.log(`  ${c.dim("have already sent. Close the ones you don't want open:")}`);
+  console.log(`     ${c.bold("pagevault list --json")} ${c.dim("to see them all, then")} ${c.bold("pagevault revoke <id>")}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

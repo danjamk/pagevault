@@ -147,7 +147,10 @@ Check automatically:
 > 3. Log in as the **client test identity** — a second address that is not the owner; a `+tag` alias
 >     of your own works and costs nothing → 5 documents, **no draft**.
 > 4. As the client, paste the draft's direct URL → **denied**, not merely hidden from the list.
-> 5. As the client, try `https://<host>/v/notes` → must not leak another portal's contents.
+> 5. As the client, try `https://<host>/v/globex` → **denied**. This is prime directive #5, and
+>     `globex` exists in the seed for no other reason. Do **not** use `/v/notes` for this — that
+>     portal is `kind: "public"`, so `canView` grants everyone by design and a pass there proves
+>     nothing.
 > 6. `https://<host>/admin` → the console loads, and its footer version matches the build.
 > 7. Open the Chart.js document in the portal → renders inside the shell.
 > 8. The PDF export button on a document (Browser Run).
