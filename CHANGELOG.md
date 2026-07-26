@@ -7,6 +7,60 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-07-26
+
+Everything here came out of one exercise: building an end-to-end test for the CLI, then running the
+full install lifecycle — Public → Public+domain → Secured, from a teardown — against a real
+Cloudflare account. The harness is the addition; the rest is what it caught.
+
+### Added
+- **Portal commands for the CLI.** `pagevault portals [--json]` lists them, `pagevault portal-create
+  <slug> [--name] [--kind] [--description]` opens one, and `pagevault share <portal> --remove a@b`
+  revokes. The MCP server could already do all three, so a terminal-only operator was stuck on the
+  default portal and — worse — could grant a client access to every document in a portal with no way
+  to take it back. Revocation names its own limit: KV stops authorizing immediately, but Cloudflare
+  Access keeps admitting the person, and charging a seat, until `sync-access --reap` reconciles
+  (ADR-002).
+- **`make test-e2e`** — the CLI driven against a real Worker (`wrangler dev` + Miniflare KV), on a
+  free port with throwaway state, so it cannot reach a deployment. It covers the seam the unit tests
+  never could: HTTP shapes, the stdout/stderr split, and exit codes. What it deliberately cannot
+  catch is written into the file — Miniflare's KV is strongly consistent and production's is not.
+- **`make seed`** publishes a realistic document set to a live deployment *through the CLI*, so
+  populating a deployment is itself coverage of the binary you are about to ship.
+
+### Changed
+- **One palette, one place.** The Worker's remaining HTML surfaces — the root landing, the console
+  403, the honest 404 and misconfigured pages, the viewer chrome, and the OAuth consent screen a
+  claude.ai user sees when connecting to the MCP server — moved to the console's neutral +
+  signal-blue system. They had kept the retired amber identity, and three had no dark mode at all.
+  The landing page was the clearest symptom: the browser tab drew the current blue mark while the
+  page body drew the retired amber aperture, on one page load. Tokens now live in
+  `worker/src/theme.ts`, and `make check-palette` keeps them there.
+- **Setup says what a tier climb actually changes.** Documents carry across untouched, which was
+  already true and is now verified — but the hostname moves, so links already shared stop resolving,
+  and documents published while Public keep their public links once Access is on. Both are correct;
+  neither was said out loud. Setup warns before a host move, and a Secured deploy reports what still
+  opens with no login. Nothing is revoked automatically: killing a URL a client already holds is the
+  mirror image of the widening ADR-002 forbids.
+
+### Fixed
+- **`destroy` pointed at the wrong rebuild command.** At rung 3 it suggested `make provision`, which
+  creates the KV namespaces, Access apps and group, then stops — leaving Access apps in front of no
+  Worker and no secrets. It now says `make deploy`, which is rung-aware and complete at every rung.
+- **`destroy` left dead state behind at rung 3.** The cleanup was guarded on `tier < 3` and deferred
+  to a file current provisioning no longer writes, so on a Secured deployment it did nothing:
+  `.pagevault.json` went on naming a deleted KV namespace, a dead URL, two dead Access audiences and
+  a deleted group, and `status` reported a deployment that no longer existed. The strip is now
+  unconditional and keeps only the operator's intent, so a rebuild still works from what is left.
+- **`verify` blamed TLS provisioning for a stale DNS cache.** Tearing down and rebuilding the same
+  hostname leaves the local resolver holding the old answer, which looks identical to a route that
+  has not come up — and waiting, the advice given, never fixes it. `verify` now resolves through both
+  the system resolver and a public one, and names the difference with the flush command. It also
+  recognises a deployment that was torn down rather than one still provisioning.
+- **`init` from a repo checkout could leave the CLI pointed at a previous deployment.** A login
+  config left by an earlier install silently won, so `pagevault publish` would write somewhere else
+  entirely. It now names both when they differ.
+
 ## [0.21.0] — 2026-07-24
 
 ### Changed
@@ -663,6 +717,7 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/danjamk/pagevault/compare/v0.21.0...v0.22.0
 [0.2.0]: https://github.com/danjamk/pagevault/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/danjamk/pagevault/releases/tag/v0.1.0
