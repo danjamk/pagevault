@@ -62,6 +62,10 @@ async function main() {
       return rotate(positional, flags);
     case "sync-access":
       return syncAccess(flags);
+    case "portals":
+      return portals(flags);
+    case "portal-create":
+      return portalCreate(positional, flags);
     case "share":
       return share(positional, flags);
     case "rm":
@@ -331,17 +335,76 @@ async function syncAccess(flags) {
   }
 }
 
-async function share(pos, flags) {
-  const [portal, ...rest] = pos;
-  const emails = [...rest, ...(splitList(flags.emails) ?? [])];
-  if (!portal || !emails.length) {
-    throw new PvError("Usage: pagevault share <portal> <email> [email …]");
+// Portals — the client boundary, and the thing permissions actually live on. The read side is one
+// call; document counts are deliberately NOT fetched per portal, because that is a KV `list()` each
+// and those have their own 1000/day quota (CLAUDE.md). Use `pagevault list --portal <slug>` for that.
+
+async function portals(flags) {
+  const cfg = requireConfig();
+  const { portals: all = [] } = await api(cfg, "GET", "/portals");
+
+  if (flags.json) return out(JSON.stringify(all, null, 2));
+  if (!all.length) return note("No portals yet. Create one: pagevault portal-create <slug> --name \"Acme Corp\"");
+
+  const rows = all.map((p) => [p.slug, p.kind, truncate(p.name ?? "", 32), (p.createdAt || "").slice(0, 10)]);
+  out(table(["SLUG", "KIND", "NAME", "CREATED"], rows));
+}
+
+async function portalCreate(pos, flags) {
+  const slug = pos[0];
+  if (!slug) {
+    throw new PvError(
+      'Usage: pagevault portal-create <slug> [--name "Acme Corp"] [--kind private|restricted|public] [--description "…"]\n' +
+        "  restricted  a client portal — its members see everything in it\n" +
+        "  private     yours only (the default)\n" +
+        "  public      anyone with the link, no login, and it burns no Access seat",
+    );
   }
 
   const cfg = requireConfig();
-  const res = await api(cfg, "PATCH", `/portals/${encodeURIComponent(portal)}`, { addMembers: emails });
+  const kind = typeof flags.kind === "string" ? flags.kind : undefined;
+  const portal = await api(cfg, "POST", "/portals", {
+    slug,
+    name: typeof flags.name === "string" ? flags.name : slug,
+    kind,
+    description: typeof flags.description === "string" ? flags.description : undefined,
+  });
 
-  note(`Granted ${emails.join(", ")} to portal "${portal}".`);
+  note(`Created portal "${portal.slug}" (${portal.kind}) — ${portal.name}.`);
+  if (portal.kind === "public") {
+    note("⚠ A public portal: every document in it opens with no login, and it burns no Access seat.");
+  } else if (portal.kind === "restricted") {
+    note(`Add the client: pagevault share ${portal.slug} <email>`);
+  }
+  // stdout carries the one thing a script wants — the slug it can now publish into.
+  out(portal.slug);
+}
+
+async function share(pos, flags) {
+  const [portal, ...rest] = pos;
+  const add = [...rest, ...(splitList(flags.emails) ?? [])];
+  const remove = splitList(flags.remove) ?? [];
+  if (!portal || (!add.length && !remove.length)) {
+    throw new PvError(
+      "Usage: pagevault share <portal> <email> [email …]     grant access\n" +
+        "       pagevault share <portal> --remove a@b,c@d     revoke it",
+    );
+  }
+
+  const cfg = requireConfig();
+  const body = {};
+  if (add.length) body.addMembers = add;
+  if (remove.length) body.removeMembers = remove;
+  const res = await api(cfg, "PATCH", `/portals/${encodeURIComponent(portal)}`, body);
+
+  if (add.length) note(`Granted ${add.join(", ")} to portal "${portal}".`);
+  if (remove.length) {
+    note(`Removed ${remove.join(", ")} from portal "${portal}".`);
+    // Removal is not synced on the hot path (ADR-002): KV stops authorizing them immediately, but
+    // Cloudflare Access keeps admitting them — and keeps charging a seat — until the reconciler
+    // runs. Saying "removed" without this would be a half-truth about a revocation.
+    note("They lose access to every document in it. Their Access seat is freed by: pagevault sync-access --reap");
+  }
   if (res.sync && res.sync !== "synced" && res.sync !== "ok") {
     note(`Access group sync: ${res.sync}`);
   }
@@ -485,9 +548,15 @@ Publish & manage documents:
   pagevault mint <id>                 mint a public /p/ link for an existing document
   pagevault revoke <id>               kill a document's public link (keeps the document)
   pagevault rotate <id>               replace the public link with a fresh one
-  pagevault share <portal> <email> [email …]
   pagevault rm <id> [--yes]           delete the document (there is no undo)
   pagevault export [dir] [--portal s] [--include-drafts] [--zip]
+
+Portals — the client boundary; permissions live here, not on the document:
+  pagevault portals [--json]          list your portals
+  pagevault portal-create <slug> [--name "Acme Corp"] [--kind private|restricted|public]
+                                [--description "…"]
+  pagevault share <portal> <email> [email …]        grant access to everything in it
+  pagevault share <portal> --remove a@b,c@d         revoke it
 
 Operate your deployment:
   pagevault status [--json]           what this install is configured for (local, no network)

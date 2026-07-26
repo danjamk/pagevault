@@ -101,6 +101,9 @@ test("the parity commands are dispatched and print their usage when a required a
     [["mint"], "pagevault mint <id>"],
     [["revoke"], "pagevault revoke <id>"],
     [["rotate"], "pagevault rotate <id>"],
+    [["portal-create"], "pagevault portal-create <slug>"],
+    [["share"], "pagevault share"],
+    [["share", "acme"], "pagevault share"], // portal given, neither a grant nor a revocation
   ]) {
     const { status, text } = run(...args);
     assert.equal(status, 1, `${args.join(" ")} should exit 1`);

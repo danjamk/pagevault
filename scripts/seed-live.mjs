@@ -21,11 +21,11 @@
 // login wall, the public link — because those are exactly the checks no script can make.
 //
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { existsSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { argValue, fromEnv, loadContext, c, ok, info, warn, die } from "../cli/lib/provision/context.mjs";
+import { argValue, fromEnv, loadContext, c, ok, warn, die } from "../cli/lib/provision/context.mjs";
 
 const BIN = fileURLToPath(new URL("../cli/bin/pagevault.mjs", import.meta.url));
 const JSON_MODE = process.argv.includes("--json");
@@ -52,21 +52,16 @@ function cli(...args) {
   return { status: r.status, stdout: (r.stdout ?? "").trim(), stderr: (r.stderr ?? "").trim() };
 }
 
-/** Portals have no CLI verb yet, so this one call goes over the API. See the note at the bottom. */
-async function ensurePortal(slug, name, kind, description) {
-  const res = await fetch(`${url}/api/portals`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ slug, name, kind, description }),
-  });
-  if (res.ok) return "created";
-
-  // Already there is success for a re-run — and this seed is meant to be re-run. Key on the
-  // server's error CODE, not its status: `portal_exists` comes back as a 400, so a status check
-  // would make the second run of an idempotent script fail.
-  const body = await res.json().catch(() => ({}));
-  if (body?.code === "portal_exists") return "existing";
-  die(`Couldn't create portal "${slug}" (HTTP ${res.status})`, `  ${JSON.stringify(body).slice(0, 300)}`);
+/**
+ * Create a portal, through the CLI — so every write this script makes goes via the binary under
+ * test, not a curl the CLI might have drifted from. Already-there is success, because this seed is
+ * meant to be re-run.
+ */
+function ensurePortal(slug, name, kind, description) {
+  const r = cli("portal-create", slug, "--name", name, "--kind", kind, "--description", description);
+  if (r.status === 0) return "created";
+  if (/already exists/.test(r.stderr)) return "existing";
+  die(`Couldn't create portal "${slug}"`, `  ${r.stderr.split("\n")[0]}`);
 }
 
 // --- The corpus -------------------------------------------------------------
@@ -208,7 +203,7 @@ const portals = [
   ["notes", "Notes", "public", "Public writing. No login, no seat, no wall."],
 ];
 for (const [slug, name, kind, description] of portals) {
-  const state = await ensurePortal(slug, name, kind, description);
+  const state = ensurePortal(slug, name, kind, description);
   say(`  ${c.green("✓")} portal ${c.bold(slug)} ${c.dim(`(${kind}, ${state})`)}`);
 }
 say();
@@ -285,9 +280,6 @@ if (JSON_MODE) {
   if (failed) warn(`${failed} document(s) did not publish — see above.`);
   else ok(`Seeded ${results.length} documents across ${portals.length} portals.`);
 
-  // A parity gap worth re-reading every time this runs: MCP can create a portal, the CLI cannot,
-  // so the two portals above went in over /api rather than through the binary under test.
-  info(`Portals were created over /api — the CLI still has no ${c.bold("portal create")} verb (MCP does).`);
   say();
 }
 

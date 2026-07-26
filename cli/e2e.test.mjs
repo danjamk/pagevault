@@ -386,14 +386,70 @@ describe("CLI against a live Worker — Public (no Access)", { timeout: 180_000 
     assert.match(r.stderr, /No such portal/);
   });
 
-  // A gap, pinned deliberately. MCP has `create_portal`; the CLI has no verb that creates one, so a
-  // terminal-only operator cannot open a second client portal — `share` only PATCHes an existing
-  // one. That breaks the parity principle (CLI and MCP are the max feature set; only the console
-  // may lag). Delete this test when `pagevault portal create` lands.
-  it("KNOWN GAP: the CLI cannot create a portal — share only reaches an existing one", () => {
-    const r = run("share", "brand-new-portal", "someone@example.com");
+  // Portals from the terminal (#117). Until these landed, a CLI-only operator could not open a
+  // second client portal at all, and could grant access but never revoke it — the parity principle
+  // says CLI and MCP are the max feature set, and only the console may lag.
+
+  it("portal-create opens a new portal and prints its slug for piping", () => {
+    const r = ok(run, "portal-create", "initech", "--name", "Initech", "--kind", "restricted");
+    assert.equal(r.stdout, "initech\n", "stdout should carry the slug and nothing else");
+    assert.match(r.stderr, /Created portal "initech" \(restricted\) — Initech\./);
+
+    // It exists, and it is immediately publishable into — the point of the command.
+    const file = fixture(scratch, "initech-brief.html", "<!doctype html><title>Brief</title><h1>b</h1>");
+    ok(run, "publish", file, "--portal", "initech");
+    assert.deepEqual(JSON.parse(ok(run, "list", "--portal", "initech", "--json").stdout).map((d) => d.name), [
+      "initech-brief.html",
+    ]);
+  });
+
+  it("portals lists them, and --json carries the raw records", () => {
+    const listed = JSON.parse(ok(run, "portals", "--json").stdout);
+    const slugs = listed.map((p) => p.slug);
+    for (const expected of ["acme", "globex", "initech"]) {
+      assert.ok(slugs.includes(expected), `${expected} should be listed`);
+    }
+    assert.equal(listed.find((p) => p.slug === "initech").kind, "restricted");
+
+    const human = ok(run, "portals").stdout;
+    assert.match(human, /^SLUG\s+KIND\s+NAME\s+CREATED$/m);
+    assert.match(human, /initech/);
+  });
+
+  it("a public portal is created as public, and says what that means", () => {
+    const r = ok(run, "portal-create", "shopfront", "--name", "Shopfront", "--kind", "public");
+    assert.match(r.stderr, /opens with no login, and it burns no Access seat/);
+    assert.equal(JSON.parse(ok(run, "portals", "--json").stdout).find((p) => p.slug === "shopfront").kind, "public");
+  });
+
+  it("portal-create refuses a duplicate slug and an invalid one", () => {
+    const dupe = run("portal-create", "acme");
+    assert.equal(dupe.status, 1);
+    assert.match(dupe.stderr, /already exists/);
+
+    const bad = run("portal-create", "Not A Slug");
+    assert.equal(bad.status, 1);
+    assert.match(bad.stderr, /not a valid portal slug/);
+  });
+
+  it("share revokes as well as grants, and says the seat outlives the revocation", () => {
+    ok(run, "portal-create", "umbrella", "--name", "Umbrella", "--kind", "restricted");
+    ok(run, "share", "umbrella", "ceo@umbrella.test", "cfo@umbrella.test");
+
+    const removed = ok(run, "share", "umbrella", "--remove", "cfo@umbrella.test");
+    assert.match(removed.stderr, /Removed cfo@umbrella\.test from portal "umbrella"/);
+    assert.match(removed.stderr, /Members now: ceo@umbrella\.test$/m);
+    assert.doesNotMatch(removed.stderr, /cfo@umbrella\.test.*\n.*Members now.*cfo@/);
+    // ADR-002: KV stops authorizing immediately, but Access keeps admitting (and charging for) them
+    // until the reconciler runs. Reporting the removal without that is a half-truth.
+    assert.match(removed.stderr, /sync-access --reap/);
+  });
+
+  it("share with neither a grant nor a revocation prints its usage", () => {
+    const r = run("share", "umbrella");
     assert.equal(r.status, 1);
-    assert.match(r.stderr, /No such portal/);
+    assert.match(r.stderr, /Usage: pagevault share/);
+    assert.match(r.stderr, /--remove/);
   });
 });
 
