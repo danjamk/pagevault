@@ -17,7 +17,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { Resolver, lookup } from "node:dns/promises";
 import { platform } from "node:process";
-import { c, ok, warn, die, loadContext, fromEnv, banner, mcpCall, EXPECTED_MCP_TOOLS } from "../provision/context.mjs";
+import { c, ok, warn, die, loadContext, fromEnv, banner, mcpCall, runHint, EXPECTED_MCP_TOOLS } from "../provision/context.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -155,6 +155,19 @@ export async function verifyCmd({ json = false } = {}) {
       return finish(false, { reason: "dns_local_cache" });
     }
     record("dns", dns === "ok", dns);
+
+    // Nothing was ever deployed here, or it was torn down. `deployedUrl` is written by a successful
+    // deploy and stripped by destroy (#118), so its absence plus a hostname that resolves nowhere is
+    // conclusive — and telling someone to wait for a certificate on a Worker that does not exist is
+    // the same wrong-cause failure as the DNS one above. We only got here via the `ctx.host`
+    // fallback, since an empty base is caught earlier.
+    if (dns === "nowhere" && !ctx.deployedUrl) {
+      say(`\n  ${c.yellow("!")} ${c.bold("Nothing is deployed at this hostname.")}`);
+      say(`  ${c.dim(`${base} resolves nowhere, and this checkout has no record of a deploy —`)}`);
+      say(`  ${c.dim("so this is a deployment that has not been built yet, or one that was torn down.")}`);
+      say(`\n     ${c.bold(runHint("deploy", "init"))}\n`);
+      return finish(false, { reason: "not_deployed" });
+    }
 
     if ((ctx.rung ?? 1) >= 2) {
       // Rung 2/3 is a CUSTOM domain: the delay is edge-certificate provisioning, not workers.dev
