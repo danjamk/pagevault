@@ -49,6 +49,11 @@ test: ## Run the test suite
 test-security: ## Run only canView() + identity — the suite where a bug is an incident
 	@$(NVM) && pnpm test:security
 
+test-e2e: ## Drive the real CLI against a real Worker (wrangler dev + Miniflare KV)
+# Included in `make test` by the cli/*.test.mjs glob above; this target is for running it alone.
+# It boots its own Worker on a free port with a throwaway KV — it cannot reach a real deployment.
+	@$(NVM) && node --test cli/e2e.test.mjs
+
 check-sandbox: ## Fail the build if the iframe is ever granted our origin (ADR-007)
 # `allow-scripts` combined with same-origin is functionally NO SANDBOX: with scripts
 # enabled the frame can reach into the parent and remove the attribute outright. It is
@@ -86,6 +91,9 @@ provision: ## Rung 3: create the KV namespace, Access group, and two Access apps
 
 deploy: ## Deploy the Worker — rung-aware (Tier 0, or provision at rung 3)
 	@$(NVM) && node cli/lib/provision/deploy.mjs
+
+seed: ## Publish a realistic document set to the LIVE deployment, through the CLI (asks first)
+	@$(NVM) && node scripts/seed-live.mjs
 
 verify: ## Smoke-test the live deployment (run after deploy)
 	@$(NVM) && node cli/bin/pagevault.mjs verify
