@@ -5,7 +5,7 @@ import { fingerprint, log } from "./log.js";
 import { renderPdf } from "./pdf.js";
 import type { DocMeta } from "./store.js";
 import { getDoc, getMeta, getRawSource } from "./store.js";
-import { THEME } from "./theme.js";
+import { ATTRIBUTION_CSS, THEME, attribution } from "./theme.js";
 
 /**
  * The iframe sandbox.
@@ -386,6 +386,11 @@ ${THEME}
      against a light background and we do not restyle its insides (ADR-007) — tinting the frame
      dark would leave the author's black-on-white content sitting in a dark well. */
   iframe { flex: 1 1 auto; width: 100%; border: 0; background: #fff; }
+${ATTRIBUTION_CSS}
+  /* The mark sits last in the control row, after the buttons — never beside the title. On a narrow
+     screen the row wraps and it drops away below, which is the right priority: the client's document
+     and its controls come first. */
+  @media (max-width: 30rem) { .pv-mark { display: none; } }
 </style>
 </head>
 <body>
@@ -398,6 +403,7 @@ ${THEME}
     ${pdfBtn}
     ${copyBtn}
     ${shareBtn}
+    ${attribution(env)}
   </div>
 </header>
 <iframe

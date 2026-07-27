@@ -12,7 +12,7 @@ import {
   listDocs,
 } from "./store.js";
 import { log } from "./log.js";
-import { THEME } from "./theme.js";
+import { PRODUCT_URL, THEME, showBranding } from "./theme.js";
 import { renderShell } from "./viewer.js";
 
 /**
@@ -133,7 +133,7 @@ async function portalIndex(
     .filter((doc) => isOwner || !doc.ownerOnly)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-  return renderPortalPage(portal, docs, isOwner);
+  return renderPortalPage(env, portal, docs, isOwner);
 }
 
 async function portalDocument(
@@ -209,7 +209,7 @@ async function portalDocument(
  * **No PageVault branding above the fold.** The client is looking at your work, not at a
  * SaaS product.
  */
-function renderPortalPage(portal: Portal, docs: DocSummary[], isOwner: boolean): Response {
+function renderPortalPage(env: Env, portal: Portal, docs: DocSummary[], isOwner: boolean): Response {
   const months = groupByMonth(docs);
 
   const sections = months
@@ -235,7 +235,9 @@ function renderPortalPage(portal: Portal, docs: DocSummary[], isOwner: boolean):
 <style>
   /* The #67 system, from theme.ts — this page is where it was designed, and every other HTML
      surface now draws the same tokens. No webfont, no logo: a portal is still the client's work,
-     not our product, above the fold. */${THEME}
+     not our product, ABOVE THE FOLD. Attribution lives in the footer, and in the viewer's control
+     row after the buttons — a printer's mark, never a banner, and never beside the client's title.
+     PAGEVAULT_BRANDING=off removes it entirely. */${THEME}
   *, *::before, *::after { box-sizing: border-box; }
   body {
     margin: 0; padding: 2.5rem 1.25rem 4rem;
@@ -315,7 +317,7 @@ function renderPortalPage(portal: Portal, docs: DocSummary[], isOwner: boolean):
   ${empty}
   ${sections}
 
-  <footer>Published with <a href="https://github.com/danjamk/pagevault">PageVault</a>.</footer>
+  ${showBranding(env) ? `<footer>Published with <a href="${PRODUCT_URL}" target="_blank" rel="noopener nofollow">PageVault</a>.</footer>` : ""}
 </div>
 <script>
   // Client-side, because the corpus is small — fourteen documents, not fourteen thousand.

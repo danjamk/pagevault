@@ -70,6 +70,11 @@
     "CF_TEAM_NAME": "",
     "PUBLIC_HOST": "",
 
+    // "off" hides the "Powered by PageVault" mark on client-facing surfaces. Anything else —
+    // including blank — shows it, so a missing var degrades to visible rather than silently
+    // stripping attribution. Set it with `branding: false` in .pagevault.json.
+    "PAGEVAULT_BRANDING": "",
+
     // One AUD per Access application. These are NOT interchangeable — /d must not
     // accept the console's token and vice versa. See ADR-001.
     "CF_ACCESS_AUD_DOCS": "",
