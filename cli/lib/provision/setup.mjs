@@ -73,18 +73,42 @@ async function resolveHost({ ctx, rl }) {
  * The tier the user is choosing between (ADR-018): "public" or "secured". `--tier` wins; otherwise
  * prompt, defaulting from the saved rung (3 → secured, else public). `--rung` is handled by the
  * caller as a direct escape and never reaches here.
+ *
+ * Numbered, not free-text. This used to read `Which tier — Public or Secured? [public]` — capitalised
+ * words against a lowercase default — which left people unsure whether the answer was case-sensitive
+ * and what exactly to type. A number cannot be mistyped into meaning the other thing. Words still
+ * work for anyone who types them out of habit, and this is also where the two tiers are described,
+ * so the choice and its consequences are on screen together rather than several lines apart.
  */
+export function tierFromAnswer(answer, def) {
+  const ans = String(answer ?? "").trim().toLowerCase();
+  if (!ans) return def;
+  if (ans === "1") return "public";
+  if (ans === "2") return "secured";
+  // Words still accepted — "s", "sec", "secured", "p", "pub", "public" — for anyone who types the
+  // thing they can see rather than the number beside it.
+  if ("secured".startsWith(ans)) return "secured";
+  if ("public".startsWith(ans)) return "public";
+  return null; // caller decides how to complain
+}
+
 async function resolveTier({ ctx, rl }) {
   const flag = (argValue("--tier") || "").toLowerCase();
   if (flag.startsWith("pub")) return "public";
   if (flag.startsWith("sec")) return "secured";
   const def = (ctx.rung ?? 1) >= 3 ? "secured" : "public";
   if (!isInteractive() || !rl) return def;
-  const ans = (await rl.question(`  Which tier — ${c.bold("Public")} or ${c.bold("Secured")}? ${c.dim(`[${def}]`)} `)).trim().toLowerCase();
-  if (!ans) return def;
-  if ("secured".startsWith(ans)) return "secured";
-  if ("public".startsWith(ans)) return "public";
-  die(`"${ans}" — choose "public" or "secured".`);
+
+  const defNum = def === "secured" ? "2" : "1";
+  console.log(`  ${c.bold("1")}  ${c.bold("Public")}   ${c.dim("public links anyone with the URL can open")}   ${c.dim("free · no card")}`);
+  console.log(`            ${c.dim("optionally on your own domain")}`);
+  console.log(`  ${c.bold("2")}  ${c.bold("Secured")}  ${c.dim("private — named people, client portals")}      ${c.dim("a domain + Zero Trust (a card)")}`);
+  console.log();
+
+  const answer = await rl.question(`  Which? ${c.dim(`[${defNum}]`)} `);
+  const tier = tierFromAnswer(answer, def);
+  if (!tier) die(`"${answer.trim()}" — type ${c.bold("1")} for Public or ${c.bold("2")} for Secured.`);
+  return tier;
 }
 
 /**
@@ -129,12 +153,11 @@ export async function setup(opts = {}) {
   if (firstRun) {
     // "your documents carry across untouched" was true and still is — but it was heard as "your
     // links keep working", which is false the moment the hostname changes. Say what carries. (#121)
+    // The tiers themselves are described at the prompt that asks you to pick one (resolveTier), so
+    // this is the framing only — the same two paragraphs twice, five lines apart, read as a stutter.
     console.log(`\n${c.bold("Two tiers")} — start Public, add security when you need it. Not a one-way`);
     console.log(`door; every document carries across, keeping its name and its place.\n`);
-    console.log(`  ${c.bold("Public")}   public links anyone with the URL can open   ${c.dim("free · no card")}`);
-    console.log(`           ${c.dim("optionally on your own domain")}`);
-    console.log(`  ${c.bold("Secured")}  private — named people, client portals      ${c.dim("a domain + Zero Trust (a card)")}`);
-    console.log(`\n  ${c.dim("Most people start Public. Re-run this anytime to add a domain or turn on security.")}\n`);
+    console.log(`  ${c.dim("Most people start Public. Re-run this anytime to add a domain or turn on security.")}\n`);
   } else {
     const tierName = (ctx.rung ?? 1) >= 3 ? "Secured" : "Public";
     info(`Current: ${c.bold(tierName)}${ctx.host ? ` · ${ctx.host}` : ""}${ctx.ownerEmail ? ` · ${ctx.ownerEmail}` : ""}`);
@@ -184,6 +207,22 @@ export async function setup(opts = {}) {
   rl.close();
 
   // --- Save ------------------------------------------------------------------
+
+  // Say back what was understood, before anything acts on it. The prompts above are terse by design,
+  // so without this the only confirmation of a tier choice was the deploy banner — well past the
+  // point where you would want to correct a mis-keyed answer, and on the one decision that turns
+  // Zero Trust (and a card) on. Name the tier, and what it means for who can open a document.
+  const secured = rung >= 3;
+  console.log();
+  ok(
+    `${c.bold(secured ? "Secured" : "Public")} — ` +
+      (secured
+        ? `only people you name can open a document, on ${c.bold(host)}`
+        : `anyone with the link can open a document, on ${c.bold(host || "*.workers.dev")}`),
+  );
+  if (secured) {
+    console.log(`  ${c.dim("Cloudflare Access will gate /v and /admin. Zero Trust must be on for this account.")}`);
+  }
 
   saveContext({ ...ctx, rung, ownerEmail, host });
   ok(`Saved to ${c.bold(".pagevault.json")}`);
