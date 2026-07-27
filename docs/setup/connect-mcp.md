@@ -90,8 +90,44 @@ claude.ai and Claude Code do not share that ceiling.
 
 ## What you get once connected
 
-Eleven tools, split into a write side (`publish_document`, `create_portal`,
-`update_portal_members`, the public-link lifecycle, `revoke_document`) and the read side that makes
-the portal *memory* rather than an outbox (`list_portals`, `list_documents`, `read_document`,
-`search_portal`). The full surface and its rules are in [`../architecture.md`](../architecture.md);
+Twelve tools, split into a write side (`publish_document`, `create_portal`,
+`update_portal_members`, the public-link lifecycle — `mint_public_link`, `rotate_public_link`,
+`revoke_public_link` — and `revoke_document`) and the read side that makes the portal *memory*
+rather than an outbox (`list_portals`, `list_documents`, `read_document`, `search_portal`, plus
+`server_info`). The full surface and its rules are in [`../architecture.md`](../architecture.md);
 the standard it's held to is [`../engineering/mcp-best-practices.md`](../engineering/mcp-best-practices.md).
+
+`pagevault verify` checks this count against the live deployment, so if the number here and the
+number it prints ever disagree, this file is the one that is wrong.
+
+---
+
+## A second server worth having — Cloudflare's own
+
+PageVault's MCP server knows about your *documents*. It knows nothing about the infrastructure
+underneath them: it cannot read the Worker's logs, list your KV namespaces, or tell you why a deploy
+failed. That is deliberate — the Worker holds the narrowest credential that does its job (ADR-002),
+and a Worker that could read its own account would be a wider blast radius for no gain to publishing.
+
+Cloudflare publishes [its own MCP servers](https://github.com/cloudflare/mcp-server-cloudflare),
+and two of them pair well with running PageVault:
+
+| Server | What it answers |
+|---|---|
+| **Observability** | *"Why did that publish 500?"* — queries your Worker's logs directly |
+| **Developer Platform** | *"Which KV namespaces exist, and is the binding pointing at the right one?"* |
+
+Both also search Cloudflare's documentation, which is worth more than it sounds during a first
+Zero Trust setup. Connected alongside PageVault's server, one conversation can go from *"the client
+says the link is broken"* to reading the actual error in the Worker log, without leaving the chat.
+
+**The trade, stated plainly:** these servers authenticate to your **whole Cloudflare account** — every
+Worker, every namespace, every zone. That is a broader grant than anything PageVault itself holds,
+and broader than the account-scoped analytics token that [ADR-015](../adr/ADR-015-what-a-view-record-contains.md)
+specifically refuses to put in the Worker.
+
+Those two things are not in tension, but the difference is worth naming: PageVault's refusal is about
+a *permanent server-side credential living in an internet-facing Worker*, where a compromise is
+silent and continuous. A Cloudflare MCP connection is a *local client you authorize, watch, and can
+revoke in one click*. Different shape of risk — but a real grant either way, so make it on purpose
+rather than because a setup guide told you to. Neither PageVault nor this guide requires it.

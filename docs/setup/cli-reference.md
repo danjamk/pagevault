@@ -22,8 +22,29 @@ exist as `make` targets (`make deploy`, `make verify`, …) — one engine, two 
 Stand PageVault up on your own Cloudflare account — no repo clone. Walks you through the Cloudflare
 API token, the tier, the owner email, and the account, writes state to `~/.pagevault/`, deploys the
 bundled Worker, and **writes the login config for you** so `publish` works immediately (no separate
-`login`). Re-run it to climb a tier (it shows your current choices and asks only for what's new).
-`--yes` runs non-interactively (flags/env supply the answers).
+`login`). Re-run it to climb a tier: it shows your current choices and asks only for what's new, and
+your documents carry across keeping their ids and filenames.
+
+| Flag | Effect |
+|---|---|
+| `--tier public\|secured` | the tier, unasked. Public = links anyone can open; Secured = named people, via Cloudflare Access |
+| `--host pagevault.you.com` | the hostname. Required for Secured; optional (but implied) for Public |
+| `--email you@example.com` | the owner — the identity that can always see everything |
+| `--rung 1\|2\|3` | the escape hatch: 1 = Public on `workers.dev`, 2 = Public on your domain, 3 = Secured |
+| `--yes` | never prompt. Flags and environment supply every answer |
+
+⚠️ **`--yes` on a *first* deployment also needs a bearer.** Non-interactively there is nobody to show
+a freshly minted `PAGEVAULT_API_TOKEN` to, so `init` refuses rather than deploying a Worker you have
+no way to authenticate to — before it creates anything. Either run it interactively once (it mints
+and saves one), or provide your own:
+
+```bash
+export PAGEVAULT_API_TOKEN=$(openssl rand -hex 32)
+pagevault init --yes --tier public --email you@example.com
+```
+
+Re-running `--yes` against a deployment that already has a bearer is fine — it reuses it, and never
+rotates a live one.
 
 ### `pagevault upgrade [--yes]`
 Redeploy the Worker bundle that shipped with your installed package — after `npm update -g pagevault`.
@@ -60,13 +81,42 @@ filename) unless you pass `--title`.
 ### `pagevault list [--portal s] [--tag t] [--json]`
 Your documents, newest first.
 
+### `pagevault link <id>`
+Print a document's shareable URL to stdout, and nothing else — so `pagevault link <id> | pbcopy`
+just works. A public document hands back its `/p/` capability link; otherwise the portal viewer URL,
+which requires a login. Warns on stderr if the document is an owner-only draft, since that link
+opens for nobody yet.
+
 ### `pagevault mint <id>` · `revoke <id>` · `rotate <id>`
 The public-link lifecycle. `mint` creates a `/p/` capability link; `revoke` kills it (keeps the
 document); `rotate` replaces it with a fresh one (the old link dies). Minting and rotating are
 **widening** actions — anyone with the link can open the document, no login.
 
-### `pagevault share <portal> <email> [email …]`
-Grant people access to a whole portal — one write covers every document in it.
+### `pagevault portals [--json]`
+Your portals: slug, kind, name, created. One API call — document counts are deliberately not
+fetched, because that is a KV `list()` per portal against a separate 1000/day quota. Use
+`pagevault list --portal <slug>` when you want the documents.
+
+### `pagevault portal-create <slug> [flags]`
+Open a new client boundary. The slug is the URL segment and the handle every other command takes.
+
+| Flag | Effect |
+|---|---|
+| `--name "Acme Corp"` | display name (defaults to the slug) |
+| `--kind restricted` | a client portal — its members see everything in it |
+| `--kind private` | yours only (the default) |
+| `--kind public` | anyone with the link, no login, and it burns no Access seat |
+| `--description "…"` | shown at the top of the portal index |
+
+Prints the slug to stdout, so it pipes into a publish.
+
+### `pagevault share <portal> <email> [email …]` · `--remove a@b,c@d`
+Grant or revoke access to a whole portal — one write covers every document in it. Permissions live
+on the portal, not the document, so adding someone to a client's team is one call, not fourteen.
+
+`--remove` stops KV authorizing them immediately, but Cloudflare Access keeps admitting them — and
+keeps charging a seat — until [`sync-access --reap`](#pagevault-sync-access---reap---yes---json)
+reconciles. The command says so; it is not a silent half-revocation.
 
 ### `pagevault rm <id> [--yes]`
 Delete a document. There is no undo. Interactive confirm unless `--yes`.
@@ -124,10 +174,28 @@ it verifies the token reaches the pinned account, then makes you type the target
 |---|---|
 | `PAGEVAULT_URL` / `PAGEVAULT_API_TOKEN` | the publish target; **override** `config.json` per command |
 | `CLOUDFLARE_API_TOKEN` | the provisioning credential (`init`/`upgrade`/`destroy`/`views`) |
+| `CF_RUNTIME_TOKEN` | Secured only. The **narrowly scoped** token `init` puts in the Worker as `CF_API_TOKEN`, so it can keep the Access viewer group in step with portal membership ([ADR-002](../adr/ADR-002-seat-bounding.md)). Absent, the deploy warns and email grants stop reaching Access |
 | `PAGEVAULT_HOME` | relocate **all** state — `config.json`, `.pagevault.json`, `.env.local` — so one machine can hold several deployments |
 
 State lives in `~/.pagevault/` for an install (or the repo directory when running from source). To
 target several deployments from one machine, give each its own `PAGEVAULT_HOME`, or pass
 `PAGEVAULT_URL`/`PAGEVAULT_API_TOKEN` per command.
+
+### Turning off the attribution
+
+Client-facing pages carry a muted **Powered by PageVault** mark — in the viewer's control row, after
+the Download/PDF/Share buttons, and in the portal index footer. Never above the fold, never beside
+your client's own title.
+
+To remove it, add `"branding": false` to `.pagevault.json` and redeploy:
+
+```bash
+pagevault upgrade      # or: make deploy
+```
+
+It is on by default because PageVault is free and spreads by being seen. It is one flag rather than
+a patch you maintain, because it is MIT and a deployment is yours — [ADR-002](../adr/ADR-002-seat-bounding.md)'s
+posture applied to a smaller question. The mark is removed entirely, not hidden with CSS: nothing is
+left in the page source of a document you hand a client.
 
 `pagevault help` prints the short version of all of this.
