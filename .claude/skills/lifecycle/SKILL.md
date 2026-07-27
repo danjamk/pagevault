@@ -13,6 +13,15 @@ everything that only breaks against the real thing.**
 It is a ritual, not a test. It takes 20–45 minutes, most of it waiting on DNS and certificates, and
 about half the value is in checks only a human with a browser can make.
 
+This file drives the lifecycle from a **repo checkout**, against `node cli/bin/pagevault.mjs`. For
+the other half — the installed npm package on a machine that has never seen this project, which
+ADR-014 makes the actual product — see [`fresh-machine.md`](fresh-machine.md) and the self-contained
+[`fresh-machine-prompt.md`](fresh-machine-prompt.md) you can paste into Claude Code over there.
+
+**One deployment per Cloudflare account.** The Worker name and KV titles are hardcoded, so this
+machine and a fresh one cannot both hold a deployment on the same account. Tear down before handing
+off in either direction.
+
 ## Hard rules
 
 1. **Never run `destroy`.** It is the one command that deletes client data. It refuses
