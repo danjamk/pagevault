@@ -407,6 +407,16 @@ async function share(pos, flags) {
   }
   if (res.sync && res.sync !== "synced" && res.sync !== "ok") {
     note(`Access group sync: ${res.sync}`);
+    // "not_configured" reads like a shrug, and it is two very different facts wearing one word. On
+    // Public it is expected and harmless; on Secured it means the grant lands in KV and the person
+    // still cannot get in. A fresh-machine run read it the first way on a deployment that was in
+    // the second state, and reported `share` as broken — it wasn't; the deployment was.
+    if (res.sync === "not_configured") {
+      note("  → There is no Cloudflare Access group on this deployment.");
+      note("    Public: expected. The grant is recorded and takes effect if you move to Secured.");
+      note("    Secured: the deployment is misconfigured and this person cannot open anything —");
+      note("             run `pagevault verify` to see what is wrong.");
+    }
   }
   note(`Members now: ${(res.members ?? []).join(", ") || "(none)"}`);
 }

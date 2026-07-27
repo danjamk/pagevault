@@ -505,6 +505,26 @@ describe("CLI against a live Worker — Secured (Access enabled)", { timeout: 18
     assert.match(r.stderr, new RegExp(`pagevault mint ${id}`));
   });
 
+  it("share attempts the Access group sync inline — it is not deferred to sync-access", () => {
+    // B4 from a fresh-machine run claimed `share` did not sync the group. It does: updatePortalMembers
+    // calls syncGroupMembers on every addition. What that run actually hit was a deployment whose
+    // config had been clobbered to Tier-0, leaving CF_ACCOUNT_ID and CF_ACCESS_GROUP_ID blank — so the
+    // sync had nowhere to go and reported "not_configured".
+    //
+    // This harness has the same shape on purpose: Access is "enabled" (team + AUD) but there is no
+    // account or group id, because Miniflare cannot hold a real Cloudflare Access group. So the
+    // assertion is not "the group changed" — it is that the sync was ATTEMPTED and its outcome
+    // surfaced, which is the part that was in doubt. The real group mutation is covered by the live
+    // lifecycle ritual, where sync-access afterwards reports nothing left to add.
+    const r = ok(run, "share", "acme", "newperson@acme.test");
+    assert.match(r.stderr, /Granted newperson@acme\.test to portal "acme"/);
+    assert.match(r.stderr, /Access group sync: not_configured/,
+      "share must report the sync outcome, not stay silent about it");
+    // And it must say what that means, in both directions — the bare status is what got misread.
+    assert.match(r.stderr, /no Cloudflare Access group on this deployment/i);
+    assert.match(r.stderr, /Secured: the deployment is misconfigured/);
+  });
+
   it("publishing with --emails records the grant and echoes it back", () => {
     const file = fixture(scratch, "granted.html", "<!doctype html><title>Granted</title><h1>g</h1>");
     const r = ok(run, "publish", file, "--portal", "acme", "--emails", "cfo@acme.test,vp@acme.test");
