@@ -74,7 +74,18 @@ export async function diagnoseDns(hostname) {
 /** @param {{ json?: boolean }} [opts] */
 export async function verifyCmd({ json = false } = {}) {
   const checks = [];
-  const record = (name, passed, detail) => checks.push({ name, ok: passed, ...(detail ? { detail } : {}) });
+  // `advisory` marks a check whose failure is not a verdict on the deployment — OAuth discovery is
+  // legitimately absent on a bearer-only deploy. Everything else counts.
+  const record = (name, passed, detail, advisory = false) =>
+    checks.push({ name, ok: passed, ...(detail ? { detail } : {}), ...(advisory ? { advisory: true } : {}) });
+
+  // 🔴 A recorded failure must fail the run.
+  //
+  // The root check used to `record(..., false)`, print a yellow "!", and let the run finish green —
+  // so `--json` emitted `ok: true` with a failed check sitting inside it, and the exit code said
+  // fine. That is exactly the shape of a Secured deployment quietly serving a Tier-0 config: root
+  // stops redirecting to /admin, verify shrugs, and nothing tells you the deployment drifted.
+  const allPassed = () => checks.every((c) => c.advisory || c.ok);
 
   // All human narration flows through these; in --json mode they go silent so stdout is pure JSON.
   const say = (s = "") => {
@@ -314,7 +325,7 @@ export async function verifyCmd({ json = false } = {}) {
     // OAuth discovery exists only once #22 is deployed. A bearer-only (Tier-0/pre-#22) deploy
     // legitimately has none — report the mode, don't fail.
     const { status } = await get("/.well-known/oauth-authorization-server");
-    record("oauth_discovery", status === 200, status === 200 ? "live" : "bearer-only");
+    record("oauth_discovery", status === 200, status === 200 ? "live" : "bearer-only", true);
     status === 200
       ? say(`  ${c.green("✓")} OAuth discovery live ${c.dim("— claude.ai web/Desktop/mobile can connect")}`)
       : say(`  ${c.dim("○ OAuth not deployed — bearer-only (Claude Code). Expected pre-#22.")}`);
@@ -326,7 +337,7 @@ export async function verifyCmd({ json = false } = {}) {
   const welcomePath = "examples/welcome.html";
   if (!existsSync(welcomePath)) {
     say(`\n  ${c.dim("○ No examples/welcome.html here — skipping the sample publish (installed verify).")}\n`);
-    return finish(true, { published: false });
+    return finish(allPassed(), { published: false });
   }
 
   say(`\n  Publishing your first document ${c.dim("(examples/welcome.html)…")}`);
@@ -371,5 +382,5 @@ export async function verifyCmd({ json = false } = {}) {
   say(`\n     ${c.blue(publicUrl || base)}\n`);
   say(`  ${c.dim("That page explains what just happened and proves the sandbox. Delete it whenever;")}`);
   say(`  ${c.dim("it was only a hello. Next: connect Claude to")} ${c.bold(base + "/mcp")} ${c.dim("with your bearer token.")}\n`);
-  return finish(true, { published: true, publicUrl: publicUrl || null });
+  return finish(allPassed(), { published: true, publicUrl: publicUrl || null });
 }
