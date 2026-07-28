@@ -40,6 +40,46 @@ export const THEME = `
  * page's own wordmark — which is what a remote MCP client (claude.ai) fetches for the connector's
  * icon. Carries no width/height so a caller sizes it with CSS.
  */
+/** The product page. One constant, so a rebrand or a domain move is a single edit. */
+export const PRODUCT_URL = "https://danjamk.github.io/pagevault";
+
+/**
+ * The attribution mark, shown on client-facing surfaces unless the operator turns it off.
+ *
+ * This deliberately overturns an earlier decision. The portal index and the viewer shell carried
+ * "no webfont, no logo — a portal is still the client's work, not our product, above the fold",
+ * and that instinct was right about *weight*: a consultant's deliverable should not look like it
+ * was made from a template, because looking substantial is what their fee is for. So this is one
+ * muted line at the end of the chrome, never a logo and never above the client's own title —
+ * closer to a printer's mark than a banner.
+ *
+ * `rel="noopener"` because it opens in a new tab; `nofollow` because a client portal is not a
+ * backlink farm and we are not asking anyone's deliverable to carry SEO for us.
+ */
+export const attribution = (env: { PAGEVAULT_BRANDING?: string }): string =>
+  showBranding(env)
+    ? `<a class="pv-mark" href="${PRODUCT_URL}" target="_blank" rel="noopener nofollow">Powered by PageVault</a>`
+    : "";
+
+/**
+ * Off only when the operator says so, in exactly those words.
+ *
+ * The comparison is inverted from `AUTH_MODE`'s on purpose. There, an unset variable had to fail
+ * CLOSED, so it matched `"none"` exactly and anything else meant "authenticate". Here the risk runs
+ * the other way: the safe default for a var that might simply be missing is the visible one, and a
+ * forker who wants it gone gets a documented switch rather than a patch to maintain.
+ */
+export const showBranding = (env: { PAGEVAULT_BRANDING?: string }): boolean =>
+  (env.PAGEVAULT_BRANDING ?? "").trim().toLowerCase() !== "off";
+
+/** Shared styling for the mark. Muted, small, and never competing with the client's own content. */
+export const ATTRIBUTION_CSS = `
+  .pv-mark {
+    color: var(--muted); text-decoration: none; font-size: .75rem;
+    white-space: nowrap; opacity: .75;
+  }
+  .pv-mark:hover { color: var(--accent); opacity: 1; }`;
+
 export const MARK_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
   '<rect x="2" y="2" width="28" height="28" rx="8" fill="#2F6FED"/>' +

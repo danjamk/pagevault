@@ -7,6 +7,53 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-07-28
+
+0.22.0 was the first release to be installed from npm on a machine that had never seen PageVault, and
+driven through a full lifecycle by hand. The install path is the product ([ADR-014](docs/adr/ADR-014-installed-product-not-thin-client.md)),
+and it turned out to be the least-exercised code in the repo. Everything below is what that found.
+
+### Fixed
+- **`init --yes` left a live, unusable deployment.** The bearer decision ran *after* the deploy, so a
+  non-interactive first install — which is what `--yes` is on a fresh machine — put a Worker on the
+  internet and then refused to finish it. Without `PAGEVAULT_API_TOKEN` every `/api` call 401s and
+  `list` reports "Not configured", and the advice offered was to re-run the command that had just
+  failed. The question is now asked before anything is built, so the answer is identical and nothing
+  is created; the message says so and gives the escape it previously buried in an error.
+- **`verify` reported success it had not earned.** Two ways. It passed while skipping the MCP surface,
+  the write path, and authentication entirely — and it read the bearer only from `.env.local`, never
+  the CLI's login config, so the documented install path always skipped. Separately, a check could
+  record a failure, print a warning, and still let the run finish green, which is how a Secured
+  deployment quietly serving a Tier-0 config went unnoticed. The verdict is now derived from what was
+  actually recorded, and an absent bearer fails rather than passes.
+- **The tier prompt was ambiguous and unconfirmed.** `Public or Secured? [public]` gave no syntax to
+  copy; it is numbered now, with both tiers described where you choose between them. Setup then says
+  back what it understood — on the one decision that turns Zero Trust, and a card, on.
+- **`not_configured` on an Access-group sync said nothing useful.** On Public it is expected; on
+  Secured it means the grant landed in KV and the person still cannot open anything. It now says
+  which, and points at `verify`.
+
+### Added
+- **A "Powered by PageVault" mark** on client-facing pages — the viewer's control row and the portal
+  footer, pointing at the product page. Never above the fold, never beside your client's own title.
+  `"branding": false` in `.pagevault.json` removes it entirely.
+- **`make test-e2e` covers `verify`** for the first time, against a real Worker. Six tests, including
+  the tier-drift case that had shipped twice.
+
+### Changed
+- **The setup docs were wrong, not merely stale.** The agent runbook still taught the three tiers
+  [ADR-018](docs/adr/ADR-018-public-and-secured-tiers.md) retired, and told the reader that tier 2
+  meant "only named people should open it." That tier is *Public on your own domain* — no access
+  control at all. Anyone following it would have assured someone their client documents were gated
+  while they were readable by whoever held the URL. Rewritten, with the failure mode named: a domain
+  changes the address, not who can read.
+- The CLI reference regained the commands it had lost track of — `link`, `portals`, `portal-create`,
+  `share --remove`, `init`'s flags, and `CF_RUNTIME_TOKEN`. Coverage is verified rather than
+  eyeballed: every command has an entry, and no entry names a command that does not exist.
+- [**ADR-019**](docs/adr/ADR-019-view-metrics-reach-mcp-by-sync.md) records how view metrics can reach
+  MCP without handing the Worker an account-scoped analytics token, which
+  [ADR-015](docs/adr/ADR-015-what-a-view-record-contains.md) refuses for good reason.
+
 ## [0.22.0] — 2026-07-26
 
 Everything here came out of one exercise: building an end-to-end test for the CLI, then running the
@@ -717,7 +764,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/danjamk/pagevault/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/danjamk/pagevault/compare/v0.21.0...v0.22.0
 [0.2.0]: https://github.com/danjamk/pagevault/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/danjamk/pagevault/releases/tag/v0.1.0

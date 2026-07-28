@@ -20,7 +20,7 @@ Start with the question you came here to answer.
 
 ## Run it yourself
 
-- [Quick Start](../README.md#install--pick-a-path) — rung 1, public links, no card.
+- [Quick Start](../README.md#install--pick-a-path) — Public: links anyone with the URL can open, no card.
 - [`setup/prerequisites.md`](setup/prerequisites.md) — what you need before you start.
 - [`setup/ai-guided-setup.md`](setup/ai-guided-setup.md) — hand your LLM this runbook and let it walk you through setup.
 - [`setup/cli-reference.md`](setup/cli-reference.md) — every `pagevault` command, flag, and environment variable.

@@ -18,6 +18,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { Resolver, lookup } from "node:dns/promises";
 import { platform } from "node:process";
 import { c, ok, warn, die, loadContext, fromEnv, banner, mcpCall, runHint, EXPECTED_MCP_TOOLS } from "../provision/context.mjs";
+import { loadConfig } from "../client.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -73,7 +74,18 @@ export async function diagnoseDns(hostname) {
 /** @param {{ json?: boolean }} [opts] */
 export async function verifyCmd({ json = false } = {}) {
   const checks = [];
-  const record = (name, passed, detail) => checks.push({ name, ok: passed, ...(detail ? { detail } : {}) });
+  // `advisory` marks a check whose failure is not a verdict on the deployment — OAuth discovery is
+  // legitimately absent on a bearer-only deploy. Everything else counts.
+  const record = (name, passed, detail, advisory = false) =>
+    checks.push({ name, ok: passed, ...(detail ? { detail } : {}), ...(advisory ? { advisory: true } : {}) });
+
+  // 🔴 A recorded failure must fail the run.
+  //
+  // The root check used to `record(..., false)`, print a yellow "!", and let the run finish green —
+  // so `--json` emitted `ok: true` with a failed check sitting inside it, and the exit code said
+  // fine. That is exactly the shape of a Secured deployment quietly serving a Tier-0 config: root
+  // stops redirecting to /admin, verify shrugs, and nothing tells you the deployment drifted.
+  const allPassed = () => checks.every((c) => c.advisory || c.ok);
 
   // All human narration flows through these; in --json mode they go silent so stdout is pure JSON.
   const say = (s = "") => {
@@ -215,13 +227,27 @@ export async function verifyCmd({ json = false } = {}) {
     }
   }
 
-  // The bearer gates both the MCP smoke and the sample publish. No token → skip both (still a pass).
-  const bearer = fromEnv("PAGEVAULT_API_TOKEN");
+  // The bearer gates both the MCP smoke and the sample publish — which is to say, everything this
+  // command exists to check.
+  //
+  // It can live in either of two places: `.env.local` (a repo run, or an install where `init` minted
+  // it) or the CLI's login config (an install where `init` was handed one, so nothing was written to
+  // `.env.local`). Reading only the first made verify skip its core checks on a perfectly healthy
+  // installed deployment.
+  //
+  // And skipping used to PASS. "✓ Deployment verified" while silently testing none of the MCP
+  // surface, the write path, or authentication is worse than a failure — on a Worker deployed
+  // without a bearer at all it reported success for something unusable. A verifier that cannot run
+  // its checks has no verdict to give, so it says so and exits non-zero.
+  const bearer = fromEnv("PAGEVAULT_API_TOKEN") || loadConfig({}).token;
   if (!bearer) {
-    record("mcp", false, "skipped — no bearer");
-    say(`\n  ${c.yellow("!")} No ${c.bold("PAGEVAULT_API_TOKEN")} in .env.local — skipping the MCP + publish checks.`);
-    say(`  ${c.dim("Re-run `pagevault init` (it saves the token), or add it by hand, then verify again.")}\n`);
-    return finish(true, { skipped: "auth_checks" });
+    record("mcp", false, "no bearer available");
+    say(`\n  ${c.red("✗")} No ${c.bold("PAGEVAULT_API_TOKEN")} to authenticate with — the MCP and publish checks cannot run.`);
+    say(`  ${c.dim("This is not a verdict on the deployment; it is this machine having no way to test it.")}`);
+    say(`  ${c.dim("Looked in the environment, .env.local, and the CLI login config.")}`);
+    say(`\n  ${c.dim("If the deployment is yours:")} ${c.bold(runHint("deploy", "init"))} ${c.dim("mints and saves one.")}`);
+    say(`  ${c.dim("If it is someone else's:")} ${c.bold("pagevault login --url <url> --token <bearer>")}\n`);
+    return finish(false, { reason: "no_bearer" });
   }
 
   // --- 3. The MCP surface actually answers (#75) — the reason the project exists (ADR-006) -----
@@ -299,7 +325,7 @@ export async function verifyCmd({ json = false } = {}) {
     // OAuth discovery exists only once #22 is deployed. A bearer-only (Tier-0/pre-#22) deploy
     // legitimately has none — report the mode, don't fail.
     const { status } = await get("/.well-known/oauth-authorization-server");
-    record("oauth_discovery", status === 200, status === 200 ? "live" : "bearer-only");
+    record("oauth_discovery", status === 200, status === 200 ? "live" : "bearer-only", true);
     status === 200
       ? say(`  ${c.green("✓")} OAuth discovery live ${c.dim("— claude.ai web/Desktop/mobile can connect")}`)
       : say(`  ${c.dim("○ OAuth not deployed — bearer-only (Claude Code). Expected pre-#22.")}`);
@@ -311,7 +337,7 @@ export async function verifyCmd({ json = false } = {}) {
   const welcomePath = "examples/welcome.html";
   if (!existsSync(welcomePath)) {
     say(`\n  ${c.dim("○ No examples/welcome.html here — skipping the sample publish (installed verify).")}\n`);
-    return finish(true, { published: false });
+    return finish(allPassed(), { published: false });
   }
 
   say(`\n  Publishing your first document ${c.dim("(examples/welcome.html)…")}`);
@@ -356,5 +382,5 @@ export async function verifyCmd({ json = false } = {}) {
   say(`\n     ${c.blue(publicUrl || base)}\n`);
   say(`  ${c.dim("That page explains what just happened and proves the sandbox. Delete it whenever;")}`);
   say(`  ${c.dim("it was only a hello. Next: connect Claude to")} ${c.bold(base + "/mcp")} ${c.dim("with your bearer token.")}\n`);
-  return finish(true, { published: true, publicUrl: publicUrl || null });
+  return finish(allPassed(), { published: true, publicUrl: publicUrl || null });
 }

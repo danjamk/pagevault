@@ -217,6 +217,35 @@ test("login with neither flags nor env errors with its usage", () => {
   assert.match(`${r.stdout}${r.stderr}`, /Usage: pagevault login/);
 });
 
+test("tierFromAnswer: numbers, words, the default, and a refusal", async () => {
+  const { tierFromAnswer } = await import("./lib/provision/setup.mjs");
+
+  // The prompt is numbered because `Public or Secured? [public]` — capitalised words against a
+  // lowercase default — left people unsure what to type. Numbers are the documented answer; words
+  // keep working for anyone who types what they can see.
+  assert.equal(tierFromAnswer("1", "public"), "public");
+  assert.equal(tierFromAnswer("2", "public"), "secured");
+
+  // Enter keeps the default, whichever way it points — this is what makes a re-run an edit.
+  assert.equal(tierFromAnswer("", "public"), "public");
+  assert.equal(tierFromAnswer("", "secured"), "secured");
+  assert.equal(tierFromAnswer("   ", "secured"), "secured");
+
+  // Words, any prefix, any case, with stray whitespace.
+  for (const yes of ["s", "sec", "secured", "SECURED", " Secured "]) {
+    assert.equal(tierFromAnswer(yes, "public"), "secured", `${JSON.stringify(yes)} should mean Secured`);
+  }
+  for (const no of ["p", "pub", "public", "PUBLIC"]) {
+    assert.equal(tierFromAnswer(no, "secured"), "public", `${JSON.stringify(no)} should mean Public`);
+  }
+
+  // Anything else is null, so the caller can say what to type instead of guessing a tier. Getting
+  // this wrong provisions Zero Trust — or fails to — against the operator's intent.
+  for (const bad of ["x", "3", "0", "yes", "priv"]) {
+    assert.equal(tierFromAnswer(bad, "public"), null, `${JSON.stringify(bad)} should be refused`);
+  }
+});
+
 test("stripDiscoveredState drops every id destroy deleted, and keeps the operator's intent", async () => {
   const { stripDiscoveredState } = await import("./lib/ops/destroy.mjs");
 

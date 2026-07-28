@@ -25,7 +25,7 @@ decision tree and the failure guide that sit on top of them.
   - `--public` / `pagevault mint` mints a link *anyone* who gets it can open, no login.
   - `pagevault destroy` deletes the deployment and its documents.
   - Publishing over an existing document with the same filename replaces it in place.
-- **Never invent a portal name.** If the person is running a client practice (tier 3) and it's
+- **Never invent a portal name.** If the person is running a client practice (Secured, with portals) and it's
   ambiguous which client a document belongs to, ask.
 
 ---
@@ -40,19 +40,32 @@ Ask the person one question: **do they want to read or change PageVault's code?*
 Both end at the same deployed PageVault. The npm path carries a prebuilt Worker, so nothing is
 compiled locally; the clone path runs the same code from source.
 
-## Step 2 — Which tier?
+## Step 2 — Public or Secured?
 
-Match their goal to a tier (full table in the [README](../../README.md#is-this-for-you)):
+There are **two tiers**, and `init` asks for them by name — `1` for Public, `2` for Secured
+([ADR-018](../adr/ADR-018-public-and-secured-tiers.md)). Match their goal:
 
 | They say… | Tier | What it needs |
 |---|---|---|
-| "I just need to hand someone a report" | **1** | a Cloudflare account, nothing else — public links on `workers.dev`, **no domain, no card** |
-| "Only named people should open it, on my own domain" | **2** | a domain in the same Cloudflare account, and Zero Trust turned on (**a card on file — nothing is charged**) |
-| "I have recurring clients and want a portal per client" | **3** | same as tier 2, plus portals |
+| "I just need to hand someone a report" | **Public** | a Cloudflare account, nothing else — links anyone with the URL can open, on `workers.dev`, **no domain, no card** |
+| "…and I want it on my own domain" | **Public** | the same, plus a domain already in that Cloudflare account. Still public — a domain changes the address, not who can read it |
+| "Only named people should be able to open it" | **Secured** | a domain, **and** Zero Trust turned on (**a card on file — nothing is charged**) |
+| "I have recurring clients and want a portal per client" | **Secured** | the same. Portals are how Secured organizes clients, not a separate tier |
 
-**Start at tier 1 unless they clearly need more.** It's the fastest to a working link, needs no card,
-and every higher tier is additive later (`pagevault init` re-run to climb). The real jump is 1 → 2
-(that's where Zero Trust and the card-on-file come in) — set expectations there honestly.
+🔴 **Be precise about this, because it is the one place a mistake is silent.** A domain does **not**
+make documents private. Public with a custom domain still means anyone holding the URL can read the
+document. Access control starts at Secured, and nowhere earlier. If the person says "only my client
+should see this", they need **Secured** — do not let a domain stand in for it.
+
+**Start at Public unless they clearly need named-people access.** It reaches a working link fastest,
+needs no card, and Secured is additive later — re-run `pagevault init` to climb, and every document
+carries across keeping its name and its place. The real jump is Public → Secured: that is where Zero
+Trust and the card-on-file come in, so set expectations there honestly.
+
+One thing to say out loud when they climb: **the links they already shared will stop working.** The
+hostname moves, so a URL handed out under the old address no longer resolves. Their documents survive
+untouched; the links do not. Documents published while Public also keep their public links after the
+climb — correct, but worth naming, and `pagevault list --json` shows which ones (`"public": true`).
 
 ## Step 3 — Prerequisites
 
@@ -64,8 +77,11 @@ Confirm the person has these before touching a command. Details and the exact to
    an older Node, point them at [nvm](https://github.com/nvm-sh/nvm).
 3. **A Cloudflare API token** — created at
    <https://dash.cloudflare.com/profile/api-tokens>. Have them grant **all** the scopes in the README
-   table now, even at tier 1, so climbing later never means re-scoping.
-4. **(Tier 2+) a domain** already added to that same Cloudflare account.
+   table now, even for Public, so climbing later never means re-scoping.
+4. **(a domain, for Secured or for Public-on-your-own-domain)** already added to that same
+   Cloudflare account.
+5. **(Secured only) Zero Trust enabled** on the account — this is the step that asks for a card,
+   and the one that cannot be automated.
 
 ## Step 4 — Install and deploy
 
@@ -76,7 +92,7 @@ npm install -g pagevault
 pagevault init
 ```
 
-`pagevault init` is interactive: it takes the API token, asks which tier, confirms the Cloudflare
+`pagevault init` is interactive: it takes the API token, asks Public or Secured, confirms the Cloudflare
 account it will deploy to, provisions, deploys the Worker, and writes the person's config to
 `~/.pagevault/`. Walk them through each prompt. When it finishes, the CLI is already pointed at their
 deployment — no separate login.
@@ -86,7 +102,7 @@ deployment — no separate login.
 ```bash
 git clone https://github.com/danjamk/pagevault
 cd pagevault
-make setup       # decide the tier, get the repo ready
+make setup       # Public or Secured, and get the repo ready
 make preflight   # read-only check that the account is ready
 make deploy      # provision + deploy
 make verify      # smoke-test, and publish a first document
@@ -111,8 +127,11 @@ browser right then. That open is the proof it works.
 pagevault publish report.html --public
 ```
 
-This prints a `/p/` link anyone can open. If they instead want it limited to named people (tier 2+),
-use `--emails a@b.com,c@d.com` and *not* `--public`. Confirm before minting any public link.
+This prints a `/p/` link anyone can open. To limit a document to named people they need **Secured** —
+then publish without `--public`, and either put the person in the portal
+(`pagevault share <portal> <email>`) or grant them the one document with
+`--emails a@b.com,c@d.com`. On a Public deployment there is nobody to check a name against, so a
+plain publish is public by nature. Confirm before minting any public link.
 
 For publishing from inside a chat (the MCP server), send them to
 [connect-mcp.md](connect-mcp.md) once the deployment is up.
@@ -127,7 +146,7 @@ For publishing from inside a chat (the MCP server), send them to
 | deploy fails mentioning **Node** or a syntax error | they're on Node < 22 | switch to Node 22 (nvm), re-run |
 | the account named at deploy is **not the one they meant** | the token reaches a different account | use the token for the intended account; PageVault refuses to deploy to the wrong one on purpose |
 | the published link **404s for a few seconds** | Cloudflare KV is eventually consistent | wait a moment and refresh — the CLI already polls, so this is brief |
-| `/admin` or `/v/` returns **Forbidden** at tier 1 | correct — there's no Access at tier 1, so those doors fail closed | ignore it until they climb to tier 2 |
+| `/admin` or `/v/` is refused on a **Public** deployment | correct — there is no Access there, so those doors fail closed | ignore it unless they climb to Secured |
 | a brand-new `workers.dev` URL isn't live yet | a fresh subdomain can take a minute to route | wait and re-run `pagevault verify` |
 
 If you're stuck, the full design and every command are in the
@@ -137,7 +156,8 @@ If you're stuck, the full design and every command are in the
 
 ## Undoing it
 
-Tiers 1–2 undo cleanly. To tear a deployment down:
+Public undoes cleanly; Secured leaves Zero Trust itself and any consumed Access seats behind
+(deliberately — they are account-wide). To tear a deployment down:
 
 ```bash
 pagevault destroy          # asks for confirmation; --keep-data leaves the documents

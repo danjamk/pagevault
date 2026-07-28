@@ -42,6 +42,9 @@ export async function deploy(opts = {}) {
   const row = (label, val) => console.log(`  ${c.cyan(label.padStart(12))}  ${val}`);
   row("Deploying to", acct(target));
   row("Owner", ctx.ownerEmail);
+  // The tier belongs in the block you are saying y/N to. It was only in the banner above, which is
+  // easy to scroll past — and it is the line that decides whether strangers can open your documents.
+  row("Tier", ctx.rung >= 3 ? `${c.bold("Secured")} ${c.dim("— named people only, via Cloudflare Access")}` : `${c.bold("Public")} ${c.dim("— anyone with the link")}`);
   row("URL", c.bold(targetUrl));
   console.log();
   if (isInteractive()) {
@@ -79,6 +82,37 @@ export async function deploy(opts = {}) {
       if (!put.ok) die(`Couldn't register "${name}.workers.dev" (${cfErr(put.errors)}).`, "That name may be taken — re-run and pick another.");
       ok(`Registered ${c.bold(`${name}.workers.dev`)}`);
     }
+  }
+
+  // --- 0c. 🔴 The bearer question, asked BEFORE anything is built ------------
+  //
+  // PAGEVAULT_API_TOKEN is what the CLI and MCP server authenticate with. Without it a deployed
+  // Worker is live and unusable: every /api call 401s, `list` says "Not configured", and there is
+  // no way in.
+  //
+  // This check used to sit AFTER the deploy, so a non-interactive run with no bearer — which is
+  // exactly what `pagevault init --yes` is on a fresh machine — deployed a Worker, went live, and
+  // then died. It left a half-provisioned deployment and told the operator to "run init once
+  // locally", which is what they had just run. Refusing before the deploy costs nothing and leaves
+  // the account untouched.
+  //
+  // Asking now is safe: a Worker that does not exist yet has no secrets, so the lookup fails and
+  // hasSecret is correctly false.
+  const existing = await cfApi(`/accounts/${target.id}/workers/scripts/pagevault/secrets`);
+  const hasSecret = existing.ok && (existing.result ?? []).some((s) => s.name === "PAGEVAULT_API_TOKEN");
+  const bearer = chooseBearer({ hasSecret, provided: fromEnv("PAGEVAULT_API_TOKEN"), interactive: isInteractive() });
+
+  if (bearer.action === "fail") {
+    die("No PAGEVAULT_API_TOKEN on the Worker, and none provided, in a non-interactive deploy.", [
+      "  Nothing was deployed — a Worker without this bearer is live and unusable, so this stops here.",
+      "",
+      "  This is a fresh deployment with no way to authenticate to it yet. Give it one:",
+      `    • run \`${runHint("deploy", "init")}\` WITHOUT --yes, and it mints and saves the bearer for you, or`,
+      "    • provide one yourself:",
+      "        export PAGEVAULT_API_TOKEN=$(openssl rand -hex 32)",
+      `        ${runHint("deploy", "init --yes")}`,
+      "      (in CI, set it as a GitHub Environment secret instead)",
+    ]);
   }
 
   // --- 1. Generate the tier-appropriate config -------------------------------
@@ -148,13 +182,11 @@ export async function deploy(opts = {}) {
   //
   // PAGEVAULT_API_TOKEN is what the CLI and MCP server authenticate with (a different token from
   // the Cloudflare one). The token model lets us set it via the API, so there is no `wrangler
-  // secret put` step to run by hand in a wrong-Node shell. Which value to use is a policy — see
-  // chooseBearer: reuse what the Worker has (never rotate a live bearer), else the provided value
-  // (a GitHub Environment secret in CI), else mint one interactively. A CI deploy into a fresh
-  // Worker with no provided bearer FAILS rather than minting a throwaway prod token on the runner.
+  // secret put` step to run by hand in a wrong-Node shell. Which value to use was decided in 0c,
+  // before the deploy — reuse what the Worker has (never rotate a live bearer), else the provided
+  // value (a GitHub Environment secret in CI), else mint one interactively. The `fail` case never
+  // reaches here: it stops the run before anything is built.
 
-  const existing = await cfApi(`/accounts/${target.id}/workers/scripts/pagevault/secrets`);
-  const hasSecret = existing.ok && (existing.result ?? []).some((s) => s.name === "PAGEVAULT_API_TOKEN");
   const setBearer = (value) =>
     cfApi(`/accounts/${target.id}/workers/scripts/pagevault/secrets`, {
       method: "PUT",
@@ -162,7 +194,6 @@ export async function deploy(opts = {}) {
     });
 
   console.log();
-  const bearer = chooseBearer({ hasSecret, provided: fromEnv("PAGEVAULT_API_TOKEN"), interactive: isInteractive() });
 
   // The bearer we end up with in plaintext, if any — used just below to write the installed CLI's
   // login config. Set only on a known-good state (the secret is live and this value is it).
@@ -173,13 +204,6 @@ export async function deploy(opts = {}) {
     // Worker already has it; the plaintext isn't on the Worker (secrets are write-only), but a
     // re-deploy from the same install has it in .env.local — enough to (re)write the login config.
     bearerValue = fromEnv("PAGEVAULT_API_TOKEN");
-  } else if (bearer.action === "fail") {
-    die("No PAGEVAULT_API_TOKEN on the Worker, and none provided, in a non-interactive deploy.", [
-      "  This looks like a CI deploy into a fresh Worker. Minting a random bearer here would strand it",
-      "  on a throwaway runner — your CLI and MCP clients would never learn it. Provide the bearer instead:",
-      "    • set PAGEVAULT_API_TOKEN as a GitHub Environment secret, or",
-      `    • run \`${runHint("deploy", "init")}\` once locally (it mints and saves the bearer).`,
-    ]);
   } else if (bearer.action === "set") {
     const put = await setBearer(bearer.value);
     if (put.ok) {

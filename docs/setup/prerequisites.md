@@ -1,8 +1,8 @@
 # Prerequisites
 
-What you need depends on how far up [the ladder](../design/onboarding-experience.md)
-you climb. Most people start at **rung 1** — publish public links — which needs
-very little and costs nothing.
+What you need depends on which tier you choose. Most people start at **Public** —
+links anyone with the URL can open — which needs very little and costs nothing.
+**Secured** adds named-people access control, and with it a domain and Zero Trust.
 
 `make preflight` checks all of this for you and names anything missing, so you don't
 have to work through this list by hand. This page is the human reference: what each
@@ -13,7 +13,7 @@ if you don't have it).
 
 ---
 
-## Rung 1 — publish public links
+## Public — links anyone with the URL can open
 
 Everything here is free, and none of it needs a credit card.
 
@@ -23,7 +23,7 @@ The Worker, the KV store, and your links all live on Cloudflare's free tier.
 
 - **Check:** you can sign in at <https://dash.cloudflare.com>.
 - **Get it:** sign up at <https://dash.cloudflare.com/sign-up>. The free plan is
-  enough for rungs 1 and 2. No card required at this rung.
+  enough for Public, with or without your own domain. No card required.
 
 ### Node.js 22 or newer
 
@@ -51,18 +51,18 @@ The repo's package manager.
 
 ### A Cloudflare API token
 
-This is how PageVault reaches your account — at **every** rung. A token is explicit and
+This is how PageVault reaches your account — at **both** tiers. A token is explicit and
 lives per-clone in `.env.local`, so a deploy can never drift to the wrong account the way
 a machine-wide login can. It also lets the tooling do everything over the API: create the
 KV, register your workers.dev subdomain, set your bearer secret — no interactive prompts.
 
 Create it at [API Tokens](https://dash.cloudflare.com/profile/api-tokens) → *Create Custom
-Token*. Rung 1 needs three scopes; grant the whole set once so climbing never means
+Token*. Public needs three scopes; grant the whole set once so climbing never means
 re-scoping:
 
 **Account** — `Workers Scripts` (Edit) · `Workers KV Storage` (Edit) · `Account Settings`
-(Read)  ← *rung 1*
-plus for rungs 2–3: `Workers Routes` (Edit) · `DNS` (Edit) · `Access: Apps and Policies` (Edit) ·
+(Read)  ← *Public*
+plus for a domain and for Secured: `Workers Routes` (Edit) · `DNS` (Edit) · `Access: Apps and Policies` (Edit) ·
 `Access: Organizations, Identity Providers, and Groups` (Edit — *groups hide here, easy to miss*)
 
 - **Save it:** `echo 'CLOUDFLARE_API_TOKEN=…' > .env.local`  (gitignored, never committed)
@@ -79,13 +79,13 @@ you want, point the tooling at the right account with an API token.
 
 **1. Create a token** in the *target* account's dashboard →
 [API Tokens](https://dash.cloudflare.com/profile/api-tokens) → *Create Custom Token*.
-For rung 1 (publish) it needs three scopes:
+For Public it needs three scopes:
 
 - `Workers Scripts` — Edit
 - `Workers KV Storage` — Edit
 - `Account Settings` — Read
 
-(Rung 3 needs the fuller set below.)
+(Secured needs the fuller set below.)
 
 **2. Put it in `.env.local`** at the repo root — gitignored, never committed:
 
@@ -104,9 +104,11 @@ If it still shows the wrong one, the token isn't being read: check the file is
 
 ---
 
-## Rung 2 — put it on your domain
+## Public, on your own domain
 
-One more thing on top of rung 1.
+One more thing on top of the above. Note this changes the *address*, not who can read a
+document — a Public deployment on your own domain is still public. Access control starts
+at Secured.
 
 ### A domain, in the same Cloudflare account
 
@@ -125,9 +127,9 @@ lives in a different account.
 
 ---
 
-## Rung 3 — client portals (email-secured)
+## Secured — named people, and client portals
 
-This is the rung that turns on Cloudflare Access, and the only one with a real cost
+This is the tier that turns on Cloudflare Access, and the only one with a real cost
 of entry.
 
 ### Cloudflare Zero Trust, enabled

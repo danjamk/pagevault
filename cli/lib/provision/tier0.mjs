@@ -125,6 +125,9 @@ export async function writeTier0Config(opts = {}) {
     .replace(/"OWNER_EMAIL": ""/, `"OWNER_EMAIL": "${ownerEmail}"`)
     .replace(/"PAGEVAULT_VERSION": ""/, `"PAGEVAULT_VERSION": "${version}"`)
     .replace(/"PAGEVAULT_DEPLOYED_AT": ""/, `"PAGEVAULT_DEPLOYED_AT": "${new Date().toISOString()}"`)
+    // Attribution is on unless the operator set `branding: false`. Only the "off" value is written,
+    // so an untouched config leaves the blank default — which shows the mark.
+    .replace(/"PAGEVAULT_BRANDING": ""/, `"PAGEVAULT_BRANDING": "${ctx.branding === false ? "off" : ""}"`)
     .replace(/"workers_dev": false/, `"workers_dev": ${workersDev}`);
 
   // 🔴 Pin the deploy to the account preflight verified. Without this, wrangler falls back to

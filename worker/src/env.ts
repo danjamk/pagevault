@@ -32,6 +32,13 @@ export interface Env {
    */
   PAGEVAULT_DEPLOYED_AT?: string;
 
+  /**
+   * `"off"` hides the "Powered by PageVault" mark on client-facing surfaces. Anything else — including
+   * unset — shows it, so a missing var degrades to the visible default rather than silently stripping
+   * attribution. See `showBranding()` in theme.ts.
+   */
+  PAGEVAULT_BRANDING?: string;
+
   /** Vars — plaintext, written into wrangler.jsonc by the provisioning script. */
   OWNER_EMAIL: string;
   CF_TEAM_NAME: string;

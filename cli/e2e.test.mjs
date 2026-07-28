@@ -505,6 +505,26 @@ describe("CLI against a live Worker — Secured (Access enabled)", { timeout: 18
     assert.match(r.stderr, new RegExp(`pagevault mint ${id}`));
   });
 
+  it("share attempts the Access group sync inline — it is not deferred to sync-access", () => {
+    // B4 from a fresh-machine run claimed `share` did not sync the group. It does: updatePortalMembers
+    // calls syncGroupMembers on every addition. What that run actually hit was a deployment whose
+    // config had been clobbered to Tier-0, leaving CF_ACCOUNT_ID and CF_ACCESS_GROUP_ID blank — so the
+    // sync had nowhere to go and reported "not_configured".
+    //
+    // This harness has the same shape on purpose: Access is "enabled" (team + AUD) but there is no
+    // account or group id, because Miniflare cannot hold a real Cloudflare Access group. So the
+    // assertion is not "the group changed" — it is that the sync was ATTEMPTED and its outcome
+    // surfaced, which is the part that was in doubt. The real group mutation is covered by the live
+    // lifecycle ritual, where sync-access afterwards reports nothing left to add.
+    const r = ok(run, "share", "acme", "newperson@acme.test");
+    assert.match(r.stderr, /Granted newperson@acme\.test to portal "acme"/);
+    assert.match(r.stderr, /Access group sync: not_configured/,
+      "share must report the sync outcome, not stay silent about it");
+    // And it must say what that means, in both directions — the bare status is what got misread.
+    assert.match(r.stderr, /no Cloudflare Access group on this deployment/i);
+    assert.match(r.stderr, /Secured: the deployment is misconfigured/);
+  });
+
   it("publishing with --emails records the grant and echoes it back", () => {
     const file = fixture(scratch, "granted.html", "<!doctype html><title>Granted</title><h1>g</h1>");
     const r = ok(run, "publish", file, "--portal", "acme", "--emails", "cfo@acme.test,vp@acme.test");
@@ -512,5 +532,133 @@ describe("CLI against a live Worker — Secured (Access enabled)", { timeout: 18
     assert.match(r.stderr, /Granted to: cfo@acme\.test, vp@acme\.test/);
     const id = JSON.parse(ok(run, "list", "--portal", "acme", "--json").stdout).find((d) => d.name === "granted.html").id;
     assert.deepEqual(JSON.parse(ok(run, "read", id, "--json").stdout).extraEmails, ["cfo@acme.test", "vp@acme.test"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// `verify` — the command whose entire job is telling you whether a deployment
+// works, and which until now had no automated coverage at all.
+//
+// It repeatedly reported success it had not earned: passing while skipping every
+// authenticated check, and passing with a recorded failure sitting inside its own
+// JSON. Both shipped, and both were found by a human driving a real install. The
+// invariant these tests exist to hold is small and absolute — **the verdict must
+// agree with the checks** — and it is asserted on every scenario below, not just
+// the ones designed to fail.
+// ---------------------------------------------------------------------------
+
+/**
+ * Drive `pagevault verify --json` against a booted Worker with a synthetic deployment context.
+ *
+ * `verify` reads its target from `.pagevault.json`, not from PAGEVAULT_URL, so the context is
+ * written rather than passed — which is also what lets a test claim `rung: 3` against a Worker that
+ * has no Access, the exact drift a clobbered deployment produces. HOME and PAGEVAULT_HOME are both
+ * redirected so the operator's real config can never supply a bearer this test did not choose.
+ */
+function runVerify(base, { rung = 1, bearer = BEARER, deployed = true } = {}) {
+  const home = mkdtempSync(join(tmpdir(), "pv-verify-"));
+  const ctx = { rung, ownerEmail: OWNER, accountId: "acct", schemaVersion: 1 };
+  if (deployed) ctx.deployedUrl = base;
+  writeFileSync(join(home, ".pagevault.json"), `${JSON.stringify(ctx, null, 2)}\n`);
+  if (bearer) writeFileSync(join(home, ".env.local"), `PAGEVAULT_API_TOKEN=${bearer}\n`);
+
+  const r = spawnSync(process.execPath, [BIN, "verify", "--json"], {
+    encoding: "utf8",
+    env: { ...process.env, HOME: home, PAGEVAULT_HOME: home, PAGEVAULT_URL: "", PAGEVAULT_API_TOKEN: "" },
+  });
+  rmSync(home, { recursive: true, force: true });
+
+  let json = null;
+  try {
+    json = JSON.parse(r.stdout);
+  } catch {
+    /* a crash, or non-JSON on stdout — the assertions below will say so */
+  }
+  return { status: r.status ?? 1, json, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+
+/**
+ * The invariant. A verdict that disagrees with its own checks is the bug class this suite exists
+ * for, so it is asserted on every run regardless of what that run was testing.
+ */
+function verdictAgreesWithChecks({ status, json }) {
+  assert.ok(json, "verify --json must emit parseable JSON on stdout");
+  const decisive = (json.checks ?? []).filter((c) => !c.advisory);
+  const expected = decisive.every((c) => c.ok);
+  assert.equal(json.ok, expected, `ok:${json.ok} but decisive checks were ${JSON.stringify(decisive)}`);
+  assert.equal(status, json.ok ? 0 : 1, "exit code must match the verdict — scripts read the code, not the JSON");
+}
+
+describe("verify against a live Worker", { timeout: 180_000 }, () => {
+  let worker;
+
+  before(async () => {
+    // No Access, so root serves the landing page. A rung-1 context expects exactly that; a rung-3
+    // context expects a redirect and will therefore fail — which is the drift test below.
+    worker = await startWorker({ access: false });
+  });
+
+  after(() => worker?.stop());
+
+  it("passes a healthy deployment, and every check it claims to have run is in the JSON", () => {
+    const r = runVerify(worker.base);
+    verdictAgreesWithChecks(r);
+    assert.equal(r.status, 0, `expected a pass, got:\n${r.stdout}${r.stderr}`);
+
+    // The checks that make this command worth running: it proved the Worker is ours, that /mcp
+    // speaks the protocol, and that a document can be written and read back through the MCP tools.
+    const names = r.json.checks.map((c) => c.name);
+    for (const required of ["worker_live", "root", "mcp_initialize", "mcp_tools", "mcp_roundtrip"]) {
+      assert.ok(names.includes(required), `${required} should have run`);
+    }
+    assert.equal(r.json.checks.find((c) => c.name === "mcp_roundtrip").ok, true);
+  });
+
+  it("FAILS when a check fails, rather than warning and exiting 0", () => {
+    // The regression. A rung-3 context against a Worker with no Access is precisely the shape of a
+    // Secured deployment redeployed with a Tier-0 config: root stops redirecting to /admin. That
+    // check recorded false, printed a yellow "!", and the run finished green — so `--json` said
+    // ok:true with a failed check inside it, and a script reading the exit code saw success.
+    const r = runVerify(worker.base, { rung: 3 });
+    verdictAgreesWithChecks(r);
+
+    assert.equal(r.status, 1, "a Secured deployment not redirecting root must fail");
+    assert.equal(r.json.ok, false);
+    assert.equal(r.json.checks.find((c) => c.name === "root").ok, false);
+    // Everything else was healthy — the point is that one decisive failure is enough.
+    assert.equal(r.json.checks.find((c) => c.name === "worker_live").ok, true);
+  });
+
+  it("refuses to pass when it has no bearer to authenticate with", () => {
+    // It used to report "Deployment verified" here, having tested none of the MCP surface, the write
+    // path, or authentication. A verifier that cannot run its checks has no verdict to give.
+    const r = runVerify(worker.base, { bearer: null });
+    verdictAgreesWithChecks(r);
+    assert.equal(r.status, 1);
+    assert.equal(r.json.reason, "no_bearer");
+    assert.ok(!(r.json.checks ?? []).some((c) => c.name === "mcp_roundtrip"), "it must not claim a round-trip it never ran");
+  });
+
+  it("fails on a bearer the Worker rejects, and says which stage broke", () => {
+    const r = runVerify(worker.base, { bearer: "not-the-right-token" });
+    verdictAgreesWithChecks(r);
+    assert.equal(r.status, 1);
+    assert.equal(r.json.reason, "mcp_initialize");
+  });
+
+  it("reports nothing-deployed instead of probing a URL it does not have", () => {
+    const r = runVerify(worker.base, { deployed: false });
+    assert.equal(r.status, 1);
+    assert.equal(r.json?.reason, "not_deployed");
+  });
+
+  it("an absent OAuth server is advisory — it does not sink an otherwise healthy run", () => {
+    // oauth_discovery is reported as a fact, not a fault: a bearer-only deployment legitimately has
+    // none. Whatever this deployment answers, the check must never be the reason a run fails.
+    const r = runVerify(worker.base);
+    const oauth = r.json.checks.find((c) => c.name === "oauth_discovery");
+    assert.ok(oauth, "oauth_discovery should be reported either way");
+    if (!oauth.ok) assert.equal(oauth.advisory, true, "a failing oauth_discovery must be marked advisory");
+    assert.equal(r.json.ok, true);
   });
 });
