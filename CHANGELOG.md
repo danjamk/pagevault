@@ -7,6 +7,13 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.23.1] — 2026-07-28
+
+Two checks in this release could not fail, and both were believed because of it. `restore` refused
+on "is the namespace empty?" — a question whose answer says nothing about what a restore would
+destroy — and `verify` asserted nine MCP tools against a Worker that registers twelve. The docs had
+drifted the same way, so the checks that catch it are now a build step rather than an audit.
+
 ### Fixed
 - **`restore` asked the wrong question.** It probed ten keys and refused if any came back, so a
   namespace holding one throwaway sample document got the same flat "not empty" as one holding a
@@ -798,7 +805,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.23.1...HEAD
+[0.23.1]: https://github.com/danjamk/pagevault/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/danjamk/pagevault/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/danjamk/pagevault/compare/v0.21.0...v0.22.0
 [0.2.0]: https://github.com/danjamk/pagevault/compare/v0.1.0...v0.2.0
