@@ -27,7 +27,12 @@ jobs:
       # Fails the build if a doc describes something the code doesn't do — dead routes, commands
       # that don't exist, MCP tools that aren't registered, broken links. Every instance found so
       # far was mechanical and had survived months of people reading the page.
-      - run: make check-docs
+      #
+      # Invoked directly, not via `make check-docs`. Every make target except check-sandbox is
+      # prefixed with $(NVM), which sources ~/.nvm/nvm.sh — absent on a runner using
+      # actions/setup-node, so the recipe dies before the script runs. Same reason `pnpm test` and
+      # the node --test suites below are called directly. `make check-docs` remains the local door.
+      - run: node scripts/check-docs.mjs
 
       - run: pnpm typecheck
 
