@@ -44,10 +44,15 @@ new dependency is genuinely the right call, open an issue and make the argument.
 ```bash
 make setup     # install deps and check your environment (Node 22)
 make dev       # run the Worker locally against Miniflare
-make test      # vitest + @cloudflare/vitest-pool-workers, and the node --test suites
-make test-e2e  # the CLI driven against a real Worker (boots its own wrangler dev)
-make help      # every target
+make test        # vitest + @cloudflare/vitest-pool-workers, and the node --test suites
+make test-e2e    # the CLI driven against a real Worker (boots its own wrangler dev)
+make check-docs  # fail if a doc describes something the code doesn't do
+make help        # every target
 ```
+
+`check-docs` runs in CI. It compares prose against the thing that defines it — links and anchors,
+`make` targets, CLI commands, MCP tools, route names — so a renamed command or a deleted route
+fails the build instead of quietly outliving itself in the README. It has no opinion about style.
 
 Tests earn their place — write them where they'd catch a real regression, not for coverage's sake,
 and test against real infrastructure rather than mocking everything. Node 22 is required (Wrangler 4

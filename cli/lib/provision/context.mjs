@@ -284,7 +284,14 @@ export const cfErr = (errors = []) => errors.map((e) => `[${e.code}] ${e.message
 // caller lives here. The MCP server is the reason the project exists (ADR-006) — a
 // deploy that serves docs but not `/mcp` is broken, and nothing used to catch that.
 
-/** The tools `/mcp` must expose. A missing one means a registration regression (#75). */
+/**
+ * The tools `/mcp` must expose. A missing one means a registration regression (#75).
+ *
+ * This must list EVERY tool `worker/src/mcp.ts` registers. It drifted to nine while the Worker
+ * served twelve, which meant `verify` reported a healthy MCP surface with `revoke_public_link`,
+ * `rotate_public_link` and `server_info` absent — a check that cannot fail is worse than no check,
+ * because it is believed. `cli/mcp-tools.test.mjs` now pins the two lists together.
+ */
 export const EXPECTED_MCP_TOOLS = [
   "publish_document",
   "read_document",
@@ -294,7 +301,10 @@ export const EXPECTED_MCP_TOOLS = [
   "create_portal",
   "update_portal_members",
   "mint_public_link",
+  "revoke_public_link",
+  "rotate_public_link",
   "revoke_document",
+  "server_info",
 ];
 
 /**

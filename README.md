@@ -9,13 +9,15 @@ from Claude, ChatGPT, Gemini, Copilot, or any MCP-capable tool, without leaving 
 where you made it. Self-hosted on Cloudflare's free tier. Whoever you send it to installs
 nothing and signs up for nothing — no account, on any platform.
 
+[![npm](https://img.shields.io/npm/v/pagevault?color=34507A&label=npm)](https://www.npmjs.com/package/pagevault) &nbsp;
 ![License: MIT](https://img.shields.io/badge/License-MIT-34507A) &nbsp;
-![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-34507A) &nbsp;
-![Version](https://img.shields.io/badge/version-0.21.0-34507A)
+![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-34507A)
 
 > **Pre-1.0 and honest about it.** [Status](#status) says what works today and what
 > doesn't. This README is the setup guide — the product argument lives on the
-> [product page](https://danjamk.github.io/pagevault).
+> [product page](https://danjamk.github.io/pagevault), and there's a
+> [live showcase](https://pagevault.danjamkuhn.com/pub/showcase) running on PageVault
+> itself if you'd rather just look at the thing.
 
 ---
 
@@ -84,7 +86,7 @@ from a deployed PageVault.
 
 | | Pick this when | How |
 |---|---|---|
-| **npm** *(recommended)* | you just want it running | `npm install -g pagevault && pagevault init` |
+| **[npm](https://www.npmjs.com/package/pagevault)** *(recommended)* | you just want it running | `npm install -g pagevault && pagevault init` |
 | **git clone** | you want to read or change the code | `git clone`, then `make setup && make deploy && make verify` |
 | **Hand it to your LLM** | you'd rather be walked through it | paste your assistant the [setup runbook](docs/setup/ai-guided-setup.md) and follow along |
 
@@ -203,29 +205,40 @@ Pre-1.0. `1.0.0` is reserved for "a stranger can rely on this."
 - Publish HTML and Markdown; both render, and the original source reads back
 - Three visibility modes: owner-only · email-gated · unguessable public link
 - Per-client portals, with permissions on the portal
+- Single-page PDF export and raw download from the viewer — a long infographic as
+  one continuous page, with nothing paginated through the middle of a chart
+- Upload from the browser at `/admin`, as well as from the CLI and from a chat
+- Per-view records for Secured documents — `pagevault views` shows which documents
+  were opened and by whom, over a rolling three-month window
+  ([ADR-015](docs/adr/ADR-015-what-a-view-record-contains.md) says exactly what's stored)
 - Owner console (light and dark), CLI, and remote MCP server — the CLI and MCP
   server are held at feature parity with each other
 - MCP over OAuth 2.1 from claude.ai, Desktop and mobile; bearer from Claude Code
 - Every artifact renders in a sandboxed iframe; `allow-same-origin` is banned by a
   test that fails the build ([ADR-007](docs/adr/ADR-007-viewer-shell.md))
-- Idempotent provisioning with a real teardown — `make destroy` puts the account back
+- Idempotent provisioning with a real teardown, plus backup, restore, and an export
+  of the whole system as a folder tree of plain files
 
 **Not yet**
 
-- **PDF export and raw download** ([#50](../../issues/50), [#49](../../issues/49)) — a
-  long infographic as one continuous page, no pagination cutting a chart in half
-- **Full-system export** ([#35](../../issues/35)) — backup works; a restore round-trip doesn't
-- **Browser upload** ([#6](../../issues/6)) — publishing is CLI/MCP only
-- **Read receipts, expiry, email-on-publish, portal branding** — designed, not built
+- **View metrics stop at the CLI** ([#127](../../issues/127)) — `pagevault views` knows
+  who opened what; asking your agent the same question doesn't work yet
+- **One-click deploy — not coming** ([#28](../../issues/28)) — a Deploy button can't set the
+  Worker's secrets or create the Access apps, so it lands you a deployment that can't publish or
+  gate. `npm install -g pagevault && pagevault init` does the parts a button can't reach
+- **Expiring links, email-on-publish, portal branding** — designed, not built
+- **Rough edges** — `<cmd> --help` prints the top-level usage instead of that command's
+  ([#126](../../issues/126)), and `status` reports your local config rather than the
+  running Worker ([#130](../../issues/130))
 
 ---
 
 ## How it compares
 
 The honest version, including the rows where the alternatives win. The
-full field guide <!-- TODO(#60): link once the interactive field guide ships --> puts ten tools across six capability
-groups on an interactive map — and it's served through PageVault, so it doubles as
-a live sample.
+[full field guide](https://pagevault.danjamkuhn.com/pub/showcase/72i8672763d7) puts ten
+tools across six capability groups on an interactive map — and it's served through
+PageVault, so it doubles as a live sample.
 
 ### Use something else if…
 
@@ -233,7 +246,7 @@ a live sample.
 |---|---|
 | Comments, reactions, live collaboration on the document | [`jonesphillip/sharehtml`](https://github.com/jonesphillip/sharehtml) — same Cloudflare design, plus collaboration. PageVault has none of it, on purpose. |
 | The host to never see your plaintext | An end-to-end-encrypted tool. PageVault's Worker can read what it serves; that's an honestly weaker guarantee. |
-| Per-viewer watermarks, an NDA gate, a named audit trail | A deal-room product. PageVault logs access decisions but has no per-view receipts. |
+| Per-viewer watermarks, an NDA click-through, an audit trail you can hand a lawyer | A deal-room product. PageVault records who opened what and when, for three months — useful, but not evidence. |
 | CRM, invoicing, e-sign around the client relationship | A client-portal SaaS. A much larger product; PageVault is deliberately none of it. |
 | One link, right now, zero setup | Claude's own Publish button, or any quick link-sharer. |
 | Fewer than ~5 clients | A shared folder per client. Said plainly because it's true. |
@@ -245,13 +258,14 @@ One representative per category, not ten names.
 | | PageVault | sharehtml | Link tool | Portal SaaS |
 |---|:---:|:---:|:---:|:---:|
 | **Per-client collection** — the unit is the client, not the link | ✅ | ❌ | ❌ | ✅ |
-| **Agent read-back** — search the collection back, months later | ✅ | ❌ | ❌ | ~ rare |
+| **Your AI agent can search it and read it back** — ask a question months later, get the passage | ✅ | ❌ | ❌ | ~ rare |
 | **Publish from a chat** (MCP) | ✅ | ❌ | ~ some | ❌ |
-| **Renders HTML *and* Markdown**, hands the source back | ✅ | ~ HTML | ~ | ❌ file host |
+| **Renders HTML *and* Markdown**, hands back the source and a PDF | ✅ | ~ HTML | ~ | ❌ file host |
 | **Free, self-hosted, your own domain** | ✅ | ✅ | ❌ | ❌ |
-| **Privacy** — can the host read it? | reads it | reads it | varies | reads it |
+| **Your infrastructure** — no vendor holds the data | ✅ | ✅ | ❌ | ❌ |
+| **Who opened it, and when** | ~ Secured, 90 days | ❌ | ~ opens | ✅ |
 | **Collaboration** — comments, presence | ❌ | ✅ | ❌ | ✅ |
-| **Accountability** — per-view receipts, watermarks | ❌ | ❌ | ~ opens | ✅ |
+| **Watermarks, NDA gate, named audit trail** | ❌ | ❌ | ❌ | ✅ |
 
 No single row is unique. Plenty of tools render HTML, several publish from a chat,
 and portal suites have held collections for years. What's rare is the
@@ -264,6 +278,7 @@ lets an agent read it back. That's the claim — not any one row.
 
 | I want to… | Start here |
 |---|---|
+| See what it does, without installing it | The [feature tour](https://pagevault.danjamkuhn.com/pub/showcase/wbhjcerqb8vc) — served through PageVault, so it's also a sample |
 | Understand the design | [`docs/architecture.md`](docs/architecture.md), then the [ADRs](docs/adr/) |
 | Work through setup properly | [`docs/setup/prerequisites.md`](docs/setup/prerequisites.md) |
 | Have my assistant set it up | [`docs/setup/ai-guided-setup.md`](docs/setup/ai-guided-setup.md) |

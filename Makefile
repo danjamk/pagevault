@@ -71,6 +71,15 @@ check-sandbox: ## Fail the build if the iframe is ever granted our origin (ADR-0
 		echo "✓ no allow-same-origin in worker/src"; \
 	fi
 
+check-docs: ## Fail the build if the docs describe something the code doesn't do
+# Links and anchors, `make` targets, CLI commands, MCP tools, and route names — each compared
+# against the thing that defines it. Not style; a failure is a factual contradiction.
+#
+# Added after an audit found a product page advertising a route the Worker never served and a
+# feature tour advertising two features that were never built. Both were mechanical, and both
+# survived months of people reading the pages.
+	@$(NVM) && node scripts/check-docs.mjs
+
 check-palette: ## Fail the build if a retired amber/cream hex reappears in the Worker (#122)
 # The console moved to the neutral + signal-blue system (#67), but the landing, error, viewer and
 # OAuth pages kept the old amber identity for months — the favicon and the landing page disagreed

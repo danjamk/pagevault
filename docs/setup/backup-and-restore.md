@@ -6,7 +6,7 @@ portals, members, and public-link tokens are all keys in that namespace.
 
 This page is about **disaster recovery** — snapshotting that namespace and restoring it on the
 same host. It is deliberately *not* a human-readable export — that's [`make
-export`](#walking-away-a-human-readable-export) at the bottom of this page. A restore is
+export`](#walking-away--a-human-readable-export) at the bottom of this page. A restore is
 Cloudflare → Cloudflare, and it keeps keys byte-for-byte, so **document ids and every `/p/` link
 you've already shared survive**.
 
@@ -45,12 +45,51 @@ anyway.
 make restore FILE=pagevault-backup-<timestamp>.json
 ```
 
-Restore is meant for an **empty** namespace (fresh recovery), so it refuses a non-empty target
-unless you pass `FORCE=1`. It prints the write cost first — a restore is **one write per key**
-against Cloudflare's free **1000 writes/day** — and asks before spending it.
+A restore is a bulk write, **not** a wipe-and-replace: it puts back every key in the backup and
+never deletes anything. So the question it actually asks before running is *"what is in here that
+the backup will not replace?"* — because those keys survive and mix in with the restored data.
+
+- **Nothing survives** (empty namespace, or every key is in the backup) → it just runs.
+- **Something survives** → it stops, **names what** would remain, and asks you to pass `FORCE=1`.
+
+It prints the write cost first — one write per key against Cloudflare's free **1000 writes/day** —
+and asks before spending it.
 
 > **KV is eventually consistent (~60s).** Right after a restore, listings and portal indexes
 > may briefly lag. This is normal; it settles.
+
+## Recovering a lost deployment
+
+Follow this in order. **Restore before you verify** — that is the one step people get backwards,
+and it is the reason `restore` used to refuse for no visible reason.
+
+```bash
+# 1. Rebuild the deployment. This creates a fresh, empty KV namespace.
+pagevault init            # or: make deploy
+
+# 2. Restore into it, while nothing has written to it yet.
+make restore FILE=pagevault-backup-<timestamp>.json
+
+# 3. Now smoke-test. This publishes a sample document, which is why it comes last.
+make verify
+
+# 4. Secured only — re-populate the Access group from the restored member lists.
+pagevault sync-access
+```
+
+Why the order matters: `verify` publishes `examples/welcome.html` so you have something to open.
+That is useful on a first install and unhelpful during a recovery — the sample's keys are not in
+your backup, so at step 2 the restore would stop and make you decide about them. Nothing is lost
+either way, and `FORCE=1` is the correct answer if you have already run `verify`. Restoring first
+just means never having to think about it.
+
+If a `pagevault-backup-*.json` file is sitting in the directory, the deploy notices and suggests
+the restore itself rather than pointing you at `verify`.
+
+**What comes back:** document ids, so every `/p/` link you already shared still opens; key
+metadata, so portal indexes render; and member lists, which is what step 4 replays into Cloudflare
+Access. **What does not:** the Access group itself (step 4 rebuilds it), your `.env.local` tokens,
+and view records — those live in Analytics Engine, not KV, and are never in a backup.
 
 ## Why the format looks the way it does
 

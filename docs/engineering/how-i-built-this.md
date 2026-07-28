@@ -63,7 +63,9 @@ Three things are load-bearing and none of them were bolted on at the end:
 
 ## It runs on itself
 
-The public showcase — including the competitive comparison and the feature walkthrough — is served
+The [public showcase](https://pagevault.danjamkuhn.com/pub/showcase) — including the
+[competitive comparison](https://pagevault.danjamkuhn.com/pub/showcase/72i8672763d7) and the
+[feature walkthrough](https://pagevault.danjamkuhn.com/pub/showcase/wbhjcerqb8vc) — is served
 *through PageVault*, into the same sandbox every other document gets. The documentation is also the
 demo. If a claim on the site were false, the site would be the thing that broke.
 

@@ -242,7 +242,7 @@
       <div class="rc skip">
         <h3>When to skip PageVault</h3>
         <ul>
-          <li><b>The artifact is confidential.</b> Watermarks, NDA gates, named audit → Peony.</li>
+          <li><b>The artifact is confidential.</b> Watermarks, NDA gates, a verified page-by-page audit trail → Peony.</li>
           <li><b>The host must never see plaintext</b> → Stacktree's client-side encryption.</li>
           <li><b>You want live feedback on the doc</b> → jonesphillip/sharehtml.</li>
           <li><b>You need a CRM, invoicing, e-sign</b> → SuiteDash or Copilot.</li>
@@ -268,7 +268,7 @@
       <p>Written in a conversation, not a terminal, and handed over as a link.</p>
       <p>PageVault is free, MIT-licensed and self-hosted. <a href="https://danjamk.github.io/pagevault">danjamk.github.io/pagevault →</a> · <a href="https://github.com/danjamk/pagevault">source on GitHub</a></p>
     </div>
-    <p class="fine">Landscape researched July 2026, last verified 21 July 2026, drawing on public product, pricing and docs pages. Categories here move fast — verify current details on each vendor's own site.</p>
+    <p class="fine">Landscape researched July 2026, last verified 28 July 2026, drawing on public product, pricing and docs pages. Categories here move fast — verify current details on each vendor's own site.</p>
   </div>
 </footer>
 
@@ -280,7 +280,7 @@
     {key:"collection", label:"A per-client collection", xlow:"one-off link", xhigh:"durable collection",
       lead:"Only PageVault sits in the extreme top-right: AI-native and built around a durable per-client collection. Data rooms (Peony) and portal suites (SuiteDash, Clinked) have collections too, but they're on the manual half — they don't take an agent, and most won't render your artifact."},
     {key:"artifact", label:"Artifact handling", xlow:"hosts a file", xhigh:"renders & exports it",
-      lead:"PageVault and sharehtml lead: both render HTML and Markdown and hand the file back, instead of just hosting it. Most link tools do HTML only; the portal suites don't render artifacts at all."},
+      lead:"PageVault and sharehtml lead: both render HTML and Markdown and hand the file back, instead of just hosting it. PageVault also exports a document as a single continuous PDF. Most link tools do HTML only; the portal suites don't render artifacts at all."},
     {key:"privacy", label:"Privacy", xlow:"open link", xhigh:"host-blind",
       lead:"Stacktree leads — client-side AES-GCM, so the host stores only ciphertext. PageVault gates by email but still reads your document: an honestly weaker guarantee."},
     {key:"collab", label:"Collaboration", xlow:"read-only", xhigh:"live comments",
@@ -288,12 +288,12 @@
     {key:"ownership", label:"You own it (free, self-hosted)", xlow:"hosted SaaS", xhigh:"free & self-hosted",
       lead:"sharehtml and PageVault lead — both free, self-hosted, open-source, on your own domain. Stacktree self-hosts too, but as a $999 one-time build. Most of the field is hosted SaaS you don't control."},
     {key:"accountability", label:"Accountability", xlow:"anonymous", xhigh:"audit trail",
-      lead:"Peony leads: per-viewer watermarks, NDA gates, named verified who-viewed logs. PageVault logs access decisions but has no per-view receipts today — near the bottom here."}
+      lead:"Peony leads: per-viewer watermarks, NDA gates, named verified who-viewed logs. PageVault records who opened a secured document and when — a real log, but a rolling three-month one, with no watermark and nothing a lawyer would call evidence."}
   ];
 
   var tools = [
     {id:"pv", name:"PageVault", url:"https://github.com/danjamk/pagevault", y:92,
-      s:{collection:95,artifact:88,privacy:70,collab:5,ownership:90,accountability:40},
+      s:{collection:95,artifact:88,privacy:70,collab:5,ownership:90,accountability:55},
       blurb:"Free, self-hosted per-client portals that render HTML and Markdown, with an MCP server an agent can publish into and read back. No live collaboration, no encryption, not a CRM."},
     {id:"sharehtml", name:"jonesphillip/sharehtml", url:"https://github.com/jonesphillip/sharehtml", y:66,
       s:{collection:12,artifact:82,privacy:65,collab:92,ownership:92,accountability:18},
@@ -371,8 +371,8 @@
   var prof = {
     pv:{who:"Many artifacts for one client, made in chat",
       verdict:"Free, self-hosted per-client portals that render HTML and Markdown, with an MCP server an agent can publish into and read back. No collaboration, no encryption, not a CRM — it keeps the collection, and handles the awkward formats, better than it does anything else.",
-      v:{s_emails:1,s_public:1,s_modes:1,a_html:1,a_md:1,a_export:.5,a_sandbox:1,a_noacct:1,w_mcp:1,w_readback:1,c_collection:1,c_overwrite:1,o_selfhost:1,o_oss:1,o_export:1,x_collab:0,x_e2e:0,x_audit:.5,x_crm:0},
-      notes:{a_md:"renders Markdown to styled HTML at publish",a_export:"hands the raw file back (export / read --source); no PDF yet",w_mcp:"Claude Code and the hosted surfaces — claude.ai, Desktop, mobile — over OAuth",w_readback:"search_portal / read_document across the client's whole corpus",x_audit:"access-decision log; no per-view receipts yet",o_export:"human-readable full export"}},
+      v:{s_emails:1,s_public:1,s_modes:1,a_html:1,a_md:1,a_export:1,a_sandbox:1,a_noacct:1,w_mcp:1,w_readback:1,c_collection:1,c_overwrite:1,o_selfhost:1,o_oss:1,o_export:1,x_collab:0,x_e2e:0,x_audit:1,x_crm:0},
+      notes:{a_md:"renders Markdown to styled HTML at publish",a_export:"raw source back, or the whole document as one continuous PDF",w_mcp:"Claude Code and the hosted surfaces — claude.ai, Desktop, mobile — over OAuth",w_readback:"search_portal / read_document across the client's whole corpus",x_audit:"named who-viewed log on Secured docs; rolling 90 days, no watermark",o_export:"human-readable full export"}},
     sharehtml:{who:"Inline feedback, if you live in a terminal",
       verdict:"The closest analog and genuinely good — same Cloudflare design, plus live comments, reactions and presence, and it renders Markdown and code. Its agent skill only works where there's a shell, and link-shared views still burn an Access seat.",
       v:{s_emails:1,s_public:0,s_modes:.5,a_html:1,a_md:1,a_export:.5,a_sandbox:.5,a_noacct:1,w_mcp:0,w_readback:0,c_collection:0,c_overwrite:1,o_selfhost:1,o_oss:1,o_export:.5,x_collab:1,x_e2e:0,x_audit:0,x_crm:0},

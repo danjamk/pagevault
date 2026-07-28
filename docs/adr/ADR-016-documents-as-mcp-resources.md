@@ -1,6 +1,7 @@
 # ADR-016 — Documents as MCP Resources
 
-**Status:** Accepted — design settled; built in the MCP-hardening batch, shipping gated on a live host check
+**Status:** Accepted and shipped — the live host check passed; production returns
+`pagevault://{portal}/{id}` resource links today
 **Date:** 2026-07-23
 
 ## Context

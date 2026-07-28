@@ -140,7 +140,7 @@
     <div class="oneliners">
       <span><b>Cloudflare Access asks who you are. The Worker asks whether you may see this.</b></span>
       <span><b>Publishing and remembering become the same act.</b></span>
-      <span><b>The Worker is the whole product — small enough to read in one sitting.</b></span>
+      <span><b>One command installs it. Your own Cloudflare account runs it.</b></span>
     </div>
   </section>
 
@@ -189,8 +189,9 @@
       <div class="fcard"><div class="fl">Finally, HTML &amp; Markdown</div><div class="fb">The formats that suck to share elsewhere — Drive won't render HTML, Markdown shows up as raw text. PageVault serves them as proper, styled, live documents.</div></div>
       <div class="fcard"><div class="fl">Readers register nowhere</div><div class="fb">The person opening your document installs nothing, creates no account, signs into no third-party app. They click a link and read.</div></div>
       <div class="fcard"><div class="fl">Download raw or as PDF</div><div class="fb">Hand back the original file, or a single continuous-page PDF — a long infographic exports as one page, no pagination slicing a chart in half.</div></div>
-      <div class="fcard"><div class="fl">Publish from the chat</div><div class="fb">A remote MCP server means you publish from the surface where you made the thing — no separate upload step, no file shuffling.</div></div>
-      <div class="fcard"><div class="fl">Friction-free deploy</div><div class="fb">Up in minutes on a free Cloudflare account: a Deploy-to-Cloudflare button or idempotent CLI provisioning — with a matching teardown, so you can test it because you can undo it.</div></div>
+      <div class="fcard"><div class="fl">Publish from the chat</div><div class="fb">A remote MCP server means you publish from the surface where you made the thing — no separate upload step, no file shuffling. Or drop a file into the console from your browser, or push it from the CLI.</div></div>
+      <div class="fcard"><div class="fl">Friction-free deploy</div><div class="fb">Up in minutes on a free Cloudflare account: one <code>npm install -g pagevault</code> provisions and deploys with no clone — and there's a matching teardown, so you can test it because you can undo it.</div></div>
+      <div class="fcard"><div class="fl">Know whether it landed</div><div class="fb">Secured documents record who opened what, and when — a rolling three-month window you read from your own machine. No IP addresses, no user agents, no third-party analytics.</div></div>
       <div class="fcard"><div class="fl">No lock-in, ever</div><div class="fb">A human-readable folder tree of every portal and document. Your work is never trapped in the tool — export the whole system and read it with your eyes.</div></div>
     </div>
   </section>
@@ -218,7 +219,7 @@
       <div class="fcard"><div class="fl">Zero onboarding for them</div><div class="fb">The client needs no account, no app, no registration. Onboarding their whole team is a few emails on your side and nothing on theirs.</div></div>
       <div class="fcard"><div class="fl">Cross-client isolation is absolute</div><div class="fb">Being in one client's portal grants nothing in another's. The failure that would end a consulting business is designed out, not patched.</div></div>
       <div class="fcard"><div class="fl">Public or private collections</div><div class="fb">A portal can be a private client vault, an email-gated team space, or a fully public showcase — same model, one axis of difference.</div></div>
-      <div class="fcard"><div class="fl">Draft in place, safely</div><div class="fb">Stage a document inside a client's portal the client cannot see — even if a link was already minted. Republishing shows a diff and asks before it clobbers a deliverable.</div></div>
+      <div class="fcard"><div class="fl">Draft in place, safely</div><div class="fb">Stage a document inside a client's portal the client cannot see — even if a link was already minted. Republishing names the document it is about to replace and refuses without an explicit confirm.</div></div>
     </div>
   </section>
 
@@ -233,7 +234,7 @@
       <div class="fcard"><div class="fl">Two path-scoped Access apps</div><div class="fb">The owner console and the client-facing routes can't be reached with each other's tokens. A privilege boundary, not a config detail.</div></div>
       <div class="fcard"><div class="fl">The API token never hits the browser</div><div class="fb">Two independent defenses on every state-changing endpoint. A stolen cookie buys an attacker nothing.</div></div>
       <div class="fcard"><div class="fl">Public ≠ unsandboxed</div><div class="fb">A public artifact is more exposed, not less — same sandbox, plus noindex so it stays out of search.</div></div>
-      <div class="fcard"><div class="fl">Seat guardrail</div><div class="fb">An alert before the 50-seat wall, because Cloudflare won't warn you — otherwise the first sign is a client emailing that your report won't open.</div></div>
+      <div class="fcard"><div class="fl">Seats are spent deliberately</div><div class="fb">Only people who actually authenticate consume one of Cloudflare's 50 free seats. Public and capability-link readers cost none — so the people who read once never crowd out the people who come back.</div></div>
     </div>
   </section>
 
@@ -249,13 +250,11 @@
       <div class="costrow"><div class="cl">Data-room / enterprise portal</div><div class="bar"><span style="width:100%"></span></div><div class="cp">up to $479 / mo</div></div>
     </div>
     <div class="ladder">
-      <span class="rung">Public links, <b>no card</b></span>
+      <span class="rung"><b>Public</b> — links anyone you send them to can open, your own domain optional</span>
       <span class="arrow">→</span>
-      <span class="rung">Your own <b>domain</b></span>
-      <span class="arrow">→</span>
-      <span class="rung">Gated <b>client portals</b></span>
+      <span class="rung"><b>Secured</b> — named people, and client portals</span>
     </div>
-    <p class="intro" style="margin-top:16px">Documents carry across every rung untouched, and the early rungs undo cleanly. Public and capability-link readers cost zero Cloudflare seats — gate the people who come back, link the people who read once.</p>
+    <p class="intro" style="margin-top:16px">Two tiers, both free. Documents carry across untouched when you climb, and Public undoes cleanly. Public and capability-link readers cost zero Cloudflare seats — gate the people who come back, link the people who read once.</p>
   </section>
 
   <!-- DELIBERATELY ISN'T -->
@@ -269,7 +268,7 @@
       <div class="fcard"><div class="fl">No comments or live presence</div><div class="fb">That's jonesphillip/sharehtml's lane, credited for three ideas PageVault borrows. If the doc is a conversation, use that.</div></div>
       <div class="fcard"><div class="fl">No client upload</div><div class="fb">That would demand virus scanning, quotas, and double the permission model. Out of scope on purpose.</div></div>
       <div class="fcard"><div class="fl">A small class of docs breaks</div><div class="fb">Anything relying on localStorage, IndexedDB, or same-origin fetch won't run in the sandbox. The trade: a few documents break so that no document can steal a session.</div></div>
-      <div class="fcard"><div class="fl">The portal bet is unproven</div><div class="fb">It pays off across many engagements with one client. Below ~10, a folder of links may be simpler — and we'll say so rather than pretend otherwise.</div></div>
+      <div class="fcard"><div class="fl">The portal bet is unproven</div><div class="fb">It pays off across many engagements with one client. Below about five, a folder of links may be simpler — and we'll say so rather than pretend otherwise.</div></div>
     </div>
   </section>
 
@@ -298,12 +297,12 @@
       login:"They click and read — no login, install nothing",
       seats:"0 seats — nobody authenticates",
       note:"Unguessable, so it's a <b>capability link</b>, not privacy. Served noindex, and still fully sandboxed."},
-    restricted:{lock:"🔒", url:"share.northwind.dev/d/rp92xk",
+    restricted:{lock:"🔒", url:"share.northwind.dev/v/northwind/rp92xk",
       who:"Only the emails you name",
       login:"One-time code to their inbox — no account to create",
       seats:"A seat only for people who keep coming back",
       note:"Add a client's CFO to a single report <b>without inventing a portal</b> for two people — grants are additive, never silently subtractive."},
-    private:{lock:"🔒", url:"share.northwind.dev/d/rp92xk",
+    private:{lock:"🔒", url:"share.northwind.dev/v/northwind/rp92xk",
       who:"Only you, the owner",
       login:"—",
       seats:"0",

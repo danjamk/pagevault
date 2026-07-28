@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { c, ok, info, warn, die, loadCloudToken, loadContext, cfApi, cfErr, argValue, isInteractive, banner } from "../cli/lib/provision/context.mjs";
+import { planRestore } from "../cli/lib/ops/restore-plan.mjs";
 
 // KV bulk write caps: 10,000 keys and 100 MB per request. Stay well under both.
 const MAX_KEYS_PER_CALL = 1000;
@@ -46,21 +47,74 @@ const nsPath = `/accounts/${account}/storage/kv/namespaces/${nsId}`;
 
 console.log(banner("restore", `(KV ${nsId})`));
 
-// Refuse a non-empty target unless forced — restore is same-host recovery into a fresh
-// namespace, not a merge. Overwriting live keys is a data-loss footgun, so it must be explicit.
-const probe = await cfApi(`${nsPath}/keys?limit=10`);
-if (!probe.ok) die(`Couldn't read the namespace (${cfErr(probe.errors)}).`, "Check the token has 'Workers KV Storage — Edit'.");
-const nonEmpty = (probe.result ?? []).length > 0;
-if (nonEmpty && !force) {
-  die(`Namespace ${nsId} is not empty.`, [
-    "Restore is meant for an empty namespace (fresh disaster recovery).",
-    "Restore into a new KV, or re-run with --force to overwrite existing keys.",
+// Restore is a bulk PUT, not a wipe-and-replace. That means the question worth asking is not
+// "is this namespace empty?" but "what is in here that the backup does NOT replace?" — because
+// those are the keys that survive and silently mix into the restored deployment. A bare
+// "not empty" refusal never said that, so the only way forward looked like --force (#125).
+// `make restore` is the documented front door and it spells the flag FORCE=1; only someone
+// invoking the script directly sees --force. Telling them the wrong one is how a refusal becomes
+// two refusals.
+const forceHint = process.env.MAKELEVEL !== undefined ? c.bold("FORCE=1") : c.bold("--force");
+
+const live = await listAllKeys(nsPath);
+const { surviving, overwritten, isSampleOnly, summary } = planRestore(live, entries.map((e) => e.key));
+
+if (live.length > 0 && surviving.length === 0) {
+  // Provably safe: every key here is also in the backup, so the restore replaces all of it and
+  // leaves nothing behind. No --force needed — there is nothing to lose.
+  info(`Namespace holds ${live.length} keys, and the backup replaces every one of them.`);
+} else if (surviving.length > 0 && !force) {
+  die(`Namespace ${nsId} holds ${surviving.length} key${surviving.length === 1 ? "" : "s"} the backup won't replace.`, [
+    ...(isSampleOnly
+      ? [
+          "This looks like the sample document `verify` publishes, not real data:",
+          ...summary.map((e) => `  ${line(e)}`),
+          "",
+          "That is the usual cause: `verify` publishes a sample so you have something to open,",
+          "and it runs first if you follow the deploy's `Next:` line literally.",
+          `Nothing is deleted by a restore — re-run with ${forceHint} to write over it.`,
+        ]
+      : [
+          "They would SURVIVE the restore and mix in with the restored data:",
+          ...summary.map((e) => `  ${line(e)}`),
+          "",
+          ...(overwritten ? [`The backup would also overwrite ${overwritten} key${overwritten === 1 ? "" : "s"} already here.`, ""] : []),
+          `If that list is disposable, re-run with ${forceHint}. If it is not, restore into a`,
+          "fresh KV namespace instead (KV=<id>) and repoint the Worker at it.",
+        ]),
   ]);
+}
+
+/** Every key in the namespace. Paginated — KV caps a list page at 1000. */
+async function listAllKeys(path) {
+  const keys = [];
+  let cursor = "";
+  do {
+    const q = `${path}/keys?limit=1000${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const page = await cfApi(q);
+    if (!page.ok) die(`Couldn't read the namespace (${cfErr(page.errors)}).`, "Check the token has 'Workers KV Storage — Edit'.");
+    keys.push(...(page.result ?? []));
+    cursor = page.result_info?.cursor ?? "";
+  } while (cursor);
+  return keys;
+}
+
+/** One summary entry, coloured. `planRestore` counts; this is the only place that formats. */
+function line(e) {
+  if (e.type === "document") return `· ${e.title ?? c.dim("(untitled)")} ${c.dim(e.id)}`;
+  const noun = { portal: "portal key", link: "public link", other: "other key" }[e.type];
+  return `· ${e.count} ${noun}${e.count === 1 ? "" : "s"}`;
 }
 
 const withMeta = entries.filter((e) => e.metadata !== undefined).length;
 console.log(`  ${c.bold(String(entries.length))} keys ${c.dim(`(${withMeta} with metadata)`)} from ${c.bold(file)}`);
-warn(`This writes ${entries.length} keys — ${entries.length} of the free ${c.bold("1000 writes/day")}.${nonEmpty ? c.red(" Existing keys will be overwritten.") : ""}`);
+warn(`This writes ${entries.length} keys — ${entries.length} of the free ${c.bold("1000 writes/day")}.${overwritten ? c.red(` ${overwritten} existing key${overwritten === 1 ? "" : "s"} will be overwritten.`) : ""}`);
+if (surviving.length > 0) {
+  // Reachable only with --force. Say plainly what is being kept, so a forced restore is still
+  // an informed one — the flag suppresses the refusal, not the facts.
+  console.log(`  ${c.dim(`${surviving.length} key${surviving.length === 1 ? "" : "s"} not in the backup will remain:`)}`);
+  for (const e of summary) console.log(`    ${c.dim(line(e))}`);
+}
 
 if (isInteractive() && !process.argv.includes("--yes")) {
   const rl = createInterface({ input: stdin, output: stdout });
