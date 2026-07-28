@@ -223,7 +223,9 @@ Pre-1.0. `1.0.0` is reserved for "a stranger can rely on this."
 
 - **View metrics stop at the CLI** ([#127](../../issues/127)) — `pagevault views` knows
   who opened what; asking your agent the same question doesn't work yet
-- **One-click deploy** ([#28](../../issues/28)) — every install path runs on your machine
+- **One-click deploy — not coming** ([#28](../../issues/28)) — a Deploy button can't set the
+  Worker's secrets or create the Access apps, so it lands you a deployment that can't publish or
+  gate. `npm install -g pagevault && pagevault init` does the parts a button can't reach
 - **Expiring links, email-on-publish, portal branding** — designed, not built
 - **Rough edges** — `<cmd> --help` prints the top-level usage instead of that command's
   ([#126](../../issues/126)), and `status` reports your local config rather than the

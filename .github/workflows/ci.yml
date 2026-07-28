@@ -24,6 +24,11 @@ jobs:
       # Fails the build if the artifact iframe is ever granted our origin. See ADR-007.
       - run: make check-sandbox
 
+      # Fails the build if a doc describes something the code doesn't do — dead routes, commands
+      # that don't exist, MCP tools that aren't registered, broken links. Every instance found so
+      # far was mechanical and had survived months of people reading the page.
+      - run: make check-docs
+
       - run: pnpm typecheck
 
       - run: pnpm test
