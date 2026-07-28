@@ -451,8 +451,8 @@
   var LOCK = '<svg class="ic" viewBox="0 0 24 24" style="width:15px;height:15px"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>';
   var modes = {
     public:  { lock: LINK, tint: "var(--pv-lv-link)", url: "acme.you.com/p/7f3k9q2mZx1a", who: "Anyone who has the link", what: "Clicks and reads — no login, installs nothing", seat: "0 seats — nobody authenticates", note: "Unguessable, so it's a capability link, not privacy. Served noindex, and still fully sandboxed." },
-    named:   { lock: USERS, tint: "var(--pv-lv-team)", url: "acme.you.com/d/rp92xk", who: "Only the emails you name", what: "One-time six-digit code to their inbox — no account", seat: "A seat only for people who keep coming back", note: "Add one client's CFO to a single report without inventing a portal for two people. Grants are additive, never silently subtractive." },
-    private: { lock: LOCK, tint: "var(--pv-lv-individual)", url: "acme.you.com/d/rp92xk", who: "Only you, the owner", what: "Nothing yet — it opens for no one else", seat: "0", note: "Stage a document inside a client's portal they can't see yet — even if a link was already minted. Draft in place, safely." }
+    named:   { lock: USERS, tint: "var(--pv-lv-team)", url: "acme.you.com/v/acme/rp92xk", who: "Only the emails you name", what: "One-time six-digit code to their inbox — no account", seat: "A seat only for people who keep coming back", note: "Add one client's CFO to a single report without inventing a portal for two people. Grants are additive, never silently subtractive." },
+    private: { lock: LOCK, tint: "var(--pv-lv-individual)", url: "acme.you.com/v/acme/rp92xk", who: "Only you, the owner", what: "Nothing yet — it opens for no one else", seat: "0", note: "Stage a document inside a client's portal they can't see yet — even if a link was already minted. Draft in place, safely." }
   };
   var lockEl = document.getElementById("sim-lock");
   var urlEl = document.getElementById("sim-url");

@@ -7,6 +7,40 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **`restore` asked the wrong question.** It probed ten keys and refused if any came back, so a
+  namespace holding one throwaway sample document got the same flat "not empty" as one holding a
+  live client portal — with `--force` as the only visible way out, offered at the exact moment an
+  operator is least able to reason about overwrite semantics. A restore is a bulk PUT that deletes
+  nothing, so the keys that matter are the ones the backup does *not* replace: those survive and
+  mix into the restored deployment. It now computes that set and names it by document title. Three
+  outcomes replace the old two — nothing surviving runs with no flag at all, a lone `verify` sample
+  is identified as such, and anything else is listed before you decide. The refusal also spelled
+  the flag `--force` while `make restore` takes `FORCE=1`. ([#125](../../issues/125))
+- **`verify` checked nine MCP tools while the Worker registered twelve.** `EXPECTED_MCP_TOOLS` had
+  drifted, so a deployment missing `revoke_public_link`, `rotate_public_link` or `server_info`
+  verified clean. A check that cannot fail is worse than no check, because it gets believed. The
+  constant now matches, and a test reads `worker/src/mcp.ts` to keep the two from drifting again.
+
+### Changed
+- **The deploy suggests a restore when it finds a backup beside it.** `verify` publishes a sample
+  document, which is what turned the documented recovery order into a refusal; it now says so
+  before it writes, and `docs/setup/backup-and-restore.md` gained a recovery runbook ordered so it
+  works when followed literally.
+
+### Documentation
+- **Corrected the launch surfaces to what actually shipped.** The README's "Not yet" list still
+  disowned PDF export, raw download, browser upload and export/backup/restore; the published field
+  guide scored PageVault 40 on accountability and said it had "no per-view receipts" months after
+  view records shipped; the feature tour advertised a Deploy-to-Cloudflare button and a seat-count
+  alert, neither of which exists. Both showcase documents were republished.
+- **`architecture.md` caught up with the tier reframe.** It gained the two-tier model
+  ([ADR-018](docs/adr/ADR-018-public-and-secured-tiers.md)), `DocMeta.name` as document identity
+  ([ADR-017](docs/adr/ADR-017-document-identity-is-the-filename.md)), MCP Resources
+  ([ADR-016](docs/adr/ADR-016-documents-as-mcp-resources.md)), and `/health`. It had described
+  OAuth 2.1 as a pre-launch task long after it shipped, claimed publishing returns a diff (it
+  names the document and refuses), and given the wrong KV listing prefix.
+
 ## [0.23.0] — 2026-07-28
 
 0.22.0 was the first release to be installed from npm on a machine that had never seen PageVault, and

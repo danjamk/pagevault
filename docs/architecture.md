@@ -4,7 +4,7 @@ The design, and why it is the way it is. Every Cloudflare and MCP behavior asser
 here was verified against current documentation. The contested decisions have their
 own ADRs in `docs/adr/`; read the relevant one before overturning it.
 
-> **Revised 2026-07-14.** The original design published one document and returned one
+> **Revised 2026-07-28.** The original design published one document and returned one
 > link. That primitive is table stakes — six commercial products and
 > [`jonesphillip/sharehtml`](https://github.com/jonesphillip/sharehtml) (Apache-2.0,
 > a Cloudflare PM's project) already do it, several of them better. **The collection
@@ -67,7 +67,8 @@ misfiling a client report, not a required flag:
 
 | Route | Access app | Worker does |
 |---|---|---|
-| `/` | none | 302 → `/admin` |
+| `/` | none | **Secured:** 302 → `/admin`. **Public:** a quiet landing page — there is no console to redirect to, and `/admin` would be a dead Forbidden. Keys on `CF_ACCESS_AUD_ADMIN`. |
+| `/health` | none | Unauthenticated liveness: name, `<version>+<sha>`, deploy time. |
 | `/v/{slug}` | **App A** (`host/v`) | Portal index. `canView` per doc. |
 | `/v/{slug}/{id}` | **App A** | Viewer shell. `canView`, then mint a capability token. |
 | `/render/{id}?cap=` | none | **Artifact bytes.** Capability token only. Framed, never navigated. |
@@ -125,6 +126,8 @@ interface Portal {
 interface DocMeta {
   id: string;
   portal: string;        // always set; defaults to "default"
+  name: string;          // the FILENAME — the document's identity within a portal (ADR-017).
+                         // Same (portal, name) → same id → overwrite in place. Title is display-only.
   title: string;
   summary?: string;      // one line, shown in the portal index
   sourceKind: SourceKind;
@@ -138,7 +141,7 @@ interface DocMeta {
 }
 ```
 
-**Listing** is `list({ prefix: "idx:portal:{slug}:" })` for membership, and
+**Listing** is `list({ prefix: "idx:{slug}:" })` for membership, and
 `list({ prefix: "meta:" })` with **KV key metadata** for titles and dates. Never a
 read per document — an N+1 passes every functional test and silently eats the
 100k/day read quota. There is a test asserting one `list()` and zero `get()`s.
@@ -278,6 +281,26 @@ not in a data attribute.
 
 ## 9. Deploying — what is true, verified on a real account
 
+### Two tiers, three rungs
+
+The operator sees **two tiers** and never the word "rung" ([ADR-018](adr/ADR-018-public-and-secured-tiers.md)):
+
+| Tier | What it is | Internally |
+|---|---|---|
+| **Public** | `/p/` links anyone holding the URL can open. Your own domain is a prompt *inside* Public, not a level above it. No Access, no card. | rung 1 (`workers.dev`) or rung 2 (custom domain) |
+| **Secured** | A domain **and** Zero Trust. Adds the owner console, portals, and email-gated documents. | rung 3 |
+
+`rung` survives as a three-value field in `.pagevault.json` because the provisioning machinery keys
+on it. It is an implementation detail: `init` takes `--tier public|secured`, and surfacing "rung"
+to a user is a bug. The naming collision this replaced — `init` saying "rung 2 = domain" while the
+README said "Tier 2 = named people" — is the reason the ADR exists.
+
+**Documents carry across a climb untouched.** The hostname changes between rung 1 and rung 2, so
+links handed out under the old address stop resolving; the documents, their ids, and their `/p/`
+tokens do not.
+
+### Provisioning
+
 `make provision` does the Cloudflare work: KV namespace, One-time PIN, the
 `pagevault-viewers` group, and the two Access applications. It reads the AUD tags out of
 the app-create responses, so nothing is copied out of a dashboard. It is idempotent.
@@ -391,22 +414,28 @@ cross-client response data.
 the CLI's `rm`, not a link-only revoke).
 
 **Read — the differentiator:** `list_portals`, `list_documents`, `read_document`,
-`search_portal`.
+`search_portal`, `server_info` (version + host, readable in-chat). Twelve tools in all.
+
+Documents are also exposed as **MCP Resources** (`pagevault://{portal}/{id}`), so a host can
+attach one directly rather than round-tripping through a tool call. See
+[ADR-016](adr/ADR-016-documents-as-mcp-resources.md).
 
 Two rules the tools must enforce:
 
 - **An agent must not be able to clobber a client deliverable in one tool call.**
-  Publishing over an existing `(portal, filename)` returns a diff summary and requires
-  an explicit `confirm: true`. Identity is the filename, not the title (ADR-017); two
+  Publishing over an existing `(portal, filename)` names the document it would replace and
+  requires an explicit `confirm: true`. It is a refusal plus an identification, not a diff —
+  the bytes are never compared. Identity is the filename, not the title (ADR-017); two
   documents may share a title.
 - **The model must not infer the portal from conversation.** With one portal, resolve
   silently. With two or more and no default, **error and list them** — inferring
   "this is probably the RealPlus one" from chat is exactly the failure that leaks
   Client A's report into Client B's portal.
 
-Auth: bearer token today, which works in Claude Code. OAuth 2.1 is required for the
-hosted surfaces (claude.ai, Desktop, mobile) and is a **pre-launch** task, not a
-pre-validation one. See ADR-006.
+Auth: a bearer token for Claude Code, and **OAuth 2.1 — shipped** — for the hosted surfaces
+(claude.ai, Desktop, mobile), where consent is delegated to the deployment's own Access identity
+rather than a second login. See [ADR-006](adr/ADR-006-remote-mcp.md) and
+[ADR-012](adr/ADR-012-oauth-consent-access-idp.md).
 
 ## 12. Operations — what the deployment tells you
 

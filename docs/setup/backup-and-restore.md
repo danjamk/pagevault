@@ -6,7 +6,7 @@ portals, members, and public-link tokens are all keys in that namespace.
 
 This page is about **disaster recovery** — snapshotting that namespace and restoring it on the
 same host. It is deliberately *not* a human-readable export — that's [`make
-export`](#walking-away-a-human-readable-export) at the bottom of this page. A restore is
+export`](#walking-away--a-human-readable-export) at the bottom of this page. A restore is
 Cloudflare → Cloudflare, and it keeps keys byte-for-byte, so **document ids and every `/p/` link
 you've already shared survive**.
 

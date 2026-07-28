@@ -3,8 +3,15 @@
 **Status:** Original onboarding design (2026-07-16), since largely realized.
 **Relates to:** [ADR-008](../adr/ADR-008-progressive-provisioning.md) (progressive provisioning).
 
-> **This is a design record, not the current how-to.** The tier model below is kept in sync with
-> what shipped, but the operational specifics further down (the manual step-by-step, the "gaps," the
+> **This is a design record, not the current how-to.** It uses the **original three-tier naming**
+> (1 · sharing something, 2 · sharing privately, 3 · running a practice). That naming is
+> **retired**: [ADR-018](../adr/ADR-018-public-and-secured-tiers.md) replaced it with two
+> user-facing tiers, **Public** and **Secured**, over three internal rungs a user never sees.
+> Tiers 1 and 2-without-Access are today's **Public**; tier 2-with-Access and tier 3 are
+> **Secured**, where portals are a data model rather than a level. Read the shape below, not the
+> labels — the reasoning holds and only the vocabulary moved.
+>
+> The operational specifics further down (the manual step-by-step, the "gaps," the
 > "what we build first" order) are the *original plan* — since realized as the CLI (`pagevault init`),
 > the [agent runbook](../setup/ai-guided-setup.md), and the [prerequisites doc](../setup/prerequisites.md),
 > or dropped (the one-click Deploy button, #28). For the **current** setup path, start at the

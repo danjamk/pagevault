@@ -54,10 +54,14 @@ model, and the sandboxed iframe. Credit them in the README.
 6. **The Worker verifies the JWT itself.** Never trust
    `Cf-Access-Authenticated-User-Email`, never trust the `CF_Authorization`
    cookie, anywhere. See ADR-004.
-7. **Ask before adding** a database, a frontend framework, or any dependency
-   beyond `jose`, the `agents` SDK, and the MCP SDK. A publish-time build that
-   bundles the Worker for distribution is sanctioned (ADR-014); any *other* build
-   pipeline still needs a conversation.
+7. **Ask before adding** a database, a frontend framework, or any runtime dependency
+   beyond the ones already sanctioned: `jose`, the `agents` SDK, the MCP SDK,
+   `@cloudflare/workers-oauth-provider` and `zod` (OAuth + tool schemas),
+   `markdown-it` with its emoji/footnote/task-list/katex plugins plus `katex`
+   (Markdown rendering), and `@cloudflare/puppeteer` (PDF export). Each of those
+   arrived with a decision behind it; the next one needs the same. A publish-time
+   build that bundles the Worker for distribution is sanctioned (ADR-014); any
+   *other* build pipeline still needs a conversation.
 
 ## Layout
 

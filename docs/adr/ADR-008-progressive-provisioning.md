@@ -1,7 +1,14 @@
 # ADR-008 — Progressive provisioning: a Publish tier before a Portals tier
 
-**Status:** Proposed
+**Status:** Accepted and shipped — the *vocabulary* below is superseded by
+[ADR-018](ADR-018-public-and-secured-tiers.md) (2026-07-24)
 **Date:** 2026-07-15
+
+> **Read this for the reasoning, not the names.** The decision — provision progressively, so a
+> first URL costs nothing and portals arrive only when wanted — shipped and still holds. The
+> "Tier 0 Publish / Tier 1 Portals" naming it introduced did not: ADR-018 replaced it with the
+> two user-facing tiers **Public** and **Secured**, over three internal rungs the user never sees.
+> Anywhere below that says "Tier 0" or "Tier 1", read the shape, not the label.
 
 ## Context
 
