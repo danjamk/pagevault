@@ -18,6 +18,8 @@ import { readFileSync, existsSync } from "node:fs";
 import { Resolver, lookup } from "node:dns/promises";
 import { platform } from "node:process";
 import { c, ok, warn, die, loadContext, fromEnv, banner, mcpCall, runHint, EXPECTED_MCP_TOOLS } from "../provision/context.mjs";
+// One source of truth for the sample's title: `restore` keys its "this is disposable" check on it.
+import { SAMPLE_TITLE } from "./restore-plan.mjs";
 import { loadConfig } from "../client.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -341,6 +343,8 @@ export async function verifyCmd({ json = false } = {}) {
   }
 
   say(`\n  Publishing your first document ${c.dim("(examples/welcome.html)…")}`);
+  // Cheap, and it lands before the write rather than after the refusal it causes (#125).
+  say(`  ${c.dim("Recovering from a backup? Restore first — this sample leaves keys a restore won't replace.")}`);
   const html = readFileSync(welcomePath, "utf8");
 
   let result;
@@ -349,7 +353,7 @@ export async function verifyCmd({ json = false } = {}) {
       method: "POST",
       headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
       body: JSON.stringify({
-        title: "Welcome to PageVault",
+        title: SAMPLE_TITLE,
         summary: "It works — this is your first published document.",
         html,
         // public:true mints a capability link that bypasses Access entirely (zero seats).

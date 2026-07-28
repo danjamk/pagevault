@@ -6,6 +6,7 @@
 // the .env.local token, which is what lets us do the subdomain and the secret over the API.
 //
 import { execSync } from "node:child_process";
+import { readdirSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { randomBytes } from "node:crypto";
 import { stdin, stdout } from "node:process";
@@ -291,8 +292,38 @@ export async function deploy(opts = {}) {
   }
 
   const verifyCmd = RUNNING_FROM_REPO ? "make verify" : "pagevault verify";
+
+  // If a backup is sitting right here, this is probably a recovery, not a first run — and the
+  // order matters. `verify` publishes a sample document, which leaves keys the backup won't
+  // replace and turns the next `restore` into a refusal (#125). Restore first, then verify.
+  const backup = findBackupFile();
+  if (backup) {
+    console.log(`\n${c.bold("Next:")} ${c.bold(`make restore FILE=${backup}`)} ${c.dim("— a backup file is sitting in this directory.")}`);
+    console.log(`  ${c.dim(`Restore BEFORE ${verifyCmd}: verify publishes a sample document, and restoring is cleanest into a namespace nothing has written to yet.`)}`);
+    console.log(`  ${c.dim(`Not recovering? Skip it and run ${verifyCmd}.`)}\n`);
+    return;
+  }
+
   console.log(`\n${c.bold("Next:")} ${c.bold(verifyCmd)} ${c.dim("— smoke-test the deployment and publish your first document.")}`);
   console.log(`  ${c.dim("It hands back a public /p/ link you can open immediately — no login, no Access.")}\n`);
+}
+
+/**
+ * The newest `pagevault-backup-*.json` in the working directory, if any.
+ *
+ * A weak signal on purpose: it only ever changes which command gets suggested, never what runs.
+ * `make backup` writes these here by default, so their presence after a deploy into a fresh KV
+ * is a good guess that someone is rebuilding rather than starting.
+ */
+function findBackupFile() {
+  try {
+    return readdirSync(process.cwd())
+      .filter((f) => /^pagevault-backup-.*\.json$/.test(f))
+      .sort()
+      .pop();
+  } catch {
+    return undefined;
+  }
 }
 
 /**
