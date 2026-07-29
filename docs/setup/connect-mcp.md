@@ -11,7 +11,8 @@ There are two ways to authenticate, and which one you use decides which path bel
   default from 0.9.0), Claude logs in through Cloudflare Access and you never paste a token. This
   is the path for **claude.ai and Claude Desktop**.
 - **A bearer token** (`PAGEVAULT_API_TOKEN`). The long-lived operator token the CLI already uses.
-  This is the path for **Claude Code**, and the fallback for a Tier-0 deployment that has no OAuth.
+  This is the path for **Claude Code**, and the fallback on a **Public** deployment, which has no
+  Cloudflare Access for OAuth to log you in against.
 
 You do not need both. Pick the row that matches your client.
 
@@ -57,12 +58,12 @@ that).
 
 ---
 
-## Tier-0 / bearer-only fallback — `mcp-remote`
+## Public deployments — the `mcp-remote` bridge
 
-If you're running a **Tier-0 deployment with no OAuth** (no Cloudflare Access, just the bearer
-token) and you want it in a client that only speaks the account connector or a stdio config file,
-there is nothing for the connector's OAuth discovery to find. Bridge it with the community
-`mcp-remote` tool — no PageVault code required:
+On a **Public** deployment there is no Cloudflare Access, so OAuth has no identity provider to send
+you to and the connector's discovery finds nothing. If you want that deployment in a client that
+only speaks the account connector or a stdio config file, bridge it with the community
+`mcp-remote` tool and the bearer token — no PageVault code required:
 
 ```bash
 npx mcp-remote https://share.<yourdomain>/mcp --header "Authorization: Bearer <PAGEVAULT_API_TOKEN>"
