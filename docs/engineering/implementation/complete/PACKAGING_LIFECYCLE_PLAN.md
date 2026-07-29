@@ -2,7 +2,7 @@
 
 **Branch:** `feature/packaging-lifecycle` · **Three PRs**, one per phase.
 
-[ADR-014](../../adr/ADR-014-installed-product-not-thin-client.md) reframed the
+[ADR-014](../../../adr/ADR-014-installed-product-not-thin-client.md) reframed the
 `pagevault` npm package: it is the **installed product**, not a thin client.
 `npm install -g pagevault` stands PageVault up on your own Cloudflare account with
 no repo clone. That turns #42 (`init` / `upgrade` / `sync-access`) from "wrap the

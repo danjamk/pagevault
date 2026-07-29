@@ -171,6 +171,12 @@ export function formatViews({ days, rows }, c) {
     ...body.map(line),
     "",
     dim(`${plural(total, "view")} across ${plural(rows.length, "document")}, last ${plural(days, "day")}.`),
+    // Unconditional on purpose (#129). The conditional version — warn only when the window predates
+    // the current deployment — sounds smarter and is worse: `upgrade` redeploys, so `deployedAt`
+    // resets on every routine upgrade and the hint would fire almost always. A note that is right
+    // every time and short enough to skim beats one that is precise in theory and noise in practice.
+    dim("The dataset is account-level and outlives any single deployment, so rows may name"),
+    dim("documents a teardown removed. Cross-check with `pagevault list`. Records age out at 3 months."),
   ].join("\n");
 }
 

@@ -161,6 +161,16 @@ no longer authorizes (reclaiming seats) — it confirms first.
 Which documents your clients actually opened. The one command that reads from Cloudflare directly
 (Analytics Engine), so it needs a Cloudflare token in the environment.
 
+⚠️ **The dataset is account-level, and it outlives any single deployment.** A view record names the
+portal and document but not the deployment that wrote it, so after a teardown and rebuild — or on an
+account that once ran a different PageVault — `views` blends the old with the new and presents all of
+it as current. Rows may name documents and portals that no longer exist. Cross-check against
+`pagevault list` when it matters.
+
+Records are kept for **three months** and then age out on their own; `destroy` cannot clear them,
+because the Worker deliberately holds no credential that can read or delete analytics
+([ADR-015](../adr/ADR-015-what-a-view-record-contains.md) §5–6).
+
 ### `pagevault destroy [--keep-data]`
 Tear the deployment down — Worker, DNS, Access apps, group, and KV data. Irreversible, and it asks:
 it verifies the token reaches the pinned account, then makes you type the target hostname to confirm.

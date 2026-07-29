@@ -113,3 +113,13 @@ and reaching those surfaces is the entire differentiator. See ADR-006.
 - **Disable the `workers.dev` subdomain and Preview URLs.** They route around
   Access entirely. The Worker fails closed without a JWT, so this is not a hole —
   but it is a required setup step, not a footnote.
+- **Rotating `PAGEVAULT_API_TOKEN` breaks every client holding the old one,** all
+  at once and with no error that says so — it looks like a session that won't
+  renew. It also invalidates console sessions and `?cap=` render tokens, which
+  derive from it (`worker/src/token.ts`); `/p/` links survive. Runbook in
+  `docs/engineering/deploy-prod.md`. The claude.ai web connector is the one that
+  gets forgotten.
+- **View records outlive the deployment.** Analytics Engine is account-level and
+  keeps three months; `destroy` cannot clear it and Cloudflare documents no way to
+  delete a dataset. So `views` after a rebuild shows history the new deployment
+  never created, and records from `/v/` reads hold a viewer's email. See ADR-015.

@@ -89,3 +89,52 @@ make restore FILE=pagevault-backup-prod.json FORCE=1
 Redeploy an older commit the same way you deploy any commit: check it out and run the workflow
 from that ref (or locally against prod if you still hold the token). `make health` — the same
 check CI runs — tells you at any time whether the live deployment matches your checkout.
+
+## Rotating `PAGEVAULT_API_TOKEN`
+
+`/api` and `/mcp` authenticate with a **static bearer** — no session, no expiry, no refresh
+([ADR-006](../adr/ADR-006-remote-mcp.md)). Nothing renews it, which means **rotating it breaks every
+client that holds the old one, silently and all at once.** There is no error that says "rotated";
+the client just starts getting 401s, which reads exactly like an expired session that won't
+renew — and that is how it was misdiagnosed once already.
+
+Rotating also reaches further than the bearer itself. The console session key and the viewer
+capability key are both **derived one-way from `PAGEVAULT_API_TOKEN`** (`worker/src/token.ts`), so
+the blast radius is:
+
+| | After a rotation |
+|---|---|
+| MCP/CLI clients holding the **bearer** | **Broken** until re-set by hand — one at a time |
+| MCP clients connected over **OAuth** | Unaffected. Their tokens live in `OAUTH_KV`, not derived from this one |
+| Open **console** sessions | Invalidated. ~15-minute TTL anyway; re-opening `/admin` re-mints |
+| In-flight **`?cap=`** render tokens | Invalidated. ~10-minute TTL; a page reload fixes an open tab |
+| Existing **`/p/` public links** | **Survive.** The token is a KV key, not derived from the bearer |
+
+### The runbook
+
+1. **Set the new value on the Worker.** `wrangler secret put PAGEVAULT_API_TOKEN` against prod, or
+   re-run the deploy workflow after updating the `production` environment secret. Note that a
+   routine deploy will *not* rotate it — the workflow only sets the bearer on a first-ever deploy
+   and reuses it afterwards, which is deliberate.
+2. **Update the `production` environment secret** if you set it with wrangler, so the two do not
+   drift.
+3. **Re-set it in every client that held the old one.** This is the step with no shortcut:
+   - **the claude.ai web connector** — the one that actually bit us, and the easiest to forget
+     because it is not on your machine and shows no configuration you can grep;
+   - **Claude Desktop** — its MCP config file;
+   - **Claude Code** — `claude mcp remove` / `add` with the new header, or the stored config;
+   - **the CLI** — `pagevault login --token <new>`, plus any `.env.local` that carries it;
+   - anything bridged through `mcp-remote`, which passes the bearer as a header.
+4. **Verify.** `pagevault health` from a machine you just updated, then open a chat surface and
+   call one MCP tool. A green `health` with a still-failing connector means the connector, not the
+   server — check the client before the deployment.
+
+**A stale connector looks identical to a broken server.** If exactly one surface is failing, it is
+the surface. Confirm by running the same call from a second client that you know holds the current
+token, before touching prod.
+
+> **On making the 401 self-explaining** — considered and declined. The Worker cannot tell a rotated
+> token from a wrong one or a missing one, so a "may have been rotated" hint would be right
+> sometimes and misleading the rest of the time. MCP clients surface the `WWW-Authenticate`
+> challenge rather than the body anyway. The fix for this failure mode is this runbook existing,
+> not a guess in an error response. ([#64](https://github.com/danjamk/pagevault/issues/64))

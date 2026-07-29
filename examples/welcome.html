@@ -116,10 +116,11 @@
   <ul class="steps">
     <li><b>Connect Claude.</b> The same deployment is a remote MCP server. Point Claude at
       <code>/mcp</code> with your bearer token and it can publish and search from the chat.</li>
-    <li><b>Put it on your domain.</b> Re-run <code>make setup</code> and pick rung 2 — the same
-      documents, now on your own hostname.</li>
-    <li><b>Add client portals.</b> Rung 3 turns on Cloudflare Access: email-secured collections
-      where permissions live on the portal, not the link.</li>
+    <li><b>Put it on your domain.</b> Re-run <code>make setup</code> and give it your hostname —
+      still Public, the same documents, now on your own address.</li>
+    <li><b>Climb to Secured.</b> Re-run setup and choose <b>Secured</b>: Cloudflare Access turns on,
+      and documents can be gated to named email addresses. Client portals live here too, with
+      permissions on the portal rather than the link. Your documents carry across untouched.</li>
   </ul>
 
   <p>Delete this document whenever you like — it was only ever a hello. Replace it with the first

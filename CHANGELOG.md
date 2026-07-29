@@ -7,6 +7,49 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.23.2] — 2026-07-28
+
+Three things that were true about PageVault and that nothing in PageVault said out loud. All three
+concern what survives a teardown or a rotation — the moments when an operator most needs the tool to
+be complete about what it did and did not do.
+
+### Fixed
+- **`destroy` did not disclose that view records survive it.** It prints a "left alone,
+  deliberately" list — Zero Trust, Access seats — and omitted the one item holding a third party's
+  personal data. Analytics Engine keeps three months of view records, and for anything read through
+  Cloudflare Access those records name the **viewer's email**. Someone winding down a client
+  engagement reads that list and reasonably concludes the rest is gone; for three months they are
+  wrong. Cloudflare documents a three-month retention and **no way to delete a dataset**, so waiting
+  out the window is the whole of the honest answer, and `destroy` now says so.
+  ([#128](../../issues/128))
+- **That disclosure block only printed on Secured deployments.** A Public deployment printed nothing
+  at all, while still recording a view for every `/p/` and `/pub/` read. It now prints at every
+  tier, with the Zero Trust items still conditional.
+- **`destroy` now says it only deletes what local state names.** A KV namespace left by an older
+  PageVault under a different title is orphaned, not removed.
+
+### Changed
+- **`pagevault views` says that its dataset outlives the deployment.** The dataset is account-level
+  and no record names the deployment that wrote it, so after a teardown and rebuild `views` shows
+  history the current deployment never created. A one-line footer says so and points at
+  `pagevault list` to tell them apart. Deliberately unconditional: the tempting version — warn only
+  when the queried window predates the deployment — fires on every routine `upgrade`, because
+  `upgrade` redeploys. ([#129](../../issues/129))
+
+### Documentation
+- **A runbook for rotating `PAGEVAULT_API_TOKEN`**, in `docs/engineering/deploy-prod.md`. The bearer
+  is static — no session, no expiry, no refresh — so rotating it breaks every client holding the old
+  one at once, with no error that says "rotated". It reads exactly like a session that will not
+  renew, which is how it was misdiagnosed once. The runbook names the step people forget: the
+  claude.ai web connector, which holds a token you cannot grep for. It also states the wider blast
+  radius, which was not previously written down anywhere: the console session key and the viewer
+  capability key both derive from that token, so open console sessions and in-flight `?cap=` render
+  tokens are invalidated too. `/p/` links and OAuth-connected MCP clients survive.
+  ([#64](../../issues/64))
+- The same disclosures reached `docs/setup/backup-and-restore.md` (a new "what leaving does not
+  remove"), `docs/setup/cli-reference.md`, `docs/architecture.md` §12, and two new entries under
+  CLAUDE.md's gotchas.
+
 ## [0.23.1] — 2026-07-28
 
 Two checks in this release could not fail, and both were believed because of it. `restore` refused
@@ -805,7 +848,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.23.1...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.23.2...HEAD
+[0.23.2]: https://github.com/danjamk/pagevault/compare/v0.23.1...v0.23.2
 [0.23.1]: https://github.com/danjamk/pagevault/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/danjamk/pagevault/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/danjamk/pagevault/compare/v0.21.0...v0.22.0

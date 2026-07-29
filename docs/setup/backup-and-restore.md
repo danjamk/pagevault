@@ -126,3 +126,30 @@ It is intentionally **lossy and not a restore format**: document ids and `/p/` t
 out — if you're leaving, your URLs are changing anyway, and if you're recovering, that's `make
 backup` above. (The `pagevault export` CLI does the same against any deployment you hold a token
 for; `make export` is the shortcut for your own.)
+
+## What leaving does not remove
+
+`destroy` deletes the Worker, the DNS record, the Access applications and group, and the KV
+namespace with every document in it. Two things survive, and it is worth knowing which before you
+tell a client their data is gone.
+
+**View records — up to three months of them.** They live in Analytics Engine, not KV, so nothing
+in a teardown touches them. Each names a portal, a document and a timestamp; for anything read
+through Cloudflare Access, it also names **the viewer's email**. Cloudflare documents no way to
+delete a dataset, so the retention window is the only mechanism — the records age out on their own
+and there is no button that hurries it. `pagevault views` keeps reading them after the deployment
+is gone, which is also why a rebuilt deployment shows history it never created
+([#129](https://github.com/danjamk/pagevault/issues/129)).
+
+If a client asks you to erase everything you hold about them, that is the honest shape of the
+answer: the documents go immediately, the access log ages out within three months. See
+[ADR-015](../adr/ADR-015-what-a-view-record-contains.md) for exactly what a view record contains
+and why the Worker cannot read or delete one.
+
+**Anything your local state never named.** Teardown removes what `.pagevault.json` points at. A KV
+namespace left behind by an older PageVault under a different title is orphaned rather than
+deleted — worth a look at **Storage & Databases → KV** in the dashboard after a `destroy`, if this
+account has run PageVault before.
+
+Zero Trust itself and any consumed Access seats also stay, deliberately — both are account-wide.
+`destroy` lists all of this before it does anything.
