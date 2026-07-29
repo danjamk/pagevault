@@ -604,14 +604,35 @@ document.
 
 Read it with `make views` or `pagevault views [--days] [--portal] [--doc] [--json]`.
 
-**`views` is CLI-only, and it is one of the documented exceptions to CLI/MCP parity**
-([ADR-019](adr/ADR-019-view-metrics-reach-mcp-by-sync.md) settles how it reaches an agent
-eventually: the operator syncs a summary into KV, rather than the Worker gaining a read
-token). The
-binding is write-only; reading needs an account-scoped `Account Analytics Read` token, which
-is strictly wider than the Access-group-scoped credential the Worker holds. Giving the Worker
-that token is the blast-radius widening ADR-002 exists to prevent — and the MCP server runs
-inside the Worker. So the Worker writes and the operator reads.
+**Reading Analytics Engine is CLI-only, and always will be.** The binding is write-only;
+reading needs an account-scoped `Account Analytics Read` token, which is strictly wider than the
+Access-group-scoped credential the Worker holds. Giving the Worker that token is the blast-radius
+widening ADR-002 exists to prevent — and the MCP server runs inside the Worker. So the Worker
+writes and the operator reads.
+
+**The answer still reaches an agent, by sync rather than by query**
+([ADR-019](adr/ADR-019-view-metrics-reach-mcp-by-sync.md), #127). `pagevault views --sync` runs
+the query on the operator's machine, aggregates it, and PUTs a summary to `POST
+/api/views/summary` — one KV key, one write. `list_documents` and `read_document` then serve
+`views`, `lastViewedAt` and a per-surface breakdown alongside the metadata they already return.
+The Worker gains data, never the capability to compute it.
+
+Three properties keep that honest, and each has a test:
+
+- **Counts and surfaces, never identities.** The underlying records carry viewer emails for
+  Access-authenticated reads; the summary does not. "Opened four times through the public link,
+  never by a signed-in member" is useful and identifies nobody. The CLI keeps identities — an
+  operator reading their own dashboard is a different act from an agent summarizing it.
+- **Absent, or measured — never a zero that means neither.** No sync, or a document published
+  since the last one, omits the fields entirely. A present `views: 0` means the document was in
+  the window and nobody opened it, which is the answer worth having.
+- **Staleness is stated.** Every response carries `viewsSyncedAt`, and both tool descriptions say
+  the numbers come from the last sync, so a model reports "as of Tuesday" rather than implying it
+  just looked.
+
+So the parity exception narrowed rather than closed: the CLI keeps identities and arbitrary
+windows, MCP gets counts as of the last sync. There is no cron — a publish that waited on an
+analytics query would hang when Analytics Engine did.
 
 `backup` and `restore` are CLI-only for the same structural reason. They read and write KV *key
 metadata*, which no `/api` endpoint exposes and which listings render from — so they talk to

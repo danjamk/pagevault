@@ -33,6 +33,7 @@ import {
   putPortal,
   putPublicToken,
 } from "./store.js";
+import { type ViewStats, type ViewSummary, getViewSummary, statsFor } from "./views.js";
 
 /**
  * The remote MCP server. This is the reason the project exists.
@@ -186,6 +187,34 @@ const SOURCE_KIND = z.enum(["html", "markdown"]);
  */
 const RELEASES_URL = "https://github.com/danjamk/pagevault/releases/latest";
 
+/**
+ * View metrics as an agent sees them (#127). Every field is OPTIONAL, and their absence is the
+ * load-bearing part: absent means "not measured" (no sync has run, or the document was published
+ * after the last one), while a present `views: 0` means "measured, and nobody opened it" — which
+ * is the answer worth having. See `statsFor` in views.ts.
+ */
+const VIEW_OUT_SHAPE = {
+  views: z.number().optional(),
+  lastViewedAt: z.string().nullable().optional(),
+  surfaces: z.object({ link: z.number(), public: z.number(), portal: z.number() }).optional(),
+};
+
+/** When the metrics above were last synced from Analytics Engine. Absent when never. */
+const VIEWS_SYNCED_AT = z.string().optional();
+
+/**
+ * Stated in the tool descriptions themselves, not only in the server instructions.
+ *
+ * ADR-019 decision 6: a number that is three days old and says so is useful; one that is three
+ * days old and looks live is a liability. A model will report what it is handed as current unless
+ * told otherwise, and the sentence has to sit next to the field for that to hold.
+ */
+const METRICS_NOTE = [
+  "`views`, `lastViewedAt` and `surfaces` come from the last `pagevault views --sync`, not from",
+  "live traffic — `viewsSyncedAt` says when it ran. Report them as of that time. When they are",
+  "absent nothing has been measured yet: say so rather than reporting zero views.",
+].join("\n");
+
 /** One document, as an agent-consumable record. `url` opens it; `id` joins to read_document. */
 const DOC_OUT_SHAPE = {
   id: z.string(),
@@ -201,6 +230,7 @@ const DOC_OUT_SHAPE = {
   createdAt: z.string(),
   updatedAt: z.string(),
   bytes: z.number(),
+  ...VIEW_OUT_SHAPE,
 };
 
 const PORTAL_OUT_SHAPE = {
@@ -648,12 +678,16 @@ function buildServer(env: Env, origin: string): McpServer {
     {
       title: "List documents",
       annotations: { readOnlyHint: true, openWorldHint: false },
-      description: "List documents, newest first. Metadata only — use read_document for the contents.",
+      description: [
+        "List documents, newest first. Metadata only — use read_document for the contents.",
+        "",
+        METRICS_NOTE,
+      ].join("\n"),
       inputSchema: {
         portal: z.string().optional().describe("Omit to list across all portals."),
         tag: z.string().optional(),
       },
-      outputSchema: { documents: z.array(z.object(DOC_OUT_SHAPE)) },
+      outputSchema: { documents: z.array(z.object(DOC_OUT_SHAPE)), viewsSyncedAt: VIEWS_SYNCED_AT },
     },
     async (args) => {
       try {
@@ -668,9 +702,16 @@ function buildServer(env: Env, origin: string): McpServer {
         // the KV list quota (1000/day). See store.ts on why kind is not on the DocSummary.
         const base = baseUrl(env, origin);
         const byslug = new Map((await listPortals(env)).map((p) => [p.slug, p]));
+        // One KV read for the whole listing, never one per document (#127).
+        const summary = await getViewSummary(env);
         return structured(
-          docs.map(describe).join("\n\n"),
-          { documents: docs.map((d) => docOut(d, docUrl(base, d.portal, d.id, byslug.get(d.portal) ?? null))) },
+          docs.map((d) => describe(d, statsFor(summary, d))).join("\n\n"),
+          {
+            documents: docs.map((d) =>
+              docOut(d, docUrl(base, d.portal, d.id, byslug.get(d.portal) ?? null), statsFor(summary, d)),
+            ),
+            ...syncedAtOf(summary),
+          },
           docs.map((d) => resourceLink(d.portal, d.id, d.title, d.sourceKind)),
         );
       } catch (err) {
@@ -689,6 +730,8 @@ function buildServer(env: Env, origin: string): McpServer {
         "",
         "This is what makes the portal memory rather than an outbox: six months into an",
         "engagement you can ask what was decided, and the answer is in here.",
+        "",
+        METRICS_NOTE,
       ].join("\n"),
       inputSchema: { id: z.string() },
       // `source` is what the prose shows — truncated when the doc is large; `bytes` is the true
@@ -705,6 +748,8 @@ function buildServer(env: Env, origin: string): McpServer {
         bytes: z.number(),
         createdAt: z.string(),
         updatedAt: z.string(),
+        ...VIEW_OUT_SHAPE,
+        viewsSyncedAt: VIEWS_SYNCED_AT,
       },
     },
     async (args) => {
@@ -714,11 +759,14 @@ function buildServer(env: Env, origin: string): McpServer {
 
         const { meta, source, truncated } = result;
         const url = docUrl(baseUrl(env, origin), meta.portal, meta.id, await getPortal(env, meta.portal));
+        const summary = await getViewSummary(env);
+        const stats = statsFor(summary, meta);
         return structured(
           [
             `# ${meta.title}`,
             `portal: ${meta.portal} · published: ${meta.createdAt.slice(0, 10)} · updated: ${meta.updatedAt.slice(0, 10)}`,
             ...(meta.summary ? [`summary: ${meta.summary}`] : []),
+            ...(stats ? [viewLine(stats, summary)] : []),
             ...(truncated ? [``, `[TRUNCATED — showing the first 100KB of ${meta.bytes} bytes]`] : []),
             ``,
             source,
@@ -735,6 +783,8 @@ function buildServer(env: Env, origin: string): McpServer {
             bytes: meta.bytes,
             createdAt: meta.createdAt,
             updatedAt: meta.updatedAt,
+            ...(stats ?? {}),
+            ...(stats ? syncedAtOf(summary) : {}),
           },
         );
       } catch (err) {
@@ -932,22 +982,44 @@ function buildServer(env: Env, origin: string): McpServer {
 
 // ---------------------------------------------------------------------------
 
-const describe = (doc: {
-  id: string;
-  name: string;
-  title: string;
-  summary?: string | undefined;
-  portal: string;
-  createdAt: string;
-  ownerOnly: boolean;
-  tags?: string[] | undefined;
-}): string =>
+const describe = (
+  doc: {
+    id: string;
+    name: string;
+    title: string;
+    summary?: string | undefined;
+    portal: string;
+    createdAt: string;
+    ownerOnly: boolean;
+    tags?: string[] | undefined;
+  },
+  stats: ViewStats | null = null,
+): string =>
   [
     `${doc.title}${doc.ownerOnly ? "  [draft]" : ""}`,
     `  file: ${doc.name} · id: ${doc.id} · portal: ${doc.portal} · ${doc.createdAt.slice(0, 10)}`,
     ...(doc.summary ? [`  ${doc.summary}`] : []),
     ...(doc.tags?.length ? [`  tags: ${doc.tags.join(", ")}`] : []),
+    ...(stats ? [`  ${viewLine(stats)}`] : []),
   ].join("\n");
+
+/**
+ * The prose half of the metrics. "not opened yet" rather than "0 views": the count is the datum,
+ * but the sentence an operator actually wants out of an agent is whether the client read it.
+ */
+function viewLine(stats: ViewStats, summary: ViewSummary | null = null): string {
+  const asOf = summary ? `, as of ${summary.syncedAt.slice(0, 10)}` : "";
+  if (stats.views === 0) return `views: not opened yet${asOf}`;
+  const doors = (["portal", "link", "public"] as const)
+    .filter((s) => stats.surfaces[s] > 0)
+    .map((s) => `${s} ${stats.surfaces[s]}`)
+    .join(", ");
+  const last = stats.lastViewedAt ? ` · last ${stats.lastViewedAt.slice(0, 10)}` : "";
+  return `views: ${stats.views} (${doors})${last}${asOf}`;
+}
+
+/** The top-level staleness stamp, present exactly when a summary is. */
+const syncedAtOf = (summary: ViewSummary | null) => (summary ? { viewsSyncedAt: summary.syncedAt } : {});
 
 const baseUrl = (env: Env, origin: string): string => {
   const host = env.PUBLIC_HOST?.trim();
@@ -1001,7 +1073,7 @@ const structured = (body: string, structuredContent: Record<string, unknown>, li
  * reading the field should not have to know that), while `summary`/`tags` stay optional — absent
  * means none, which is information, not a default worth inventing.
  */
-const docOut = (doc: DocSummary, url: string): Record<string, unknown> => ({
+const docOut = (doc: DocSummary, url: string, stats: ViewStats | null = null): Record<string, unknown> => ({
   id: doc.id,
   portal: doc.portal,
   name: doc.name,
@@ -1015,6 +1087,9 @@ const docOut = (doc: DocSummary, url: string): Record<string, unknown> => ({
   createdAt: doc.createdAt,
   updatedAt: doc.updatedAt,
   bytes: doc.bytes,
+  // Spread whole or not at all — a document measured at zero carries `views: 0`, one that was
+  // never measured carries no view fields. See statsFor in views.ts.
+  ...(stats ?? {}),
 });
 
 /**

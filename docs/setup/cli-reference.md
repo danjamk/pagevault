@@ -180,6 +180,29 @@ Records are kept for **three months** and then age out on their own; `destroy` c
 because the Worker deliberately holds no credential that can read or delete analytics
 ([ADR-015](../adr/ADR-015-what-a-view-record-contains.md) §5–6).
 
+### `pagevault views --sync`
+Push a summary of those counts into your deployment so an **agent** can see them. `read_document`
+and `list_documents` then report `views`, `lastViewedAt`, and which door readers came through —
+as of the sync, never live.
+
+The query still runs here, on your machine, with your Cloudflare token; only the aggregate
+travels ([ADR-019](../adr/ADR-019-view-metrics-reach-mcp-by-sync.md)). **Counts and surfaces
+only — viewer emails never leave this machine.**
+
+- **Whole-deployment by design.** `--portal` and `--doc` are refused: a summary covering one
+  client would make every document outside it report a *measured* zero — "they never opened it"
+  about documents nobody measured.
+- **90-day window by default**, where the table defaults to 30. "Have they ever opened it" is a
+  lifetime question, and Analytics Engine retains about three months.
+- **Documents that no longer exist are dropped**, and the count of them is reported — the dataset
+  outlives the deployment, so a rebuild leaves rows pointing at ids that no longer resolve.
+- **Costs one KV write.** Re-run it whenever you want the numbers refreshed. There is no cron on
+  purpose: a publish that waited on an analytics query would hang when Analytics Engine did.
+
+An agent sees nothing at all until the first sync, and nothing for a document published since the
+last one. That is deliberate — absent means "not measured", and only a real zero means nobody
+opened it.
+
 ### `pagevault backup [--out <file.json>]` · `restore <file.json> [--force]`
 Same-host disaster recovery. `backup` snapshots the whole KV namespace — documents, portals,
 members, public-link tokens — to one JSON file; `restore` replays it. Keys are preserved

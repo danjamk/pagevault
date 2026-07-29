@@ -7,6 +7,55 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-07-29
+
+The portal could always tell you what you sent. Now it can tell you what got opened.
+
+### Added
+- **View metrics over MCP.** "Which of the fourteen things I sent Acme did they actually open?"
+  now has an answer in the place you are already talking about that client. `list_documents` and
+  `read_document` report `views`, `lastViewedAt`, and which door readers came through — so an
+  agent can say *they never opened the migration plan* while you are drafting the call agenda,
+  instead of you remembering to check a terminal. ([#127](../../issues/127))
+
+  The Worker still cannot read Analytics Engine, and that has not been softened. Reading it needs
+  an account-scoped `Account Analytics Read` token — one that can read analytics for **every**
+  Worker on the account, not just this one — and ADR-015 decision 6 keeps it off the Worker.
+  Instead `pagevault views --sync` runs the query on your machine, aggregates it, and pushes a
+  summary into one KV key. The Worker gains data, never the capability to compute it
+  ([ADR-019](docs/adr/ADR-019-view-metrics-reach-mcp-by-sync.md)).
+
+- **`pagevault views --sync`.** One KV write, whole-deployment, 90-day window by default — the
+  table still defaults to 30, but "have they *ever* opened it" is a lifetime question and
+  Analytics Engine keeps about three months. Documents that no longer exist are dropped and
+  counted; the dataset outlives the deployment that wrote it, so a rebuild leaves rows pointing at
+  ids that no longer resolve.
+
+  `--portal` and `--doc` are **refused** with `--sync`. A summary covering one client would claim
+  to cover the deployment, and every document outside it would then report a *measured* zero — a
+  lie in the one direction that matters.
+
+  No cron, deliberately: coupling a publish to an analytics query means an Analytics Engine outage
+  makes publishing hang.
+
+  The same fields ride through `pagevault list --json` and `read --json`, so the terminal is not a
+  lesser surface than an agent. The human table is unchanged — `pagevault views` already reports
+  this in more detail, with identities.
+
+### Notes
+- **Counts and surfaces reach an agent; identities never do.** The underlying records carry viewer
+  emails for Access-authenticated reads. The summary carries none. "Opened four times through the
+  public link, never by a signed-in member" is useful and identifies nobody; putting *who* within
+  reach of an LLM is a decision to make on its own merits, not one to inherit from a metrics
+  feature.
+- **Absent is not zero.** No sync, or a document published since the last one, omits the fields
+  entirely. A present `views: 0` means the document was in the measured window and nobody opened
+  it — which is the whole value. Every response carries `viewsSyncedAt`, and both tool
+  descriptions say the numbers come from the last sync, so a model reports "as of Tuesday" rather
+  than implying it just looked.
+- `views` stops being a whole-command exception to CLI/MCP parity and becomes a difference in
+  *kind*: the CLI keeps identities and arbitrary windows, MCP gets counts as of the last sync.
+
 ## [0.25.0] — 2026-07-28
 
 Two things the console could see and did not say.
@@ -936,7 +985,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/danjamk/pagevault/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/danjamk/pagevault/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/danjamk/pagevault/compare/v0.23.2...v0.24.0
 [0.23.2]: https://github.com/danjamk/pagevault/compare/v0.23.1...v0.23.2

@@ -148,6 +148,14 @@ Three things worth recording so they are not re-litigated:
   `read_document` and `list_documents` resolve kind with one extra read (never per-document).
 - **`read_document` reports `bytes` (true size) alongside a possibly-truncated `source`**, so
   `truncated: true` + `bytes` together tell an agent the payload is partial.
+- **View metrics are optional fields whose *absence* is meaningful** (#127). `views`,
+  `lastViewedAt` and `surfaces` appear only for documents that were actually measured; a
+  document published since the last sync, or a deployment that has never synced, carries none of
+  them. A present `views: 0` therefore means "measured, nobody opened it" — the answer worth
+  having — and an absent one never gets read as that. The staleness stamp `viewsSyncedAt` rides
+  alongside, and both tool descriptions say the numbers come from the last sync, so a model
+  reports "as of Tuesday" rather than implying it just looked (ADR-019 decision 6). One extra KV
+  read per call for the whole listing, never per-document.
 
 ### 5. Resources — addressable content, not just model-invoked tools
 

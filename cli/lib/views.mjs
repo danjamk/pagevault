@@ -7,10 +7,15 @@
 // Worker holds. Putting it in the Worker is exactly the blast-radius widening ADR-002 exists to
 // prevent, so the Worker writes and the operator reads. See ADR-015, decision 6.
 //
-// The practical consequence: `views` is CLI-only, a documented exception to CLI/MCP parity — the
-// MCP server runs *inside* the Worker, so it cannot have this without handing the Worker a
-// credential that can read the whole account's analytics. `backup` and `restore` are CLI-only for
-// the same shape of reason, with a wider token still (it can delete namespaces).
+// The practical consequence: *reading* is CLI-only — the MCP server runs *inside* the Worker, so
+// it cannot query analytics without holding a credential that can read the whole account's.
+// `backup` and `restore` are CLI-only for the same shape of reason, with a wider token still (it
+// can delete namespaces).
+//
+// What DOES reach MCP is the answer, not the capability: `views --sync` aggregates here and PUTs
+// a summary into one KV key, which `list_documents` / `read_document` then serve (#127, ADR-019).
+// So the parity exception narrowed rather than closed — the CLI keeps identities and arbitrary
+// windows; MCP gets counts and surfaces as of the last sync.
 //
 // Zero dependencies. Node built-ins only.
 //
@@ -107,6 +112,62 @@ export async function queryViews({ accountId, token }, opts = {}) {
 }
 
 /**
+ * Aggregate query rows into the summary the Worker stores, so MCP can answer "did the client
+ * actually open it?" without the Worker ever holding an analytics token (#127, ADR-019).
+ *
+ * Pure: the caller supplies `syncedAt` and the set of ids that still exist, so the whole thing is
+ * testable with no network and no clock.
+ *
+ * 🔴 Counts and surfaces, never identities (ADR-019 decision 4). `viewer` is on every row and is
+ * dropped here on purpose. "Opened four times through the public link, never by a signed-in
+ * member" is useful and identifies nobody; putting an email within reach of an LLM is a separate
+ * decision to be made on its own merits. The CLI table keeps identities — an operator reading
+ * their own dashboard is a different act from an agent summarizing it.
+ */
+export function summarizeViews({ days, rows }, { syncedAt, knownIds = null } = {}) {
+  // Null-prototype: keys are document ids that arrived from Cloudflare, and `__proto__` on a
+  // normal object literal would set the prototype rather than store a count.
+  const docs = Object.create(null);
+  const skipped = new Set();
+
+  for (const r of rows) {
+    if (!r.doc) continue;
+
+    // The dataset is account-level and outlives the deployment that wrote it (#129), so rows can
+    // name documents that were revoked or torn down. Dropping them keeps the one KV key bounded
+    // and stops MCP reporting metrics for something `list_documents` will never return.
+    if (knownIds && !knownIds.has(r.doc)) {
+      skipped.add(r.doc);
+      continue;
+    }
+
+    const entry = (docs[r.doc] ??= { views: 0, lastViewedAt: null, surfaces: { link: 0, public: 0, portal: 0 } });
+    entry.views += r.views;
+    // hasOwn, not `in` — `in` also matches inherited members, so an unexpected surface value
+    // would land on Object.prototype's namespace and produce NaN.
+    if (Object.hasOwn(entry.surfaces, r.surface)) entry.surfaces[r.surface] += r.views;
+
+    const seen = toIso(r.lastView);
+    if (seen && (!entry.lastViewedAt || seen > entry.lastViewedAt)) entry.lastViewedAt = seen;
+  }
+
+  return { summary: { syncedAt, windowDays: days, docs }, skipped: [...skipped] };
+}
+
+/**
+ * Analytics Engine hands back timestamps as ClickHouse DateTime (`2026-07-26 18:04:00`, UTC),
+ * not ISO. Normalize so the stored summary reads the same shape whichever came back, and so the
+ * string comparison above genuinely picks the latest view.
+ */
+function toIso(value) {
+  if (!value) return null;
+  const s = String(value).trim();
+  if (!s) return null;
+  const t = s.includes("T") ? s : s.replace(" ", "T");
+  return /(Z|[+-]\d{2}:?\d{2})$/.test(t) ? t : `${t}Z`;
+}
+
+/**
  * Turn the three failures that actually happen into the thing that fixes them. Everything else
  * passes through — a wrong guess dressed up as advice is worse than the raw response.
  */
@@ -181,7 +242,7 @@ export function formatViews({ days, rows }, c) {
   ].join("\n");
 }
 
-const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+export const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** Column widths must ignore ANSI, or a styled cell throws the whole table off. */
 const visible = (s) => String(s).replace(/\x1b\[[0-9;]*m/g, "");

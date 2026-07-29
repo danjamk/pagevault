@@ -452,6 +452,58 @@ describe("CLI against a live Worker — Public (no Access)", { timeout: 180_000 
     assert.match(r.stderr, /--remove/);
   });
 
+  it("views --sync refuses a filtered sync before it queries anything", () => {
+    // #127. A per-portal summary would claim to cover the deployment while holding one client,
+    // so every document outside it would report a MEASURED zero views — "they never opened it"
+    // about documents nobody measured. The guard runs before the Analytics Engine call, which is
+    // also why this is assertable here with no Cloudflare credential in the environment.
+    for (const flag of ["--portal", "--doc"]) {
+      const r = run("views", "--sync", flag, "acme");
+      assert.equal(r.status, 1, `views --sync ${flag} should exit 1`);
+      assert.match(r.stderr, /cannot be combined with --sync/);
+      assert.match(r.stderr, /whole deployment/);
+    }
+  });
+
+  it("a synced summary reaches the CLI read side, and an unsynced one shows nothing (#127)", async () => {
+    // The query half needs a real Analytics Engine and an account-scoped token, so it belongs to
+    // the lifecycle run. What is testable here is the half that ships in the Worker: the summary
+    // going in over /api and coming back out through `list --json` / `read --json`.
+    const file = fixture(scratch, "metrics.html", "<!doctype html><title>Metrics Target</title><h1>m</h1>");
+    ok(run, "publish", file, "--portal", "acme");
+    const id = JSON.parse(ok(run, "list", "--portal", "acme", "--json").stdout).find(
+      (d) => d.name === "metrics.html",
+    ).id;
+
+    // Absent before any sync — not zero.
+    assert.equal(JSON.parse(ok(run, "read", id, "--json").stdout).views, undefined);
+
+    const res = await fetch(`${worker.base}/api/views/summary`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${BEARER}`, "Content-Type": "application/json" },
+      // Dated ahead of the document published a moment ago, so it falls inside the window.
+      body: JSON.stringify({
+        syncedAt: "2099-01-01T00:00:00.000Z",
+        windowDays: 90,
+        docs: { [id]: { views: 5, lastViewedAt: "2026-07-28T09:00:00Z", surfaces: { link: 5, public: 0, portal: 0 } } },
+      }),
+    });
+    assert.equal(res.status, 200);
+
+    const doc = JSON.parse(ok(run, "read", id, "--json").stdout);
+    assert.equal(doc.views, 5);
+    assert.deepEqual(doc.surfaces, { link: 5, public: 0, portal: 0 });
+    assert.equal(doc.viewsSyncedAt, "2099-01-01T00:00:00.000Z");
+
+    // Every other document in the portal was measured and had no rows — a real zero.
+    const others = JSON.parse(ok(run, "list", "--portal", "acme", "--json").stdout).filter((d) => d.id !== id);
+    assert.ok(others.length > 0, "the portal should hold other documents by now");
+    assert.ok(
+      others.every((d) => d.views === 0),
+      "documents inside a synced window report a measured zero, not an absent field",
+    );
+  });
+
   it("--help answers for the command, not the whole CLI, and touches no deployment", () => {
     // #126: `<cmd> --help` used to print the top-level wall. `cli/help.test.mjs` pins the map to
     // the dispatch table; this proves the wiring survives against a configured, live deployment —

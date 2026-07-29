@@ -237,14 +237,25 @@ reports that there is no group, which is expected.
   ),
 
   views: H(
-    "Usage: pagevault views [--days 30] [--portal s] [--doc id] [--json]",
+    "Usage: pagevault views [--days 30] [--portal s] [--doc id] [--json]   ·   views --sync",
     `
 Which documents were actually opened. Reads Analytics Engine directly with your Cloudflare token
-— the Worker's binding is write-only, which is why there is no MCP equivalent (ADR-015).
+— the Worker's binding is write-only, so it can never run this query itself (ADR-015).
 
 View records are ACCOUNT-LEVEL and outlive the deployment that wrote them: after a teardown and
 rebuild this shows history the new deployment never created. Cloudflare keeps them three months
-and documents no way to delete a dataset.`,
+and documents no way to delete a dataset.
+
+  --sync   push a summary of these counts into your deployment, so an agent can see them.
+           read_document and list_documents then report views, when they were last opened, and
+           which door readers came through — as of the sync, never live. Counts and surfaces
+           only: viewer emails stay here, on your machine (ADR-019).
+
+           Whole-deployment by design, so --portal and --doc are refused: a partial summary would
+           report a MEASURED zero for every document it left out. Defaults to a 90-day window
+           (the table defaults to 30) because "have they ever opened it" is a lifetime question.
+           Costs one KV write. Re-run it whenever you want the numbers refreshed; there is no
+           cron, deliberately — a publish that waited on an analytics query could hang.`,
   ),
 
   backup: H(
