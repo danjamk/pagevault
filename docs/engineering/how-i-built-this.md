@@ -207,7 +207,7 @@ demo. If a claim on the site were false, the site would be the thing that broke.
 
 ## What this repo is trying to show
 
-Two things, really. One: you can build a genuinely small, auditable product with an agent, if you
+Two things, really. One: you can build a genuinely high-quality, auditable product with an agent, if you
 put the discipline in the repo instead of in your head. Every practice above is a file someone else
 can read — the ADRs, the plans, the issue labels, the lifecycle skill, the three workflows, the
 checks that fail the build. None of it lives in my memory or in a chat log, which is the only reason
