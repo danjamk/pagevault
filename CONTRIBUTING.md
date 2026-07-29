@@ -46,13 +46,21 @@ make setup     # install deps and check your environment (Node 22)
 make dev       # run the Worker locally against Miniflare
 make test        # vitest + @cloudflare/vitest-pool-workers, and the node --test suites
 make test-e2e    # the CLI driven against a real Worker (boots its own wrangler dev)
-make check-docs  # fail if a doc describes something the code doesn't do
-make help        # every target
+make check-docs    # fail if a doc describes something the code doesn't do
+make check-console # fail if the Worker's inline browser JS doesn't parse
+make help          # every target
 ```
 
 `check-docs` runs in CI. It compares prose against the thing that defines it — links and anchors,
 `make` targets, CLI commands, MCP tools, route names — so a renamed command or a deleted route
 fails the build instead of quietly outliving itself in the README. It has no opinion about style.
+
+`check-console` also runs in CI, and covers a blind spot in the type checker. The Worker builds its
+UI as HTML inside TypeScript template literals, so the browser JavaScript is *string content* as far
+as `tsc` is concerned — a stray backtick, a bad escape, or an unbalanced brace type-checks clean and
+ships a blank page. It extracts every inline `<script>` the Worker emits, evaluates the template,
+and parses the result. An unbalanced brace introduced into the console passes `pnpm typecheck` and
+all 25 console tests; this catches it.
 
 Tests earn their place — write them where they'd catch a real regression, not for coverage's sake,
 and test against real infrastructure rather than mocking everything. Node 22 is required (Wrangler 4

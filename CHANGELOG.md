@@ -45,6 +45,19 @@ Two things the console could see and did not say.
   spend the quota, and the cheap single-portal read rather than the full portal tree. The document
   header also now says when the list was last read, instead of leaving you to assume.
 
+### Tooling
+- **`make check-console`** — a new build check, in CI, for a blind spot in the type checker. The
+  Worker builds its UI as HTML inside TypeScript template literals, so roughly 45KB of browser
+  JavaScript is *string content* to `tsc`: a stray backtick, a bad escape, or an unbalanced brace
+  type-checks clean and ships a blank page. It extracts every inline `<script>` the Worker emits —
+  the console, the viewer shell, the portal page — evaluates the template, and parses the result.
+
+  Written after a backtick inside a comment inside `page()` silently terminated the template. The
+  gap is measured, not assumed: an unbalanced brace introduced into the console passes `pnpm
+  typecheck` with exit 0 and all 25 console tests, and this catches it. It also refuses to pass on
+  an implausibly small extraction, because an earlier version of it reported success having parsed
+  279 characters of the wrong script.
+
 ## [0.24.0] — 2026-07-28
 
 Three places where the CLI knew something and did not say it. Backup and restore existed but only

@@ -34,6 +34,12 @@ jobs:
       # the node --test suites below are called directly. `make check-docs` remains the local door.
       - run: node scripts/check-docs.mjs
 
+      # Fails the build if the browser JavaScript the Worker emits doesn't parse. It lives inside
+      # TypeScript template literals, so tsc sees string content, not code: an unbalanced brace in
+      # the console passes `pnpm typecheck` below with exit 0 and all 25 console tests, and ships a
+      # blank admin page. Same direct invocation as check-docs, for the same $(NVM) reason.
+      - run: node scripts/check-console.mjs
+
       - run: pnpm typecheck
 
       - run: pnpm test

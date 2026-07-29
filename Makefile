@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install setup dev demo status test test-security check-sandbox check login logout preflight provision deploy verify health logs destroy backup restore views export bundle deploy-bundle publish-cli
+.PHONY: help install setup dev demo status test test-security check-sandbox check-console check login logout preflight provision deploy verify health logs destroy backup restore views export bundle deploy-bundle publish-cli
 
 # Written by `make provision`. Gitignored — it holds your email, team name, AUD tags and
 # KV id, and this is a public repo.
@@ -80,6 +80,16 @@ check-docs: ## Fail the build if the docs describe something the code doesn't do
 # survived months of people reading the pages.
 	@$(NVM) && node scripts/check-docs.mjs
 
+check-console: ## Fail the build if the Worker's inline browser JS doesn't parse
+# The Worker ships its UI as HTML built from template literals, so ~45KB of browser JavaScript
+# lives inside TypeScript strings where tsc has nothing to say about it. A stray backtick, a bad
+# escape, an unbalanced brace — all valid *string content*, and the first sign is a blank page.
+#
+# Proven, not assumed: an unbalanced brace introduced into the console passes `tsc` with exit 0
+# and all 25 console tests, and this catches it. Added after a backtick inside a comment inside
+# page() silently terminated the template.
+	@$(NVM) && node scripts/check-console.mjs
+
 check-palette: ## Fail the build if a retired amber/cream hex reappears in the Worker (#122)
 # The console moved to the neutral + signal-blue system (#67), but the landing, error, viewer and
 # OAuth pages kept the old amber identity for months — the favicon and the landing page disagreed
@@ -97,7 +107,7 @@ check-palette: ## Fail the build if a retired amber/cream hex reappears in the W
 		echo "✓ no retired palette hexes in worker/src"; \
 	fi
 
-check: check-sandbox check-palette ## Typecheck + test — the pre-PR gate, and what CI runs
+check: check-sandbox check-palette check-console ## Typecheck + test — the pre-PR gate, and what CI runs
 	@$(NVM) && pnpm check
 
 ##@ Cloudflare account
