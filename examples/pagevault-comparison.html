@@ -236,7 +236,7 @@
         <h3>What's genuinely rare here</h3>
         <ul>
           <li><b>The whole combination.</b> Free, self-hosted on your own domain, renders the artifact <em>and</em> Markdown, keeps it as a per-client collection, open-source enough to read in a sitting. Any one piece you can find elsewhere; the set is the gap.</li>
-          <li><b>Agent read-back of the collection.</b> An MCP server lets Claude search and read a client's whole corpus later — "what did we decide about the CDC migration in March?" The nearest rival, Peony, has a bidirectional MCP, but it's a $30+/mo data room, not a free deliverable portal.</li>
+          <li><b>Your AI reads the collection back.</b> An MCP server lets Claude search and read a client's whole corpus later — "what did we decide about the CDC migration in March?" The nearest rival, Peony, has a bidirectional MCP, but it's a $30+/mo data room, not a free deliverable portal.</li>
         </ul>
       </div>
       <div class="rc skip">
@@ -278,7 +278,7 @@
 
   var frames = [
     {key:"collection", label:"A per-client collection", xlow:"one-off link", xhigh:"durable collection",
-      lead:"Only PageVault sits in the extreme top-right: AI-native and built around a durable per-client collection. Data rooms (Peony) and portal suites (SuiteDash, Clinked) have collections too, but they're on the manual half — they don't take an agent, and most won't render your artifact."},
+      lead:"Only PageVault sits in the extreme top-right: AI-native and built around a durable per-client collection. Data rooms (Peony) and portal suites (SuiteDash, Clinked) have collections too, but they're on the manual half — they don't take an AI assistant, and most won't render your artifact."},
     {key:"artifact", label:"Artifact handling", xlow:"hosts a file", xhigh:"renders & exports it",
       lead:"PageVault and sharehtml lead: both render HTML and Markdown and hand the file back, instead of just hosting it. PageVault also exports a document as a single continuous PDF. Most link tools do HTML only; the portal suites don't render artifacts at all."},
     {key:"privacy", label:"Privacy", xlow:"open link", xhigh:"host-blind",
@@ -294,13 +294,13 @@
   var tools = [
     {id:"pv", name:"PageVault", url:"https://github.com/danjamk/pagevault", y:92,
       s:{collection:95,artifact:88,privacy:70,collab:5,ownership:90,accountability:55},
-      blurb:"Free, self-hosted per-client portals that render HTML and Markdown, with an MCP server an agent can publish into and read back. No live collaboration, no encryption, not a CRM."},
+      blurb:"Free, self-hosted per-client portals that render HTML and Markdown, with an MCP server an AI assistant can publish into and read back. No live collaboration, no encryption, not a CRM."},
     {id:"sharehtml", name:"jonesphillip/sharehtml", url:"https://github.com/jonesphillip/sharehtml", y:66,
       s:{collection:12,artifact:82,privacy:65,collab:92,ownership:92,accountability:18},
-      blurb:"OSS, Cloudflare Workers + Access, by a Cloudflare Group PM. Live comments, reactions and presence; renders Markdown and code. Its agent story is a CLI skill — terminal only — and there's no per-client collection."},
+      blurb:"OSS, Cloudflare Workers + Access, by a Cloudflare Group PM. Live comments, reactions and presence; renders Markdown and code. Its AI integration is a CLI skill — terminal only — and there's no per-client collection."},
     {id:"sharehtmlcom", name:"share-html.com", url:"https://share-html.com", y:84,
       s:{collection:12,artifact:52,privacy:44,collab:8,ownership:20,accountability:24},
-      blurb:"Paste, drop or push. Ships an MCP server with edit tokens so an agent can rewrite the same URL across a conversation. It can write; it can't read a collection back."},
+      blurb:"Paste, drop or push. Ships an MCP server with edit tokens so an AI assistant can rewrite the same URL across a conversation. It can write; it can't read a collection back."},
     {id:"shareduo", name:"ShareDuo", url:"https://shareduo.com", y:76,
       s:{collection:14,artifact:56,privacy:50,collab:10,ownership:34,accountability:55},
       blurb:"Free, no signup. Password, expiry, aggregate analytics, and a six-tool MCP server that publishes from inside Claude. It even runs CDN-loaded Chart.js/D3. The frictionless pick for one-off links."},
@@ -347,9 +347,9 @@
       {key:"a_sandbox",label:"Sandboxed against hostile artifact JS"},
       {key:"a_noacct", label:"Reader installs nothing, no account"}
     ]},
-    {g:"Agent & workflow", caps:[
-      {key:"w_mcp",     label:"An agent can publish it (MCP)"},
-      {key:"w_readback",label:"An agent can read the whole collection back", u:true}
+    {g:"AI & workflow", caps:[
+      {key:"w_mcp",     label:"An AI assistant can publish it (MCP)"},
+      {key:"w_readback",label:"An AI assistant can read the whole collection back", u:true}
     ]},
     {g:"The collection", caps:[
       {key:"c_collection",label:"One durable per-client collection"},
@@ -370,17 +370,17 @@
 
   var prof = {
     pv:{who:"Many artifacts for one client, made in chat",
-      verdict:"Free, self-hosted per-client portals that render HTML and Markdown, with an MCP server an agent can publish into and read back. No collaboration, no encryption, not a CRM — it keeps the collection, and handles the awkward formats, better than it does anything else.",
+      verdict:"Free, self-hosted per-client portals that render HTML and Markdown, with an MCP server an AI assistant can publish into and read back. No collaboration, no encryption, not a CRM — it keeps the collection, and handles the awkward formats, better than it does anything else.",
       v:{s_emails:1,s_public:1,s_modes:1,a_html:1,a_md:1,a_export:1,a_sandbox:1,a_noacct:1,w_mcp:1,w_readback:1,c_collection:1,c_overwrite:1,o_selfhost:1,o_oss:1,o_export:1,x_collab:0,x_e2e:0,x_audit:1,x_crm:0},
       notes:{a_md:"renders Markdown to styled HTML at publish",a_export:"raw source back, or the whole document as one continuous PDF",w_mcp:"Claude Code and the hosted surfaces — claude.ai, Desktop, mobile — over OAuth",w_readback:"search_portal / read_document across the client's whole corpus",x_audit:"named who-viewed log on Secured docs; rolling 90 days, no watermark",o_export:"human-readable full export"}},
     sharehtml:{who:"Inline feedback, if you live in a terminal",
-      verdict:"The closest analog and genuinely good — same Cloudflare design, plus live comments, reactions and presence, and it renders Markdown and code. Its agent skill only works where there's a shell, and link-shared views still burn an Access seat.",
+      verdict:"The closest analog and genuinely good — same Cloudflare design, plus live comments, reactions and presence, and it renders Markdown and code. Its assistant integration only works where there's a shell, and link-shared views still burn an Access seat.",
       v:{s_emails:1,s_public:0,s_modes:.5,a_html:1,a_md:1,a_export:.5,a_sandbox:.5,a_noacct:1,w_mcp:0,w_readback:0,c_collection:0,c_overwrite:1,o_selfhost:1,o_oss:1,o_export:.5,x_collab:1,x_e2e:0,x_audit:0,x_crm:0},
       notes:{s_public:"link-shared docs still burn an Access seat",a_export:"pull the raw file; no PDF",a_sandbox:"iframe attribute only, no CSP header",w_mcp:"CLI skill — terminal only",c_overwrite:"diff before overwrite",x_collab:"comments, reactions, presence"}},
-    sharehtmlcom:{who:"An agent rewriting one URL across a chat",
+    sharehtmlcom:{who:"An AI rewriting one URL across a chat",
       verdict:"Ships an MCP server with edit tokens — a model can iterate on the same URL across a conversation. That's write access; it can't read a collection back and isn't self-hosted.",
       v:{s_emails:.5,s_public:1,s_modes:.5,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:1,w_mcp:1,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:0,x_e2e:0,x_audit:0,x_crm:0},
-      notes:{s_emails:"expiry + edit tokens, not a per-recipient allowlist",w_mcp:"MCP + REST, with agent edit tokens",c_overwrite:"edit tokens revise the same URL"}},
+      notes:{s_emails:"expiry + edit tokens, not a per-recipient allowlist",w_mcp:"MCP + REST, with edit tokens for an AI",c_overwrite:"edit tokens revise the same URL"}},
     shareduo:{who:"A free, no-signup one-off link",
       verdict:"Free, no account, password + expiry + aggregate analytics + a six-tool MCP server, and it runs CDN-loaded Chart.js/D3. Frictionless for single links — but a single link is all it is.",
       v:{s_emails:.5,s_public:1,s_modes:.5,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:1,w_mcp:1,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:0,x_e2e:0,x_audit:.5,x_crm:0},
@@ -400,11 +400,11 @@
     htmlshare:{who:"Versioning + analytics, no infrastructure",
       verdict:"A lot shipped in a Chrome extension: access control with Google OAuth, version history, inline comments, view analytics. No self-host, no collection, tied to the browser.",
       v:{s_emails:1,s_public:.5,s_modes:.5,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:.5,w_mcp:0,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:1,x_e2e:0,x_audit:1,x_crm:0},
-      notes:{s_emails:"access control via Google OAuth",a_noacct:"viewers sign in with Google",w_mcp:"browser extension, no agent API",c_overwrite:"version history",x_collab:"inline comments",x_audit:"view link analytics"}},
+      notes:{s_emails:"access control via Google OAuth",a_noacct:"viewers sign in with Google",w_mcp:"browser extension, no API for an assistant",c_overwrite:"version history",x_collab:"inline comments",x_audit:"view link analytics"}},
     publish:{who:"The link that's already inside Claude",
       verdict:"Zero setup, free on every plan, embeddable, link stays current when you revise. But all-or-nothing public, possibly indexed, and anonymous — no gating, no idea if it landed.",
       v:{s_emails:0,s_public:1,s_modes:0,a_html:1,a_md:.5,a_export:.5,a_sandbox:.5,a_noacct:1,w_mcp:0,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:0,x_e2e:0,x_audit:0,x_crm:0},
-      notes:{s_emails:"all-or-nothing public",a_md:"renders formatted docs in-app",a_export:"copy the source",c_overwrite:"updating in place is unreliable; unpublishing is one-way",w_mcp:"a manual button, not an agent tool"}},
+      notes:{s_emails:"all-or-nothing public",a_md:"renders formatted docs in-app",a_export:"copy the source",c_overwrite:"updating in place is unreliable; unpublishing is one-way",w_mcp:"a manual button, not a tool an AI can call"}},
     suitedash:{who:"Invoicing and a CRM, not just a host",
       verdict:"A genuine per-client portal with a full business suite for $19/mo flat. But it's a file host — it won't render your interactive HTML, isn't AI-native, and the client has to make an account and learn a UI.",
       v:{s_emails:1,s_public:0,s_modes:.5,a_html:0,a_md:0,a_export:.5,a_sandbox:0,a_noacct:0,w_mcp:0,w_readback:0,c_collection:1,c_overwrite:0,o_selfhost:0,o_oss:0,o_export:.5,x_collab:1,x_e2e:0,x_audit:.5,x_crm:1},
