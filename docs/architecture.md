@@ -40,6 +40,62 @@ answerable from the portal. **Publishing and remembering become the same act.** 
 is what makes a portal worth having at one client, which is the number that exists
 today.
 
+### Why the whole thing is Cloudflare
+
+PageVault is not a web app that happens to be hosted on Cloudflare. It is **one Worker
+plus five Cloudflare primitives**, and the choice of each is load-bearing enough that
+swapping one would change the product.
+
+| Primitive | What it does here | Why it, specifically |
+|---|---|---|
+| **Workers** | The whole product. Router, authorization, viewer shell, console, MCP server. | On a custom domain the Worker *is* the origin — there is no server behind it to bypass, which is also why a quota fail-open cannot serve an unauthorized document (§12). |
+| **Workers KV** | Every document, portal, member list and public token. | Key **metadata** is the trick: a portal index renders from one `list()` with zero reads. A database would be a second thing to run, back up, and pay for. |
+| **Cloudflare Access** (Zero Trust) | Answers *who are you* on `/v` and `/admin`. One-time PIN, so a client needs no account anywhere. | The alternative is building password auth, email delivery and session management — and asking a client's CFO to make an account, which is the one thing this product says you shouldn't have to do. |
+| **Browser Rendering** | Single-page PDF export. | Headless Chrome without hosting headless Chrome. Optional: delete the binding and the feature degrades off. |
+| **Analytics Engine** | View records — who opened what, when (§12). | It has a **separate write quota** from KV: 100k/day against KV's 1,000. A view counter in KV would put reading in competition with publishing and lose. |
+
+Two bindings are optional by design — `BROWSER` and `ANALYTICS`. Remove either and the
+Worker keeps running with that feature quietly off. A second KV namespace, `OAUTH_KV`,
+belongs entirely to the OAuth provider and never mixes with ours.
+
+**The economics are the point.** All of it fits the free tier: 100,000 requests a day,
+100,000 KV reads, 100,000 Analytics writes, and 50 Zero Trust seats. The binding
+constraint is KV **writes** — 1,000 a day, and a publish costs two or three. Reading is
+effectively free; writing is the thing to count.
+
+**And the honest cost:** Cloudflare wants a card on file before it will enable Zero
+Trust, even on the free plan where nothing is charged. That is the one place this stops
+being free-as-in-no-signup, and it is why the tiers split where they do (§9).
+
+### The stack, and what is deliberately not in it
+
+**TypeScript throughout**, on Node 22 — Wrangler 4 requires it. Tests are `vitest` with
+`@cloudflare/vitest-pool-workers`, so the Worker suite runs inside the real Workers
+runtime rather than a Node approximation of it; the CLI and setup scripts use the
+built-in `node --test`. Package manager is `pnpm`.
+
+Four choices are worth stating because they are decisions, not defaults:
+
+- **No frontend framework, anywhere.** The owner console is server-rendered HTML with
+  vanilla JavaScript and no build step ([ADR-004](adr/ADR-004-console-auth.md)). A
+  framework would add a build pipeline, a bundle to audit, and a second security surface
+  on the one page that can administer everything — to render what is essentially a list.
+- **No database.** KV is the whole persistence layer. Nothing to provision, back up
+  separately, or pay for, and the free tier covers it. The cost is real: no transactions,
+  no queries, and ~60s eventual consistency that the code has to assume everywhere.
+- **The CLI has zero runtime dependencies.** Node built-ins only. It is the thing that
+  asks for your Cloudflare API token, so its supply chain is exactly as large as Node
+  itself — a property worth more than any convenience library.
+- **The Worker's dependencies are few and each has a reason**: `jose` for JWT
+  verification (never hand-roll that), the `agents` SDK and the MCP SDK for the remote
+  MCP server, `zod` for tool schemas, `markdown-it` plus KaTeX for Markdown rendering,
+  `@cloudflare/puppeteer` for PDF export, and Cloudflare's OAuth provider. Adding to that
+  list is a conversation, not a commit — prime directive #7.
+
+`nodejs_compat` is on, because the `agents` SDK reaches for `node:path` through
+transitive dependencies. That flag is not optional and not discoverable from tests: the
+suite passes without it and `wrangler` refuses to build.
+
 ## 2. Simplicity first — portals are invisible until needed
 
 Non-negotiable. The quickstart does not contain the word "portal":
@@ -109,6 +165,12 @@ pub:{token}       → string (doc id)
 **The prefixes are disjoint on purpose.** The obvious layout — `portal:{slug}:members` —
 collides with `list({ prefix: "portal:" })`: the member list comes back looking like a
 portal. Members and the index get their own namespaces instead. There is a test for it.
+
+**There is a second KV namespace, `OAUTH_KV`, and nothing above lives in it.** It belongs
+entirely to `@cloudflare/workers-oauth-provider` — issued tokens, grants, and registered
+clients for the MCP OAuth flow (§11). Keeping it separate means a library's key space can
+never collide with ours, and a `list()` over our prefixes can never return one of its
+records. It is provisioned alongside `PAGEVAULT` and otherwise never touched by our code.
 
 ```ts
 type PortalKind = "private" | "restricted" | "public";
@@ -258,6 +320,14 @@ than sharehtml, which relies on the iframe attribute alone.
 > is a lint-level test asserting the string `allow-same-origin` appears **nowhere** in
 > the codebase.
 
+**The shell is also the only thing PageVault puts on a client's screen for its own
+benefit.** One muted line at the end of the chrome — "Powered by PageVault", linking to
+the product page — never a logo and never above the client's own title. A consultant's
+deliverable should not look like it came from a template. `PAGEVAULT_BRANDING=off`
+removes it entirely, and the default is deliberately inverted from `AUTH_MODE`'s: a
+missing or blank value shows the mark, because the failure that matters here is silently
+stripping attribution from a deployment that never asked to, not the reverse.
+
 **Public does not mean unsandboxed.** `/p/*` and `/pub/*` go through the same shell.
 A public artifact is *more* exposed, not less. `X-Robots-Tag: noindex, nofollow` on
 both.
@@ -298,6 +368,17 @@ README said "Tier 2 = named people" — is the reason the ADR exists.
 **Documents carry across a climb untouched.** The hostname changes between rung 1 and rung 2, so
 links handed out under the old address stop resolving; the documents, their ids, and their `/p/`
 tokens do not.
+
+### What it looks like in your account
+
+![The pagevault Worker in the Cloudflare dashboard: one custom domain, Workers Logs enabled, and its bindings](cloudflare-app-overview.png)
+
+That is the whole deployment — one Worker, one custom domain, and its bindings. No
+services, no containers, no database instance, nothing else to watch. The Worker is the
+origin, so what you see here is everything that serves a document.
+
+> The screenshot predates two bindings. A current deployment shows **four**: `PAGEVAULT`
+> and `OAUTH_KV` (§4), `BROWSER` for PDF export, and `ANALYTICS` for view records (§12).
 
 ### Provisioning
 
@@ -498,7 +579,10 @@ document.
 
 Read it with `make views` or `pagevault views [--days] [--portal] [--doc] [--json]`.
 
-**`views` is CLI-only, and that is the one documented exception to CLI/MCP parity.** The
+**`views` is CLI-only, and that is the one documented exception to CLI/MCP parity**
+([ADR-019](adr/ADR-019-view-metrics-reach-mcp-by-sync.md) settles how it reaches an agent
+eventually: the operator syncs a summary into KV, rather than the Worker gaining a read
+token). The
 binding is write-only; reading needs an account-scoped `Account Analytics Read` token, which
 is strictly wider than the Access-group-scoped credential the Worker holds. Giving the Worker
 that token is the blast-radius widening ADR-002 exists to prevent — and the MCP server runs

@@ -32,7 +32,7 @@ Start with the question you came here to answer.
 
 - [`engineering/how-i-built-this.md`](engineering/how-i-built-this.md) — the workflow and the process behind the repo.
 - [`engineering/mcp-best-practices.md`](engineering/mcp-best-practices.md) — the standard the remote MCP server is held to, and where it stands.
-- [`engineering/implementation/`](engineering/implementation/) — the build plans, phase by phase. Live plans sit at the top; [`complete/`](engineering/implementation/complete/) holds the ones whose work has shipped.
+- [`engineering/implementation/`](engineering/implementation/) — the build plans, phase by phase. Open plans sit at the top; [`complete/`](engineering/implementation/complete/) holds the ones whose work has shipped, which is currently all of them.
 - [`engineering/state-versioning.md`](engineering/state-versioning.md) — the `.pagevault.json` schema and its migrations.
 - [`engineering/deploy-prod.md`](engineering/deploy-prod.md) — how I run PageVault's own production through CI (one operator's rig, not required).
 
