@@ -13,8 +13,7 @@ nothing and signs up for nothing — no account, on any platform.
 ![License: MIT](https://img.shields.io/badge/License-MIT-34507A) &nbsp;
 ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-34507A)
 
-> **Pre-1.0 and honest about it.** [Status](#status) says what works today and what
-> doesn't. This README is the setup guide — the product argument lives on the
+> This README is the setup guide. The product argument lives on the
 > [product page](https://danjamk.github.io/pagevault), and there's a
 > [live showcase](https://pagevault.danjamkuhn.com/pub/showcase) running on PageVault
 > itself if you'd rather just look at the thing.
@@ -117,7 +116,7 @@ pagevault publish report.html --public
 ```
 
 `init` already pointed the CLI at your deployment, so there's nothing to configure first. Or publish
-straight from the conversation where you made the artifact — see [Connect an agent](#connect-an-agent).
+straight from the conversation where you made the artifact — see [Connect an agent](#3--connect-an-agent).
 
 `/v/` and `/admin` fail closed at this tier. That's correct: you aren't using them
 yet. When you want them, climb.
@@ -171,65 +170,43 @@ pagevault share acme cfo@acme.com          # and --remove when they leave
 pagevault search acme "migration decision"
 ```
 
-And the collection reads back. The MCP server exposes `search_portal` and
-`read_document`, so six months in, *"what did we decide about the migration?"* is a
-question the portal can answer — over the same connection you published through.
-Publishing and remembering become the same act.
+That last line is a search across everything you've ever sent Acme — and it's the same
+search your agent runs, which is [the next section](#3--connect-an-agent).
 
 Portals are invisible until you ask for them. Nothing above this section required
 knowing what one is.
 
-### Connect an agent
-
-The MCP server runs inside your Worker — there is nothing extra to host.
-
-Add your Worker as a connector on claude.ai, Desktop, or mobile — OAuth 2.1, and you
-sign in with your own Access identity. Claude Code uses a bearer token. Same server,
-same twelve tools, every surface.
-
-Tools carry annotations, so a host knows which are safe to auto-run and which need a
-confirmation first. Full walkthrough:
-[`docs/setup/connect-mcp.md`](docs/setup/connect-mcp.md).
-
 ---
 
-## Status
+## 3 · Connect an agent
 
-Pre-1.0. `1.0.0` is reserved for "a stranger can rely on this."
+This is the part that isn't a link-sharer. The MCP server runs **inside your Worker** —
+nothing extra to host, no second service, no bridge process on your laptop.
 
-**Working today**
+Two things happen once it's connected.
 
-- **`npm install -g pagevault && pagevault init`** — provision and deploy your own
-  PageVault with no clone; `pagevault upgrade` redeploys later. The package ships the
-  Worker itself ([ADR-014](docs/adr/ADR-014-installed-product-not-thin-client.md))
-- Publish HTML and Markdown; both render, and the original source reads back
-- Three visibility modes: owner-only · email-gated · unguessable public link
-- Per-client portals, with permissions on the portal
-- Single-page PDF export and raw download from the viewer — a long infographic as
-  one continuous page, with nothing paginated through the middle of a chart
-- Upload from the browser at `/admin`, as well as from the CLI and from a chat
-- Per-view records for Secured documents — `pagevault views` shows which documents
-  were opened and by whom, over a rolling three-month window
-  ([ADR-015](docs/adr/ADR-015-what-a-view-record-contains.md) says exactly what's stored)
-- Owner console (light and dark), CLI, and remote MCP server — the CLI and MCP
-  server are held at feature parity with each other
-- MCP over OAuth 2.1 from claude.ai, Desktop and mobile; bearer from Claude Code
-- Every artifact renders in a sandboxed iframe; `allow-same-origin` is banned by a
-  test that fails the build ([ADR-007](docs/adr/ADR-007-viewer-shell.md))
-- Idempotent provisioning with a real teardown, plus backup, restore, and an export
-  of the whole system as a folder tree of plain files
+**You publish from the conversation that made the artifact.** No exporting a file, finding
+it in Downloads, and uploading it somewhere. The chat that produced the report hands it to
+your PageVault and gives you back the URL.
 
-**Not yet**
+**And the collection reads back.** `search_portal` and `read_document` mean that six months
+into an engagement, *"what did we decide about the migration?"* is a question your agent can
+answer out of the client's portal — over the same connection you published through.
+Publishing and remembering become the same act. This is why the server is remote rather than
+stdio: a stdio server can't run in a browser or on a phone, which is where artifacts actually
+get made ([ADR-006](docs/adr/ADR-006-remote-mcp.md)).
 
-- **View metrics stop at the CLI** ([#127](../../issues/127)) — `pagevault views` knows
-  who opened what; asking your agent the same question doesn't work yet
-- **One-click deploy — not coming** ([#28](../../issues/28)) — a Deploy button can't set the
-  Worker's secrets or create the Access apps, so it lands you a deployment that can't publish or
-  gate. `npm install -g pagevault && pagevault init` does the parts a button can't reach
-- **Expiring links, email-on-publish, portal branding** — designed, not built
-- **Rough edges** — `<cmd> --help` prints the top-level usage instead of that command's
-  ([#126](../../issues/126)), and `status` reports your local config rather than the
-  running Worker ([#130](../../issues/130))
+| Surface | How it authenticates |
+|---|---|
+| claude.ai · Desktop · mobile | **OAuth 2.1** — you sign in with your own Cloudflare Access identity, nothing to paste. Needs Secured |
+| Claude Code | a bearer token, the one the CLI already uses. Works at either tier |
+| Hosted surfaces on a **Public** deployment | bridge with `mcp-remote` and the bearer — with no Access there's nothing for OAuth discovery to find |
+
+Same server, same twelve tools, every surface. The tools carry annotations, so a host knows
+which are safe to auto-run and which should ask first — publishing over an existing document
+and minting a public link both require an explicit confirmation.
+
+Full walkthrough: [`docs/setup/connect-mcp.md`](docs/setup/connect-mcp.md).
 
 ---
 
@@ -239,17 +216,6 @@ The honest version, including the rows where the alternatives win. The
 [full field guide](https://pagevault.danjamkuhn.com/pub/showcase/72i8672763d7) puts ten
 tools across six capability groups on an interactive map — and it's served through
 PageVault, so it doubles as a live sample.
-
-### Use something else if…
-
-| If you need | Go to |
-|---|---|
-| Comments, reactions, live collaboration on the document | [`jonesphillip/sharehtml`](https://github.com/jonesphillip/sharehtml) — same Cloudflare design, plus collaboration. PageVault has none of it, on purpose. |
-| The host to never see your plaintext | An end-to-end-encrypted tool. PageVault's Worker can read what it serves; that's an honestly weaker guarantee. |
-| Per-viewer watermarks, an NDA click-through, an audit trail you can hand a lawyer | A deal-room product. PageVault records who opened what and when, for three months — useful, but not evidence. |
-| CRM, invoicing, e-sign around the client relationship | A client-portal SaaS. A much larger product; PageVault is deliberately none of it. |
-| One link, right now, zero setup | Claude's own Publish button, or any quick link-sharer. |
-| Fewer than ~5 clients | A shared folder per client. Said plainly because it's true. |
 
 ### The short table
 
@@ -271,6 +237,17 @@ No single row is unique. Plenty of tools render HTML, several publish from a cha
 and portal suites have held collections for years. What's rare is the
 **combination**: free, self-hosted, renders the artifact, holds the collection, and
 lets an agent read it back. That's the claim — not any one row.
+
+### Use something else if…
+
+| If you need | Go to |
+|---|---|
+| Comments, reactions, live collaboration on the document | [`jonesphillip/sharehtml`](https://github.com/jonesphillip/sharehtml) — same Cloudflare design, plus collaboration. PageVault has none of it, on purpose. |
+| The host to never see your plaintext | An end-to-end-encrypted tool. PageVault's Worker can read what it serves; that's an honestly weaker guarantee. |
+| Per-viewer watermarks, an NDA click-through, an audit trail you can hand a lawyer | A deal-room product. PageVault records who opened what and when, for three months — useful, but not evidence. |
+| CRM, invoicing, e-sign around the client relationship | A client-portal SaaS. A much larger product; PageVault is deliberately none of it. |
+| One link, right now, zero setup | Claude's own Publish button, or any quick link-sharer. |
+| Fewer than ~5 clients | A shared folder per client. Said plainly because it's true. |
 
 ---
 

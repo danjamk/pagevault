@@ -150,7 +150,8 @@ For publishing from inside a chat (the MCP server), send them to
 | a brand-new `workers.dev` URL isn't live yet | a fresh subdomain can take a minute to route | wait and re-run `pagevault verify` |
 
 If you're stuck, the full design and every command are in the
-[docs](../README.md); the honest limits are in the [README status section](../../README.md#status).
+[docs](../README.md); the honest limits — including when to use something else — are in the
+[README comparison](../../README.md#how-it-compares).
 
 ---
 
