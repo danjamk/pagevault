@@ -98,11 +98,18 @@ the list and watched it fail, then added one that doesn't exist and watched it f
 tightened the restore logic, mutation-testing the decision function killed two of three mutants —
 and the survivor exposed a real hole I'd have shipped otherwise.
 
-Three checks fail the build outright rather than warn: `check-sandbox` (the string
+Four checks fail the build outright rather than warn: `check-sandbox` (the string
 `allow-same-origin` must appear nowhere), `check-palette` (a retired colour must not creep back),
-and `check-docs` (the docs must not describe a route, command or MCP tool the code doesn't have).
-All three are plain greps or small scripts. The guardrail that matters is the one a machine
-enforces.
+`check-docs` (the docs must not describe a route, command or MCP tool the code doesn't have), and
+`check-console` (the browser JavaScript the Worker emits must actually parse). All four are plain
+greps or small scripts. The guardrail that matters is the one a machine enforces.
+
+The last one exists because the type checker has a structural blind spot here: the Worker builds
+its UI as HTML inside template literals, so roughly 45KB of browser JavaScript is *string content*
+to `tsc`. I proved the gap rather than assuming it — an unbalanced brace dropped into the console
+passes `tsc` with exit 0 and all 25 console tests, and would have shipped an admin page that renders
+nothing. Every one of these checks earned its place by catching something; none was added
+speculatively.
 
 ## Every provisioning step has an undo
 

@@ -7,6 +7,57 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-07-28
+
+Two things the console could see and did not say.
+
+### Added
+- **Access seat usage in the console.** At the free plan's 50 seats Cloudflare **blocks new
+  logins** — silently, with no seat-limit notification at any tier, so the first sign is a client
+  saying your report will not open. The sidebar now carries `Access seats N of 50`, muted until it
+  reaches the ceiling and red once it does. No cron, no webhook, no alert: PageVault is
+  single-operator, so the person who would get the alert is the person already looking at the
+  console when something breaks. ([#44](../../issues/44))
+
+  It needed no new credential. The count reads from `access_seat: true` on Cloudflare's Access
+  users endpoint, which the Worker's *existing* narrow runtime token can already see — verified
+  against the live API before it was written. Had it needed an account-wide token it would have
+  gone in the CLI instead, next to `views` (ADR-015).
+
+  The ceiling is an **assumption**, and says so: reading your real plan needs billing scope the
+  Worker deliberately does not hold, so 50 is always labelled as the free plan's allowance. And if
+  the count cannot be read, the console shows nothing rather than zero — a seat readout saying `0`
+  because it could not ask would read as plenty of room at exactly the moment logins are blocked.
+
+### Fixed
+- **The console forgot which portal you were on.** The selection lived only in a JS variable, so
+  every reload dropped you back on the default portal and a portal view could not be bookmarked or
+  linked. It is now in the URL fragment, restored on boot ahead of the default fallback, and
+  written with `replaceState` so Back still leaves the console rather than walking backwards
+  through portals. ([#92](../../issues/92))
+- **The console went stale after a publish made anywhere else.** A document published from the CLI,
+  from an agent, or in another tab left an open console showing the old list indefinitely. Coming
+  back to the tab now re-reads the current portal.
+
+  Bounded deliberately, because "refresh whenever the tab is focused" is a poll wearing a disguise
+  and the house rule is that the console must not poll the KV list quota: a 30-second staleness
+  window so rapid tab-switching is free, a per-page-load ceiling so a pathological day still cannot
+  spend the quota, and the cheap single-portal read rather than the full portal tree. The document
+  header also now says when the list was last read, instead of leaving you to assume.
+
+### Tooling
+- **`make check-console`** — a new build check, in CI, for a blind spot in the type checker. The
+  Worker builds its UI as HTML inside TypeScript template literals, so roughly 45KB of browser
+  JavaScript is *string content* to `tsc`: a stray backtick, a bad escape, or an unbalanced brace
+  type-checks clean and ships a blank page. It extracts every inline `<script>` the Worker emits —
+  the console, the viewer shell, the portal page — evaluates the template, and parses the result.
+
+  Written after a backtick inside a comment inside `page()` silently terminated the template. The
+  gap is measured, not assumed: an unbalanced brace introduced into the console passes `pnpm
+  typecheck` with exit 0 and all 25 console tests, and this catches it. It also refuses to pass on
+  an implausibly small extraction, because an earlier version of it reported success having parsed
+  279 characters of the wrong script.
+
 ## [0.24.0] — 2026-07-28
 
 Three places where the CLI knew something and did not say it. Backup and restore existed but only
@@ -885,7 +936,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/danjamk/pagevault/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/danjamk/pagevault/compare/v0.23.2...v0.24.0
 [0.23.2]: https://github.com/danjamk/pagevault/compare/v0.23.1...v0.23.2
 [0.23.1]: https://github.com/danjamk/pagevault/compare/v0.23.0...v0.23.1

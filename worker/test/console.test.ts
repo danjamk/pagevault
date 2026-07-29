@@ -122,6 +122,45 @@ describe("console — UI tweaks", () => {
     expect(body).toContain('a === "refresh"'); // wired into the action dispatch
   });
 
+  it("keeps the selected portal in the URL fragment, and restores it on boot (#92)", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    // replaceState, not an assignment to location.hash — the latter pushes a history entry per
+    // portal click, so Back would walk portals instead of leaving the console.
+    expect(body).toContain("history.replaceState");
+    expect(body).not.toContain("location.hash =");
+    expect(body).toContain("function hashPortal(");
+    // Boot precedence: the fragment is consulted ahead of the default-portal fallback.
+    expect(body).toContain("const fromHash = hashPortal();");
+    expect(body).toContain("(fromHash && PORTALS[fromHash]) ? fromHash");
+  });
+
+  it("refreshes the document list on tab-back, bounded so it cannot become a poll (#92)", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain("visibilitychange");
+    // The cheap path — one list() for the selected portal, not one per portal.
+    expect(body).toContain("async function reselect(");
+    // Both guards. The house rule is that the console must not poll the KV list quota, and
+    // "refresh on every focus" is a poll wearing a disguise.
+    expect(body).toContain("const STALE_MS = 30000");
+    expect(body).toContain("const AUTO_MAX = 60");
+    // And it says when the list was actually read, rather than letting the operator assume.
+    expect(body).toContain("function freshLabel(");
+  });
+
+  it("shows Access seat usage, labelled as the free plan's ceiling (#44)", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain('id="seats"');
+    expect(body).toContain("/api/access/seats");
+    // Hidden until it has a real answer: a seat readout that shows 0 because it could not ask
+    // reads as plenty of room at exactly the moment logins are being blocked.
+    expect(body).toContain('s.status !== "ok"');
+    expect(body).toContain("limit reached, new logins blocked");
+    // The ceiling is an assumption (no billing scope in the Worker), so it names the plan.
+    expect(body).toContain("free Zero Trust allowance");
+    // Fetched independently of load() so a Cloudflare round-trip never delays the document list.
+    expect(body).toContain("loadSeats();");
+  });
+
   it("offers an open-portal link and localizes the deploy timestamp", async () => {
     const body = await (await getAdmin(await adminJwt(OWNER))).text();
     expect(body).toContain('id="i-open"'); // the open glyph

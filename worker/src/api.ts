@@ -20,6 +20,7 @@ import {
   updatePortalMembers,
 } from "./documents.js";
 import type { Env } from "./env.js";
+import { countAccessSeats } from "./seats.js";
 import {
   type DocMeta,
   type Portal,
@@ -113,6 +114,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (rest === "/search") {
       if (request.method === "GET") return await searchHandler(request, env);
       return fail(405, "method_not_allowed", `${request.method} not allowed on /api/search`);
+    }
+
+    if (rest === "/access/seats") {
+      if (request.method === "GET") return json(await countAccessSeats(env));
+      return fail(405, "method_not_allowed", `${request.method} not allowed on /api/access/seats`);
     }
 
     if (rest === "/access/sync") {

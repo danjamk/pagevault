@@ -249,6 +249,27 @@ describe("GET /api/search — keyword search within a portal (#73)", () => {
   });
 });
 
+describe("GET /api/access/seats — how close to the login-blocking ceiling (#44)", () => {
+  it("401s without a bearer token — seat usage is owner-only", async () => {
+    expect((await SELF.fetch(`${HOST}/api/access/seats`)).status).toBe(401);
+  });
+
+  it("405s on POST — it reads, it never evicts", async () => {
+    const res = await SELF.fetch(`${HOST}/api/access/seats`, { method: "POST", headers: auth() });
+    expect(res.status).toBe(405);
+  });
+
+  it("reports not_configured at Tier 0 rather than a seat count of zero", async () => {
+    // The test env has no CF_ACCOUNT_ID/CF_API_TOKEN, which is exactly a Public deployment: no
+    // Access, so no seats. Answering `0` here would render in the console as plenty of room.
+    const res = await SELF.fetch(`${HOST}/api/access/seats`, { headers: auth() });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).toEqual({ status: "not_configured" });
+    expect(body).not.toHaveProperty("used");
+  });
+});
+
 describe("POST /api/access/sync — reconcile the viewer group (#85)", () => {
   const sync = (qs = "", headers = auth()) =>
     SELF.fetch(`${HOST}/api/access/sync${qs}`, { method: "POST", headers });

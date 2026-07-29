@@ -438,6 +438,20 @@ window. Someone who opened one report in March is still holding a seat in Decemb
 When the seats run out, **further logins are blocked**. It fails closed — no surprise
 invoice, but your actual client cannot get in.
 
+**So the console shows the count.** The sidebar carries `Access seats N of 50`, muted until it
+reaches the ceiling and red once it does. That is the whole of the feature — no cron, no webhook,
+no alert. PageVault is single-operator infrastructure, so the person who would receive an alert is
+the person already looking at the console when a client says the link will not open.
+
+Two honesty constraints shape it. The count comes from `access_seat: true` on
+`GET /accounts/{id}/access/users`, readable with the Worker's *existing* narrow runtime token — so
+this needed no wider credential (ADR-002). And the **ceiling is an assumption, not an observation**:
+reading your actual plan needs billing scope the Worker deliberately does not hold, so 50 is always
+labelled as the free plan's allowance. A paid operator sees a true count against a ceiling that
+says which plan it belongs to. If the count cannot be read at all, the console shows **nothing**
+rather than zero — a seat readout that says `0` because it could not ask reads as plenty of room at
+exactly the moment logins are being refused.
+
 Past 50: **$7/user/month, self-serve, monthly, no sales call** (the plan is now called
 Pay-as-you-go). But the free 50 is a property of the *free plan*, not a discount carried
 into the paid one — so the 51st person plausibly costs $7 × 51, not $7. **Confirm in the
@@ -632,9 +646,12 @@ dashboard's request graph has no such correction, so do not read it as traffic.
 ### What the free tier does not tell you
 
 **Cloudflare will not notify you about any of this.** There are *zero* Workers notification types
-at any tier — no request-limit alert, no error-rate alert, no KV-quota alert, and no seat alert
-(§10). Every guardrail here is one you build. That is the single most important operational fact
-about running on this stack.
+at any tier — no request-limit alert, no error-rate alert, no KV-quota alert, and no seat alert.
+Every guardrail here is one you build. That is the single most important operational fact about
+running on this stack.
+
+The one that is built: the console shows the Access seat count (§10), because that is the limit
+whose arrival a *client* notices before you do. The rest are still yours to watch.
 
 The numbers worth knowing, all daily and all free-plan:
 
