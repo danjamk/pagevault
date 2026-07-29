@@ -13,6 +13,8 @@ exist as `make` targets (`make deploy`, `make verify`, …) — one engine, two 
 - On success, `publish`/`mint`/`rotate` print **only the URL** to stdout; every status line, prompt,
   and warning goes to stderr, so `pagevault publish report.html | pbcopy` does the obvious thing.
 - `--json` is available on the read and diagnostic commands, for scripting and for an agent to consume.
+- **`pagevault <command> --help`** prints that command's own flags and what they do — the same text
+  its usage guard throws, so the two cannot drift. `pagevault help` alone is the one-line summary.
 
 ---
 
@@ -143,6 +145,12 @@ These auto-target *your* deployment from `~/.pagevault/` — no arguments, no lo
 ### `pagevault status [--json]`
 What this install is configured for — tier, account, host, versions. Local only, no network.
 
+⚠️ **It reports your saved answers, not the running deployment.** `.pagevault.json` records the
+intent you gave `init`; nothing in `status` asks the Worker whether that is still true. It will
+happily print `Tier Secured` for a deployment that was redeployed without Access, or name a host and
+a KV namespace that a `destroy` removed. `--json` carries `"source": "local"` so an agent can tell.
+To confirm the deployment agrees, run [`pagevault health`](#pagevault-health---json).
+
 ### `pagevault verify [--json]`
 The post-deploy smoke test: the Worker is live and ours, the root behaves for the tier, the `/mcp`
 surface answers a real `publish → read → revoke` round-trip, OAuth discovery, and a sample publish
@@ -158,8 +166,9 @@ Reconcile the Cloudflare Access viewer group with what KV authorizes. `--reap` a
 no longer authorizes (reclaiming seats) — it confirms first.
 
 ### `pagevault views [--days 30] [--portal s] [--doc id] [--json]`
-Which documents your clients actually opened. The one command that reads from Cloudflare directly
-(Analytics Engine), so it needs a Cloudflare token in the environment.
+Which documents your clients actually opened. Reads Analytics Engine directly rather than going
+through `/api`, so it needs a Cloudflare token in the environment — as `backup` and `restore` do,
+and for the same reason: the Worker deliberately holds no credential that wide.
 
 ⚠️ **The dataset is account-level, and it outlives any single deployment.** A view record names the
 portal and document but not the deployment that wrote it, so after a teardown and rebuild — or on an
@@ -170,6 +179,23 @@ it as current. Rows may name documents and portals that no longer exist. Cross-c
 Records are kept for **three months** and then age out on their own; `destroy` cannot clear them,
 because the Worker deliberately holds no credential that can read or delete analytics
 ([ADR-015](../adr/ADR-015-what-a-view-record-contains.md) §5–6).
+
+### `pagevault backup [--out <file.json>]` · `restore <file.json> [--force]`
+Same-host disaster recovery. `backup` snapshots the whole KV namespace — documents, portals,
+members, public-link tokens — to one JSON file; `restore` replays it. Keys are preserved
+byte-for-byte, so **document ids and every `/p/` link you have already shared survive**.
+
+Both talk to Cloudflare directly with your provisioning token rather than to `/api`, because
+listings render from KV *key metadata* and no PageVault endpoint exposes it.
+
+A restore is a bulk write, **never** a wipe: it puts back every key in the backup and deletes
+nothing. So it asks what is in the namespace that the backup will *not* replace — those keys survive
+and mix in with the restored data — and stops to name them. `--force` proceeds anyway; it suppresses
+the refusal, not the facts, and still lists what is being kept.
+
+`--kv <id>` targets a namespace other than the one this install deployed. The full story, including
+why the format carries key metadata and what a restore does *not* bring back, is in
+[Backup & restore](backup-and-restore.md).
 
 ### `pagevault destroy [--keep-data]`
 Tear the deployment down — Worker, DNS, Access apps, group, and KV data. Irreversible, and it asks:
@@ -183,7 +209,7 @@ it verifies the token reaches the pinned account, then makes you type the target
 | Variable | What it does |
 |---|---|
 | `PAGEVAULT_URL` / `PAGEVAULT_API_TOKEN` | the publish target; **override** `config.json` per command |
-| `CLOUDFLARE_API_TOKEN` | the provisioning credential (`init`/`upgrade`/`destroy`/`views`) |
+| `CLOUDFLARE_API_TOKEN` | the provisioning credential (`init`/`upgrade`/`destroy`/`views`/`backup`/`restore`) |
 | `CF_RUNTIME_TOKEN` | Secured only. The **narrowly scoped** token `init` puts in the Worker as `CF_API_TOKEN`, so it can keep the Access viewer group in step with portal membership ([ADR-002](../adr/ADR-002-seat-bounding.md)). Absent, the deploy warns and email grants stop reaching Access |
 | `PAGEVAULT_HOME` | relocate **all** state — `config.json`, `.pagevault.json`, `.env.local` — so one machine can hold several deployments |
 

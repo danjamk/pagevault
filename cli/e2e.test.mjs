@@ -451,6 +451,18 @@ describe("CLI against a live Worker — Public (no Access)", { timeout: 180_000 
     assert.match(r.stderr, /Usage: pagevault share/);
     assert.match(r.stderr, /--remove/);
   });
+
+  it("--help answers for the command, not the whole CLI, and touches no deployment", () => {
+    // #126: `<cmd> --help` used to print the top-level wall. `cli/help.test.mjs` pins the map to
+    // the dispatch table; this proves the wiring survives against a configured, live deployment —
+    // help must short-circuit BEFORE the command runs, not after it has published something.
+    const r = run("publish", "--help");
+    assert.equal(r.status, 0);
+    assert.match(r.stderr, /^Usage: pagevault publish/);
+    assert.match(r.stderr, /--confirm\s+required to REPLACE/);
+    assert.equal(r.stdout, "", "help is human output — stdout stays the URL channel");
+    assert.doesNotMatch(r.stderr, /Set up & deploy:/);
+  });
 });
 
 // ---------------------------------------------------------------------------

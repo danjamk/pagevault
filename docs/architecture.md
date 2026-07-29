@@ -590,7 +590,7 @@ document.
 
 Read it with `make views` or `pagevault views [--days] [--portal] [--doc] [--json]`.
 
-**`views` is CLI-only, and that is the one documented exception to CLI/MCP parity**
+**`views` is CLI-only, and it is one of the documented exceptions to CLI/MCP parity**
 ([ADR-019](adr/ADR-019-view-metrics-reach-mcp-by-sync.md) settles how it reaches an agent
 eventually: the operator syncs a summary into KV, rather than the Worker gaining a read
 token). The
@@ -598,6 +598,13 @@ binding is write-only; reading needs an account-scoped `Account Analytics Read` 
 is strictly wider than the Access-group-scoped credential the Worker holds. Giving the Worker
 that token is the blast-radius widening ADR-002 exists to prevent — and the MCP server runs
 inside the Worker. So the Worker writes and the operator reads.
+
+`backup` and `restore` are CLI-only for the same structural reason. They read and write KV *key
+metadata*, which no `/api` endpoint exposes and which listings render from — so they talk to
+Cloudflare directly with the operator's provisioning token. That token creates and deletes
+namespaces; putting it inside the Worker to satisfy parity would hand every MCP client the
+ability to delete the deployment. An agent can publish and search, and cannot back up. That is
+the intended shape, not a gap.
 
 ### Retention, sampling, and how to read `make logs`
 

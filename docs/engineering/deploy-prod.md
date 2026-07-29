@@ -68,8 +68,8 @@ before it proceeds (a deliberate *are-you-sure*, not real four-eyes on a single-
 What the job does, in order:
 
 1. **Reconstructs `.pagevault.json`** from `PAGEVAULT_PROD_CONFIG`.
-2. **Backs up prod KV** (`scripts/kv-backup.mjs`) and uploads it as the `prod-kv-backup`
-   artifact — your restore point, kept 30 days.
+2. **Backs up prod KV** (`pagevault backup`, the same command `make backup` runs) and uploads it
+   as the `prod-kv-backup` artifact — your restore point, kept 30 days.
 3. **Deploys** via `cli/lib/provision/deploy.mjs` — the same script `make deploy` runs, no forked logic. Its
    prompts auto-skip when stdin isn't a TTY. The bearer is reused from the Worker; only a
    first-ever prod deploy sets it from the secret.
@@ -83,7 +83,8 @@ Download the `prod-kv-backup` artifact from the run, then restore it into prod's
 your bootstrap clone:
 
 ```bash
-make restore FILE=pagevault-backup-prod.json FORCE=1
+pagevault restore pagevault-backup-prod.json --force
+# from a clone: make restore FILE=pagevault-backup-prod.json FORCE=1
 ```
 
 Redeploy an older commit the same way you deploy any commit: check it out and run the workflow

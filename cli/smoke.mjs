@@ -83,6 +83,20 @@ try {
   run(bin, ["init", "--help"]);
   run(bin, ["upgrade", "--help"]);
 
+  // 5b. Per-command help resolves from the INSTALLED package (#126) — `lib/help.mjs` is a new file
+  // and a wrong `files` allowlist would leave `<cmd> --help` printing the top-level wall forever.
+  // Backup/restore are the reason this matters (#133): they are the commands an installed operator
+  // reaches for under stress, and until now they existed only behind `make`.
+  for (const cmd of ["backup", "restore"]) {
+    const help = run(bin, [cmd, "--help"]);
+    if (!help.startsWith(`Usage: pagevault ${cmd}`)) {
+      throw new Error(`installed \`${cmd} --help\` did not print its own usage — lib/help.mjs or lib/ops/${cmd}.mjs didn't ship`);
+    }
+    if (!new RegExp(`\\b${cmd}\\b`).test(run(bin, ["help"]))) {
+      throw new Error(`\`help\` does not mention \`${cmd}\` — same-host disaster recovery is invisible to an installed operator`);
+    }
+  }
+
   // 6. The installed package reports the PRODUCT version (from the stamped dist/version.txt), not
   // its own npm version — the #87 version stamp, exercised from an actual install (RUNNING_FROM_REPO
   // is false under node_modules, which the in-repo tests can't reach).

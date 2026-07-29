@@ -6,11 +6,24 @@
 // One engine, two front doors (ADR-014): the CLI imports statusCmd(); `make status` runs it
 // through `pagevault status`. No duplicate logic, no shim.
 //
+// 🔴 It reports INTENT, not observed state (#130). `.pagevault.json` records the answers the
+// operator gave; nothing here asks the Worker whether they are still true. During a fresh-machine
+// run a deployment was accidentally redeployed with Access unconfigured, and `status` went on
+// printing "Tier Secured · Deployed https://…" the whole time — every line true of the file, the
+// middle one false of the running Worker. It is the same failure as #118, where a post-teardown
+// `status` named a KV namespace and a URL that no longer existed.
+//
+// The fix is not to make `status` phone home — local, instant and offline is the point, and
+// `health` already asks the deployment. The fix is that it must not SOUND like a report from the
+// deployment. Hence the header, the footer, and `source: "local"` in the JSON: an agent consuming
+// `--json` has no tone to read, so the marker has to be a field.
+//
 import { c, banner, loadContext, VERSION, SCHEMA_VERSION, RUNNING_FROM_REPO } from "../provision/context.mjs";
 
 // The "not set up yet" nudge names the right door: `make setup` from the repo, `pagevault init`
 // from an install. Same reasoning everywhere a hint points at the setup step.
 const SETUP_CMD = RUNNING_FROM_REPO ? "make setup" : "pagevault init";
+const CHECK_CMD = RUNNING_FROM_REPO ? "make health" : "pagevault health";
 
 /**
  * @param {{ json?: boolean, out?: (s: string) => void }} [opts]
@@ -24,6 +37,10 @@ export async function statusCmd({ json = false, out = (s) => process.stdout.writ
     out(
       JSON.stringify(
         {
+          // "local" is a promise about provenance, not a mode: every field below was read from
+          // ~/.pagevault/, and none of it was confirmed against the deployment. `pagevault health
+          // --json` is the observed-state surface.
+          source: "local",
           version: VERSION,
           schemaVersion: ctx.schemaVersion ?? SCHEMA_VERSION,
           configured: ctx.rung !== undefined,
@@ -42,7 +59,7 @@ export async function statusCmd({ json = false, out = (s) => process.stdout.writ
     return;
   }
 
-  console.log(banner("status"));
+  console.log(banner("status", "local configuration — not the live deployment"));
   const row = (label, val) => console.log(`  ${c.cyan(label.padStart(13))}  ${val ?? c.dim("—")}`);
 
   row("PageVault", `v${VERSION}`);
@@ -61,4 +78,10 @@ export async function statusCmd({ json = false, out = (s) => process.stdout.writ
   if (ctx.kvId) row("KV", c.dim(ctx.kvId));
   if (ctx.deployedUrl) row("Deployed", c.bold(ctx.deployedUrl));
   console.log();
+
+  // The footer, not a flag. `status --check` was considered and rejected: `health` already fetches
+  // /health and compares it to the build you shipped, and a second front door onto the same
+  // question is how the two start disagreeing. Naming it here costs one line and stays honest.
+  console.log(`  ${c.dim("These are your saved answers. They can name a host, a namespace or a URL that")}`);
+  console.log(`  ${c.dim("no longer exists — confirm against the deployment with")} ${c.bold(CHECK_CMD)}${c.dim(".")}\n`);
 }
