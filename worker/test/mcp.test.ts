@@ -980,6 +980,16 @@ describe("view metrics ride along with the read tools (#127)", () => {
     // ADR-019 decision 4: counts and surfaces reach the model, emails do not.
     expect(JSON.stringify(structured)).not.toMatch(/@[a-z]+\.(com|org)/);
     expect(text).toContain("views: 2");
+    // Once at the foot, and in the PROSE: a host that renders only text would otherwise show a
+    // column of counts with nothing saying when they were measured.
+    expect(text).toContain("as of the last sync, 2026-07-29 — not live");
+    expect(text.match(/as of the last sync/g)).toHaveLength(1);
+  });
+
+  it("says nothing about staleness when there is nothing to be stale", async () => {
+    await publishBackdated("No Sync Yet");
+    const { text } = await callToolFull("list_documents", {});
+    expect(text).not.toContain("as of the last sync");
   });
 
   it("both read tools tell the model the numbers are as of the sync, not live", async () => {

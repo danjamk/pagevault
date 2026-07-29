@@ -704,8 +704,12 @@ function buildServer(env: Env, origin: string): McpServer {
         const byslug = new Map((await listPortals(env)).map((p) => [p.slug, p]));
         // One KV read for the whole listing, never one per document (#127).
         const summary = await getViewSummary(env);
+        const prose = docs.map((d) => describe(d, statsFor(summary, d))).join("\n\n");
         return structured(
-          docs.map((d) => describe(d, statsFor(summary, d))).join("\n\n"),
+          // The staleness stamp goes once at the foot rather than onto every line — but it does
+          // have to be in the PROSE. `viewsSyncedAt` in structuredContent is invisible to a host
+          // that renders only text, and a column of view counts with no "as of" reads as live.
+          summary ? `${prose}\n\nView counts are as of the last sync, ${summary.syncedAt.slice(0, 10)} — not live.` : prose,
           {
             documents: docs.map((d) =>
               docOut(d, docUrl(base, d.portal, d.id, byslug.get(d.portal) ?? null), statsFor(summary, d)),
