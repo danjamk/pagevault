@@ -10,6 +10,9 @@ export`](#walking-away--a-human-readable-export) at the bottom of this page. A r
 Cloudflare → Cloudflare, and it keeps keys byte-for-byte, so **document ids and every `/p/` link
 you've already shared survive**.
 
+Both are `pagevault` commands, so an installed operator has them — you do not need a repo checkout
+to snapshot a client portal. From a checkout, `make backup` / `make restore` run the same engine.
+
 ## What's in the namespace
 
 Six key prefixes, all disjoint:
@@ -30,8 +33,8 @@ below.
 ## Back up
 
 ```bash
-make backup                 # writes pagevault-backup-<timestamp>.json
-make backup OUT=snap.json   # or name it yourself
+pagevault backup                     # writes pagevault-backup-<timestamp>.json
+pagevault backup --out snap.json     # or name it yourself
 ```
 
 It lists every key (with metadata), fetches every value, and writes a single JSON file in the
@@ -39,10 +42,13 @@ shape a restore replays. The file carries key metadata but **no secrets** — yo
 Cloudflare tokens live in `.env.local` and the Worker, never in KV. Keep the file gitignored
 anyway.
 
+> Running from a repo checkout? `make backup` and `make backup OUT=snap.json` are the same engine
+> through the other front door — one code path, either way.
+
 ## Restore
 
 ```bash
-make restore FILE=pagevault-backup-<timestamp>.json
+pagevault restore pagevault-backup-<timestamp>.json    # or: make restore FILE=…
 ```
 
 A restore is a bulk write, **not** a wipe-and-replace: it puts back every key in the backup and
@@ -50,7 +56,9 @@ never deletes anything. So the question it actually asks before running is *"wha
 the backup will not replace?"* — because those keys survive and mix in with the restored data.
 
 - **Nothing survives** (empty namespace, or every key is in the backup) → it just runs.
-- **Something survives** → it stops, **names what** would remain, and asks you to pass `FORCE=1`.
+- **Something survives** → it stops, **names what** would remain, and asks you to pass `--force`
+  (`FORCE=1` through `make`). Forcing suppresses the refusal, not the facts — the surviving keys
+  are still listed before anything is written.
 
 It prints the write cost first — one write per key against Cloudflare's free **1000 writes/day** —
 and asks before spending it.
@@ -68,10 +76,10 @@ and it is the reason `restore` used to refuse for no visible reason.
 pagevault init            # or: make deploy
 
 # 2. Restore into it, while nothing has written to it yet.
-make restore FILE=pagevault-backup-<timestamp>.json
+pagevault restore pagevault-backup-<timestamp>.json
 
 # 3. Now smoke-test. This publishes a sample document, which is why it comes last.
-make verify
+pagevault verify
 
 # 4. Secured only — re-populate the Access group from the restored member lists.
 pagevault sync-access
@@ -80,7 +88,7 @@ pagevault sync-access
 Why the order matters: `verify` publishes `examples/welcome.html` so you have something to open.
 That is useful on a first install and unhelpful during a recovery — the sample's keys are not in
 your backup, so at step 2 the restore would stop and make you decide about them. Nothing is lost
-either way, and `FORCE=1` is the correct answer if you have already run `verify`. Restoring first
+either way, and `--force` is the correct answer if you have already run `verify`. Restoring first
 just means never having to think about it.
 
 If a `pagevault-backup-*.json` file is sitting in the directory, the deploy notices and suggests
@@ -100,14 +108,14 @@ render from a single `list()` with no per-document read. A values-only dump (wha
 documents are still fetchable by id, but `listDocs()` skips any metadata-less `meta:` key
 (`worker/src/store.ts`), so **every document goes invisible to listings and portals**.
 
-So `make backup` joins each value to its key's metadata by key name and writes them together;
-`make restore` replays both. The round-trip is pinned by `scripts/kv-backup.test.mjs`, which
-fails on the naive no-metadata path.
+So `backup` joins each value to its key's metadata by key name and writes them together, and
+`restore` replays both. The round-trip is pinned by `cli/backup.test.mjs`, which fails on the naive
+no-metadata path.
 
 ## Walking away — a human-readable export
 
-`make backup` is Cloudflare → Cloudflare. When you want the *content* — to hand a client their
-documents, or to leave PageVault entirely — `make export` writes a browsable folder instead:
+`pagevault backup` is Cloudflare → Cloudflare. When you want the *content* — to hand a client
+their documents, or to leave PageVault entirely — `make export` writes a browsable folder instead:
 
 ```bash
 make export                     # → pagevault-export-<date>.zip (everything)

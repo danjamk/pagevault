@@ -7,6 +7,43 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-07-28
+
+Three places where the CLI knew something and did not say it. Backup and restore existed but only
+behind `make`, so the operator most likely to need them — the one who installed PageVault and holds
+real client documents — could not reach them. `<command> --help` printed the whole manual and left
+you to find your command in it. And `status` reported saved intent in the voice of observed fact.
+
+### Added
+- **`pagevault backup` and `pagevault restore`.** Same-host disaster recovery is now part of the
+  installed product, not a repo convenience. `backup` snapshots the whole KV namespace — documents,
+  portals, members, public-link tokens — to one JSON file; `restore` replays it, keys preserved
+  byte-for-byte, so document ids and every `/p/` link you have already shared survive. The engine
+  moved from `scripts/` into `cli/lib/ops/`, alongside `status`/`verify`/`health`/`destroy`, and
+  `make backup` / `make restore` now run that same code through the other front door.
+  ([#133](../../issues/133))
+- **`pagevault <command> --help`** prints that command's own flags and what the non-obvious ones do
+  — `--name` is the update key, `--confirm` replaces in place, `--yes` makes `init` non-interactive
+  and therefore requires a bearer to already exist. `pagevault help <command>` is the same thing.
+  Reaching for `<cmd> --help` is the first thing anyone does when a command misbehaves, and it is
+  the moment they are least able to skim a wall of text. ([#126](../../issues/126))
+
+### Changed
+- **`pagevault status` no longer reads like a report from the deployment.** It describes
+  `.pagevault.json` — the answers you gave `init` — and nothing in it asks the Worker whether they
+  are still true. During a fresh-machine run a Worker was accidentally redeployed with Access
+  unconfigured and `status` went on printing `Tier Secured` throughout; the same blind spot printed
+  a KV namespace and a URL that a teardown had already removed. It now says what it is, and points
+  at `health` for what is actually running. `--json` carries `"source": "local"`, because an agent
+  consuming it has no tone to read. ([#130](../../issues/130), [#118](../../issues/118))
+- A command's usage line and its `--help` are now one constant, so the guard cannot drift from the
+  documentation of the thing it is guarding.
+
+### Notes
+- **`status --check` was considered and rejected.** `pagevault health` already fetches `/health` and
+  compares it to the build you shipped; a second front door onto the same question is how the two
+  start disagreeing. `status` stays local, instant, and offline — it just stops implying otherwise.
+
 ## [0.23.2] — 2026-07-28
 
 Three things that were true about PageVault and that nothing in PageVault said out loud. All three
@@ -848,7 +885,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.23.2...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/danjamk/pagevault/compare/v0.23.2...v0.24.0
 [0.23.2]: https://github.com/danjamk/pagevault/compare/v0.23.1...v0.23.2
 [0.23.1]: https://github.com/danjamk/pagevault/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/danjamk/pagevault/compare/v0.22.0...v0.23.0

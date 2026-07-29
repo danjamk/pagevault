@@ -1,0 +1,309 @@
+//
+// Per-command help (#126).
+//
+// `pagevault <cmd> --help` used to print the whole top-level usage wall and leave the reader to
+// find their command in it — at exactly the moment they are least able to skim, because something
+// just did not behave. Reaching for `<cmd> --help` is the first thing anyone does.
+//
+// One entry per command, and it is the SINGLE source for both surfaces:
+//   · `usage`  — the invocation form(s). Thrown by the command's missing-argument guard, and the
+//                first thing `--help` prints. So the guard and the help can never drift.
+//   · `detail` — what `--help` adds: flags, and what the non-obvious ones actually do.
+//
+// Data only, no side effects, so `cli/help.test.mjs` can assert every dispatched command has an
+// entry. That test is the point: a command added without help would otherwise fail silently, and
+// this repo has learned that a check which cannot fail is worse than no check.
+//
+
+const H = (usage, detail = "") => ({ usage, detail });
+
+export const HELP = {
+  // --- Set up & deploy ---------------------------------------------------------------------
+  init: H(
+    "Usage: pagevault init [--tier public|secured] [--host h] [--email you@example.com] [--yes]",
+    `
+Stand PageVault up on your own Cloudflare account — no repo clone. Walks you through the
+Cloudflare API token, the tier, the owner email and the account, writes state to ~/.pagevault/,
+deploys the bundled Worker, and saves your login config so \`publish\` works immediately.
+
+Re-run it to climb a tier. It shows your current answers and asks only for what is new; your
+documents carry across keeping their ids and filenames.
+
+  --tier public|secured   Public = links anyone can open. Secured = named people, via Access
+  --host pagevault.you.com  the hostname. Required for Secured, optional for Public
+  --email you@example.com   the owner — the identity that can always see everything
+  --rung 1|2|3            the escape hatch: 1 = workers.dev, 2 = your domain, 3 = Secured
+  --yes                   never prompt; flags and the environment supply every answer
+
+⚠ --yes on a FIRST deployment also needs a bearer. Non-interactively there is nobody to show a
+  freshly minted PAGEVAULT_API_TOKEN to, so init refuses rather than deploying a Worker you
+  cannot authenticate to. Either run it interactively once, or provide your own:
+
+    export PAGEVAULT_API_TOKEN=$(openssl rand -hex 32)
+    pagevault init --yes --tier public --email you@example.com`,
+  ),
+
+  upgrade: H(
+    "Usage: pagevault upgrade [--yes]",
+    `
+Redeploy the Worker bundle that shipped with your installed package — the second half of
+\`npm update -g pagevault\`. Keeps your KV data, config and secrets, and never rotates a live
+bearer.`,
+  ),
+
+  login: H(
+    "Usage: pagevault login [--url https://share.example.com] [--token <PAGEVAULT_API_TOKEN>]",
+    `
+Point the CLI at a deployment: writes ~/.pagevault/config.json (mode 600 — it holds a bearer)
+and proves the connection works now rather than at your first publish.
+
+Both flags are optional — they fall back to PAGEVAULT_URL and PAGEVAULT_API_TOKEN, so
+\`pagevault login\` alone persists the environment you already have exported.
+
+\`init\` already does this for the deployment it stood up. Reach for \`login\` only for a second
+machine, or for someone else's deployment.`,
+  ),
+
+  // --- Publish & manage documents ----------------------------------------------------------
+  publish: H(
+    "Usage: pagevault publish <file.html|.md> [--portal s] [--name f] [--title t] [--public] …",
+    `
+Publish a file and print its shareable URL to stdout — and nothing else, so
+\`pagevault publish report.html | pbcopy\` does the obvious thing. Everything human goes to stderr.
+
+  --portal <slug>         which portal to publish into (default: your default portal)
+  --name <filename>       THE UPDATE KEY. Identity is the filename (ADR-017), not the title —
+                          publishing the same name again replaces that document in place, at
+                          the same URL. Defaults to the file's basename
+  --title "Q3 Review"     display only. Changing it does not create a new document
+  --summary "…"           one line, shown in listings and used by search
+  --tags a,b,c            comma-separated
+  --emails a@b,c@d        grant these people access to this document
+  --source-kind html|markdown   override the extension sniff
+  --public                also mint a /p/ capability link — anyone holding it can open the
+                          document with no login. It burns no Cloudflare Access seat
+  --owner-only            a draft. It opens for nobody but you
+  --confirm               required to REPLACE an existing document with the same --name.
+                          Without it, a same-name publish stops and shows you the options`,
+  ),
+
+  list: H(
+    "Usage: pagevault list [--portal s] [--tag t] [--json]",
+    `
+Every document you can see, newest first: id, filename, portal, title, created date, and whether
+it is a draft or has a public link.`,
+  ),
+
+  read: H(
+    "Usage: pagevault read <id> [--source] [--json]",
+    `
+A document's metadata — portal, filename, format, visibility, and its shareable link.
+
+  --source   print the STORED BODY to stdout byte-for-byte (the original .md, or the HTML), so
+             \`pagevault read <id> --source > report.md\` round-trips
+  --json     the metadata as an object`,
+  ),
+
+  link: H(
+    "Usage: pagevault link <id>",
+    `
+Print the document's shareable URL to stdout and nothing else — \`pagevault link <id> | pbcopy\`.
+A public document hands back its /p/ capability link; otherwise the portal viewer URL, which
+requires a login.`,
+  ),
+
+  search: H(
+    "Usage: pagevault search <portal> <query …> [--limit N] [--json]",
+    `
+Full-text search within ONE portal. The portal is required on purpose: a cross-client grep is how
+one client's material ends up in another client's answer (prime directive #5).`,
+  ),
+
+  mint: H(
+    "Usage: pagevault mint <id>",
+    `
+Mint a public /p/ link for an existing document, without re-uploading it.
+
+⚠ WIDENING. Anyone who receives, forwards or finds that URL can open the document with no login.
+  It burns no Cloudflare Access seat. Undo it with \`pagevault revoke <id>\`.`,
+  ),
+
+  revoke: H(
+    "Usage: pagevault revoke <id>",
+    `
+Kill a document's public /p/ link. The document itself is untouched and portal members keep
+seeing it — to delete the document, use \`pagevault rm <id>\`.`,
+  ),
+
+  rotate: H(
+    "Usage: pagevault rotate <id>",
+    `
+Replace a document's public link with a fresh one, atomically. The previous /p/ URL dies
+immediately; the new one is just as public.`,
+  ),
+
+  rm: H(
+    "Usage: pagevault rm <id> [--yes]",
+    `
+Delete the document. There is no undo, and no backup unless you made one.
+
+  --yes   skip the confirmation. Required when there is no terminal to ask at`,
+  ),
+
+  export: H(
+    "Usage: pagevault export [dir] [--portal s] [--include-drafts] [--zip]",
+    `
+Walk away with the CONTENT: a browsable folder — index.html, an ACCESS.md spelling out who could
+see what, and one standalone file per document. Every file opens with no PageVault and no server.
+
+Intentionally lossy and NOT a restore format: document ids and /p/ tokens are left out. For
+same-host disaster recovery use \`pagevault backup\`.
+
+  --portal <slug>     just one client
+  --include-drafts    owner-only drafts too (excluded by default)
+  --zip               one file instead of a folder`,
+  ),
+
+  // --- Portals -------------------------------------------------------------------------------
+  portals: H(
+    "Usage: pagevault portals [--json]",
+    `
+Your portals — the client boundary, and the thing permissions actually live on. Document counts
+are deliberately not fetched: that is a KV list() per portal, and those have their own 1000/day
+quota. Use \`pagevault list --portal <slug>\` instead.`,
+  ),
+
+  "portal-create": H(
+    'Usage: pagevault portal-create <slug> [--name "Acme Corp"] [--kind private|restricted|public] [--description "…"]',
+    `
+  --kind restricted   a client portal — its members see everything in it
+  --kind private      yours only (the default)
+  --kind public       anyone with the link, no login, and it burns no Access seat
+
+Prints the slug to stdout, so a script can publish into it immediately.`,
+  ),
+
+  share: H(
+    `Usage: pagevault share <portal> <email> [email …]     grant access
+       pagevault share <portal> --remove a@b,c@d     revoke it`,
+    `
+Permissions live on the PORTAL, not the document — so adding someone to a client's team is one
+write, not one per document.
+
+A removal takes effect in KV immediately, but Cloudflare Access keeps admitting them (and keeps
+charging a seat) until the reconciler runs: \`pagevault sync-access --reap\`.`,
+  ),
+
+  // --- Operate your deployment ---------------------------------------------------------------
+  status: H(
+    "Usage: pagevault status [--json]",
+    `
+What THIS INSTALL is configured for — the tier, owner, account, host and KV id recorded in
+~/.pagevault/. Local only: it makes no network call, so it describes your saved answers, not the
+running deployment. To confirm the two agree, use \`pagevault health\`.
+
+  --json   the same facts as an object, tagged "source": "local"`,
+  ),
+
+  verify: H(
+    "Usage: pagevault verify [--json]",
+    `
+Smoke-test the live deployment end to end — run it after \`init\` or \`upgrade\`. Checks that the
+Worker is ours, that the root serves, that /health reports the build you shipped, that /mcp
+answers, and that a publish → read → revoke round-trip works through the MCP tools.
+
+It publishes a sample document so you have something to open. That matters during a recovery:
+restore BEFORE you verify, or the sample's keys will be sitting in the namespace when the restore
+asks what to do about them.`,
+  ),
+
+  health: H(
+    "Usage: pagevault health [--json]",
+    `
+Ask the live deployment what code it is running (/health) and assert it matches the build this
+install ships. Exits non-zero on a mismatch or an unreachable deployment, so CI fails loudly
+instead of going green on a rollout that silently did not take.`,
+  ),
+
+  "sync-access": H(
+    "Usage: pagevault sync-access [--reap] [--yes] [--json]",
+    `
+Reconcile the Cloudflare Access viewer group with KV. Secured deployments only; on Public it
+reports that there is no group, which is expected.
+
+  --reap   also REMOVE people KV no longer authorizes, freeing their Access seat. A real
+           revocation — recoverable by re-granting, but confirm it
+  --yes    skip the --reap confirmation`,
+  ),
+
+  views: H(
+    "Usage: pagevault views [--days 30] [--portal s] [--doc id] [--json]",
+    `
+Which documents were actually opened. Reads Analytics Engine directly with your Cloudflare token
+— the Worker's binding is write-only, which is why there is no MCP equivalent (ADR-015).
+
+View records are ACCOUNT-LEVEL and outlive the deployment that wrote them: after a teardown and
+rebuild this shows history the new deployment never created. Cloudflare keeps them three months
+and documents no way to delete a dataset.`,
+  ),
+
+  backup: H(
+    "Usage: pagevault backup [--out <file.json>] [--kv <namespace-id>]",
+    `
+Snapshot the whole KV namespace — documents, portals, members and public-link tokens — to one
+JSON file that \`pagevault restore\` replays. Same-host disaster recovery: keys are preserved
+byte-for-byte, so document ids and every /p/ link you have already shared survive a restore.
+
+The file carries key metadata but NO secrets. Keep it gitignored anyway.
+
+  --out <file>   default: pagevault-backup-<timestamp>.json
+  --kv <id>      a namespace other than the one this install deployed`,
+  ),
+
+  restore: H(
+    "Usage: pagevault restore <file.json> [--kv <namespace-id>] [--force] [--yes]",
+    `
+Replay a backup into the KV namespace. A bulk write, NOT a wipe-and-replace: it puts back every
+key in the backup and deletes nothing.
+
+So the question it asks first is "what is in here that the backup will NOT replace?" — those keys
+survive and mix in with the restored data. If any would, it stops and names them.
+
+  --force   proceed anyway. Nothing is deleted either way; this suppresses the refusal, not the
+            facts — the surviving keys are still listed
+  --kv <id> restore into a different namespace
+  --yes     skip the confirmation prompt
+
+Recovering a lost deployment? Restore BEFORE you verify — \`verify\` publishes a sample document,
+and its keys are not in your backup.`,
+  ),
+
+  destroy: H(
+    "Usage: pagevault destroy [--keep-data]",
+    `
+Tear the deployment down: the Worker, the DNS record, the Access applications and group, and the
+KV namespace with every document in it. Irreversible, and it asks — there is no --yes.
+
+  --keep-data   leave the KV namespace and its documents in place
+
+It lists what it will NOT remove before doing anything — Zero Trust itself, consumed Access
+seats, up to three months of view records, and any resource your local state never named.`,
+  ),
+};
+
+/**
+ * The message a missing-argument guard throws: the invocation form, plus a pointer to the rest
+ * when there is more to say. Same constant as `--help`, so the two cannot drift.
+ */
+export function usageError(cmd) {
+  const entry = HELP[cmd];
+  if (!entry) return `Unknown command: ${cmd}\nRun \`pagevault help\`.`;
+  return entry.detail ? `${entry.usage}\nFull help: pagevault ${cmd} --help` : entry.usage;
+}
+
+/** The full text for `pagevault <cmd> --help`. Undefined for a command with no entry. */
+export function helpText(cmd) {
+  const entry = HELP[cmd];
+  if (!entry) return undefined;
+  return entry.detail ? `${entry.usage}\n${entry.detail}\n` : `${entry.usage}\n`;
+}

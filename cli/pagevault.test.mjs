@@ -156,12 +156,23 @@ test("operator commands are dispatched and fail closed with no deployment config
   const parsed = JSON.parse(sj.stdout);
   assert.equal(parsed.configured, false);
   assert.equal(typeof parsed.version, "string");
+  // #130: status reports saved intent, never observed state. An agent reading --json has no tone
+  // to read, so the provenance has to be a field it can branch on.
+  assert.equal(parsed.source, "local");
 
   // verify/health need a deployed URL; with none they die BEFORE any network call.
   for (const cmd of ["verify", "health"]) {
     const r = runIn(home, cmd);
     assert.equal(r.status, 1, `${cmd} should exit 1`);
     assert.match(r.text, /No deployed URL/);
+    assert.doesNotMatch(r.text, /Unknown command/);
+  }
+
+  // backup/restore need a Cloudflare token and a namespace; with neither they die before any
+  // Cloudflare call. They ship as CLI commands (#133) — `make` is no longer the only door.
+  for (const cmd of [["backup"], ["restore", "nope.json"]]) {
+    const r = runIn(home, ...cmd);
+    assert.equal(r.status, 1, `${cmd[0]} should exit 1`);
     assert.doesNotMatch(r.text, /Unknown command/);
   }
 

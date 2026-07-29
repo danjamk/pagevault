@@ -139,10 +139,12 @@ destroy: ## Tear the deployment down — Worker, DNS, Access apps, group, and KV
 
 ##@ Data
 backup: ## Snapshot the KV namespace to a JSON file (OUT=path, KV=id optional)
-	@$(NVM) && node scripts/kv-backup.mjs $(if $(OUT),--out $(OUT),) $(if $(KV),--kv $(KV),)
+# Same engine as `pagevault backup` — one code path, two front doors (#133). An installed
+# operator holds the same client documents a clone does, and had no way to snapshot them.
+	@$(NVM) && node cli/bin/pagevault.mjs backup $(if $(OUT),--out $(OUT),) $(if $(KV),--kv $(KV),)
 
 restore: ## Restore a backup into the KV namespace (make restore FILE=backup.json [KV=id] [FORCE=1])
-	@$(NVM) && node scripts/kv-restore.mjs --in "$(FILE)" $(if $(KV),--kv $(KV),) $(if $(FORCE),--force,)
+	@$(NVM) && node cli/bin/pagevault.mjs restore --file "$(FILE)" $(if $(KV),--kv $(KV),) $(if $(FORCE),--force,)
 
 views: ## Which documents your clients actually opened (DAYS=30 PORTAL=slug DOC=id)
 	@$(NVM) && node scripts/views.mjs $(if $(DAYS),--days $(DAYS),) $(if $(PORTAL),--portal $(PORTAL),) $(if $(DOC),--doc $(DOC),)

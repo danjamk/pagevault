@@ -1,5 +1,6 @@
 //
 // The backup format's one job: preserve KEY METADATA. PageVault's `meta:` and `portal:` keys
+// (moved here from scripts/ with the engine in #133 — one code path, both front doors.)
 // carry their listing data in metadata, and `store.ts` listDocs()/listPortals() SKIP a
 // metadata-less key — so a values-only dump restores documents that are invisible to every
 // listing and portal index (spike, 2026-07-16). These tests pin `toEntry` against exactly that
@@ -7,7 +8,7 @@
 //
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toEntry } from "./kv-backup.mjs";
+import { toEntry, defaultOutName } from "./lib/ops/backup.mjs";
 
 test("toEntry preserves key metadata — the listing data lives here", () => {
   const key = { name: "meta:abc", metadata: { title: "Q3 Review", portal: "acme", visibility: "restricted" } };
@@ -36,4 +37,12 @@ test("toEntry omits metadata for keys that legitimately have none (doc:/pub:)", 
 test("expiration is carried through when present (pub: tokens can expire)", () => {
   const entry = toEntry({ name: "pub:tok", expiration: 1893456000 }, "docid");
   assert.equal(entry.expiration, 1893456000);
+});
+
+test("the default filename is the one the restore hint tells you to type", () => {
+  // A backup names itself, and then prints `pagevault restore <that name>`. If the name ever grew
+  // a character a shell would eat — a colon, a space — the hint would stop being copy-pasteable.
+  const name = defaultOutName(new Date("2026-07-24T18:09:31.512Z"));
+  assert.equal(name, "pagevault-backup-2026-07-24T18-09-31.json");
+  assert.match(name, /^[\w.-]+\.json$/);
 });

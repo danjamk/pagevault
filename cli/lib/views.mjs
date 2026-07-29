@@ -7,9 +7,10 @@
 // Worker holds. Putting it in the Worker is exactly the blast-radius widening ADR-002 exists to
 // prevent, so the Worker writes and the operator reads. See ADR-015, decision 6.
 //
-// The practical consequence: `views` is CLI-only. It is the documented exception to CLI/MCP
-// parity — the MCP server runs *inside* the Worker, so it cannot have this without handing the
-// Worker a credential that can read the whole account's analytics.
+// The practical consequence: `views` is CLI-only, a documented exception to CLI/MCP parity — the
+// MCP server runs *inside* the Worker, so it cannot have this without handing the Worker a
+// credential that can read the whole account's analytics. `backup` and `restore` are CLI-only for
+// the same shape of reason, with a wider token still (it can delete namespaces).
 //
 // Zero dependencies. Node built-ins only.
 //

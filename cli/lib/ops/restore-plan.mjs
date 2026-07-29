@@ -1,14 +1,14 @@
 //
 // What a restore would actually do — the decision, separated from the doing.
 //
-// `make restore` is a bulk PUT, never a wipe. It writes back every key in the backup and deletes
+// `pagevault restore` is a bulk PUT, never a wipe. It writes back every key in the backup and deletes
 // nothing. That makes "is the namespace empty?" the wrong question, and asking it was the bug in
 // #125: a namespace holding one throwaway sample document got the same flat refusal as one holding
 // a live client portal, with `--force` as the only visible way forward. The right question is
 // which keys the backup does NOT replace, because those are the ones that survive and mix in.
 //
-// Pure and side-effect free so it can be tested. `scripts/kv-restore.mjs` runs on import, so the
-// logic cannot live there and still be reachable from a test.
+// Pure and side-effect free so it can be tested independently of `restore.mjs`, which talks to
+// Cloudflare and calls `die()`.
 //
 
 /**

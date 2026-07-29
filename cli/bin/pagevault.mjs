@@ -12,6 +12,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { api, apiText, requireConfig, saveLoginConfig, waitReadable, PvError } from "../lib/client.mjs";
 import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "../lib/format.mjs";
+import { helpText, usageError } from "../lib/help.mjs";
 import { buildExport } from "../lib/export.mjs";
 import { formatViews, queryViews } from "../lib/views.mjs";
 
@@ -29,7 +30,15 @@ async function main() {
   const { positional, flags } = parseArgs(rest);
 
   if (flags.version || cmd === "--version" || cmd === "-v") return out(VERSION);
-  if (!cmd || cmd === "help" || cmd === "--help" || flags.help) return usage();
+
+  // `pagevault help <cmd>` and `pagevault <cmd> --help` both land on that command's own help
+  // (#126). A bare `help`, or a `--help` on something we don't dispatch, falls back to the
+  // top-level summary — including `init --help` and `upgrade --help`, which cli/smoke.mjs runs to
+  // prove the lifecycle commands ship WITHOUT provisioning anything. Help must stay cheap and
+  // exit 0.
+  const showHelp = (name) => note((helpText(name) ?? usageText()).trimEnd());
+  if (!cmd || cmd === "help" || cmd === "--help") return showHelp(positional[0]);
+  if (flags.help) return showHelp(cmd);
 
   switch (cmd) {
     case "init":
@@ -74,6 +83,10 @@ async function main() {
       return exportTree(positional, flags);
     case "views":
       return views(flags);
+    case "backup":
+      return backup(flags);
+    case "restore":
+      return restore(positional, flags);
     case "login":
       return login(flags);
     default:
@@ -98,7 +111,7 @@ function passedPublishFlags(flags) {
 
 async function publish(pos, flags) {
   const file = pos[0];
-  if (!file) throw new PvError("Usage: pagevault publish <file.html|.md> [--portal s] [--name f] [--title t] [--public] …");
+  if (!file) throw new PvError(usageError("publish"));
   if (!existsSync(file)) throw new PvError(`No such file: ${file}`);
 
   const cfg = requireConfig();
@@ -194,7 +207,7 @@ async function list(flags) {
 
 async function read(pos, flags) {
   const id = pos[0];
-  if (!id) throw new PvError("Usage: pagevault read <id> [--source] [--json]");
+  if (!id) throw new PvError(usageError("read"));
   const cfg = requireConfig();
   const enc = encodeURIComponent(id);
 
@@ -229,7 +242,7 @@ async function read(pos, flags) {
 
 async function link(pos) {
   const id = pos[0];
-  if (!id) throw new PvError("Usage: pagevault link <id>   (prints the shareable URL to stdout)");
+  if (!id) throw new PvError(usageError("link"));
   const cfg = requireConfig();
   const meta = await api(cfg, "GET", `/docs/${encodeURIComponent(id)}`);
   // One URL → stdout, nothing else, so `pagevault link <id> | pbcopy` just works. A public doc
@@ -247,7 +260,7 @@ async function search(pos, flags) {
   if (!portal || !query) {
     // The portal is required on purpose: a cross-client grep is how one client's material
     // ends up in another's answer (prime directive #5).
-    throw new PvError("Usage: pagevault search <portal> <query…> [--limit N] [--json]");
+    throw new PvError(usageError("search"));
   }
 
   const cfg = requireConfig();
@@ -273,7 +286,7 @@ async function search(pos, flags) {
 
 async function mint(pos) {
   const id = pos[0];
-  if (!id) throw new PvError("Usage: pagevault mint <id>");
+  if (!id) throw new PvError(usageError("mint"));
   const cfg = requireConfig();
 
   const res = await api(cfg, "PATCH", `/docs/${encodeURIComponent(id)}`, { makePublic: true });
@@ -283,7 +296,7 @@ async function mint(pos) {
 
 async function revoke(pos) {
   const id = pos[0];
-  if (!id) throw new PvError("Usage: pagevault revoke <id>");
+  if (!id) throw new PvError(usageError("revoke"));
   const cfg = requireConfig();
 
   // Kill the /p/ link, keep the document. This is NOT delete — that's `pagevault rm`.
@@ -293,7 +306,7 @@ async function revoke(pos) {
 
 async function rotate(pos) {
   const id = pos[0];
-  if (!id) throw new PvError("Usage: pagevault rotate <id>");
+  if (!id) throw new PvError(usageError("rotate"));
   const cfg = requireConfig();
 
   // One atomic call: the old token is dropped and a fresh one minted server-side. Two calls
@@ -353,12 +366,7 @@ async function portals(flags) {
 async function portalCreate(pos, flags) {
   const slug = pos[0];
   if (!slug) {
-    throw new PvError(
-      'Usage: pagevault portal-create <slug> [--name "Acme Corp"] [--kind private|restricted|public] [--description "…"]\n' +
-        "  restricted  a client portal — its members see everything in it\n" +
-        "  private     yours only (the default)\n" +
-        "  public      anyone with the link, no login, and it burns no Access seat",
-    );
+    throw new PvError(usageError("portal-create"));
   }
 
   const cfg = requireConfig();
@@ -385,10 +393,7 @@ async function share(pos, flags) {
   const add = [...rest, ...(splitList(flags.emails) ?? [])];
   const remove = splitList(flags.remove) ?? [];
   if (!portal || (!add.length && !remove.length)) {
-    throw new PvError(
-      "Usage: pagevault share <portal> <email> [email …]     grant access\n" +
-        "       pagevault share <portal> --remove a@b,c@d     revoke it",
-    );
+    throw new PvError(usageError("share"));
   }
 
   const cfg = requireConfig();
@@ -423,7 +428,7 @@ async function share(pos, flags) {
 
 async function remove(pos, flags) {
   const id = pos[0];
-  if (!id) throw new PvError("Usage: pagevault rm <id> [--yes]");
+  if (!id) throw new PvError(usageError("rm"));
 
   const cfg = requireConfig();
 
@@ -466,10 +471,7 @@ async function login(flags) {
   const url = (typeof flags.url === "string" ? flags.url : process.env.PAGEVAULT_URL || "").replace(/\/+$/, "");
   const token = typeof flags.token === "string" ? flags.token : process.env.PAGEVAULT_API_TOKEN || "";
   if (!url || !token) {
-    throw new PvError(
-      "Usage: pagevault login [--url https://share.example.com] [--token <PAGEVAULT_API_TOKEN>]\n" +
-        "Provide both as flags, or set PAGEVAULT_URL and PAGEVAULT_API_TOKEN and run `pagevault login`.",
-    );
+    throw new PvError(usageError("login"));
   }
 
   // The same writer `pagevault init` uses, so an install and an explicit login leave identical
@@ -538,8 +540,42 @@ async function destroy(flags) {
   await destroyCmd({ keepData: flags["keep-data"] === true });
 }
 
-function usage() {
-  note(`pagevault ${VERSION} — publish HTML or Markdown to your PageVault deployment
+// Same-host disaster recovery (#133). These were `make`-only, which made them unreachable for an
+// `npm install -g pagevault` operator — the one holding real client documents (Prime Directive #2).
+// Both talk to Cloudflare directly with your provisioning token, not to /api: KV key metadata is
+// what listings render from, and no PageVault endpoint exposes it.
+
+async function backup(flags) {
+  const { backupCmd } = await import("../lib/ops/backup.mjs");
+  await backupCmd({
+    out: typeof flags.out === "string" ? flags.out : undefined,
+    kv: typeof flags.kv === "string" ? flags.kv : undefined,
+  });
+}
+
+async function restore(pos, flags) {
+  const { restoreCmd } = await import("../lib/ops/restore.mjs");
+  // The file is positional (`pagevault restore backup.json`); --file is the alias `make restore`
+  // passes, so FILE=… keeps working through the one engine.
+  //
+  // `--force` and `--yes` take no value, but parseArgs can't know that: `restore --force snap.json`
+  // binds the filename to the flag and leaves no positional. Recover it — printing a usage line at
+  // someone who plainly passed a file, in the one command people reach for mid-recovery, would be
+  // the worst possible moment to be pedantic about argument order.
+  const swallowed = ["force", "yes"].map((k) => flags[k]).find((v) => typeof v === "string");
+  const file = pos[0] || (typeof flags.file === "string" ? flags.file : swallowed);
+  if (!file) throw new PvError(usageError("restore"));
+  await restoreCmd({
+    file,
+    kv: typeof flags.kv === "string" ? flags.kv : undefined,
+    force: flags.force !== undefined,
+  });
+}
+
+// The top-level summary — one line per command. Depth lives in `pagevault <cmd> --help` (#126),
+// which is where a reader goes when a command misbehaves; this is the map, not the manual.
+function usageText() {
+  return `pagevault ${VERSION} — publish HTML or Markdown to your PageVault deployment
 
 Set up & deploy:
   pagevault init [--yes]              stand PageVault up on your own Cloudflare account (no repo)
@@ -574,19 +610,22 @@ Operate your deployment:
   pagevault health [--json]           assert /health reports the version you shipped
   pagevault sync-access [--reap] [--yes] [--json]  reconcile the Access viewer group with KV
   pagevault views [--days 30] [--portal s] [--doc id] [--json]  which documents were opened
+  pagevault backup [--out <file.json>]  snapshot KV — same-host disaster recovery
+  pagevault restore <file.json> [--force]  replay a backup (never deletes; asks first)
   pagevault destroy [--keep-data]     tear the deployment down (asks; irreversible)
 
+Any command: pagevault <command> --help   for its flags and what they do.
 Config: PAGEVAULT_URL / PAGEVAULT_API_TOKEN, or ~/.pagevault/config.json (written by init/login).
 On success, publish/mint/rotate print only the URL to stdout:  pagevault mint <id> | pbcopy
 read --source prints the stored body to stdout:  pagevault read <id> --source > report.md
-Export writes a browsable folder (index.html + one folder per portal); its path is printed to stdout.`);
+Export writes a browsable folder (index.html + one folder per portal); its path is printed to stdout.`;
 }
 
 /**
- * `pagevault views` — the one command that talks to Cloudflare rather than to a PageVault
- * deployment. Analytics Engine's binding is write-only; reading needs an account-scoped token
- * that the Worker deliberately does not hold (ADR-015, decision 6), which is also why there is
- * no MCP equivalent. Documented exception to CLI/MCP parity.
+ * `pagevault views` — one of the three commands that talk to Cloudflare rather than to a PageVault
+ * deployment (`backup` and `restore` are the others). Analytics Engine's binding is write-only;
+ * reading needs an account-scoped token that the Worker deliberately does not hold (ADR-015,
+ * decision 6), which is also why there is no MCP equivalent. Documented exception to CLI/MCP parity.
  */
 async function views(flags) {
   const { loadContext, loadCloudToken } = await import("../lib/provision/context.mjs");

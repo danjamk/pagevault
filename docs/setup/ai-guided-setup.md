@@ -114,9 +114,12 @@ Node 22 (nvm).
 ## Step 5 — Confirm it worked
 
 ```bash
-pagevault status     # or: make status  — what got deployed, and where
+pagevault status     # or: make status  — what they ASKED for (local config, no network)
 pagevault verify     # or: make verify  — liveness, the MCP surface, a sample publish
 ```
+
+`status` reads the saved answers, never the deployment — so it is the wrong tool for "did it
+work?" and the right one for "what did they choose?". `verify` is the one that asks the Worker.
 
 `verify` ends by publishing a welcome document and printing a public link the person can open in a
 browser right then. That open is the proof it works.
