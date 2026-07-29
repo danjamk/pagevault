@@ -207,15 +207,38 @@ export async function destroyCmd({ keepData = false } = {}) {
   }
 
   // --- What we deliberately do NOT touch -------------------------------------
+  // Deliberately NOT rung-3-only any more (#128). View records are written from renderShell for
+  // /p/ and /pub/ too, so they outlive a teardown at every tier — and a teardown that lists what
+  // survives, while omitting the one thing holding a third party's email, is worse than one that
+  // lists nothing. Zero Trust and seats stay conditional; they only exist at rung 3.
+  console.log(`\n${c.bold("Left alone, deliberately:")}\n`);
+
   if (tier >= 3) {
-    console.log(`\n${c.bold("Left alone, deliberately:")}\n`);
     console.log(`  · ${c.bold("Zero Trust itself")} — the org, the team name, the login methods.`);
     console.log(`    ${c.dim("Account-wide; tearing it down would affect anything else using Access,")}`);
     console.log(`    ${c.dim("and re-enabling it is the one step that cannot be automated.")}`);
     console.log();
     console.log(`  · ${c.bold("Access seats")} — anyone who logged in still holds one.`);
     console.log(`    ${c.dim("Zero Trust → Team & Resources → Users → Remove, if you want them back.")}`);
+    console.log();
   }
+
+  // Deliberately a statement, not a count (#128). Counting would mean querying Analytics Engine,
+  // which needs an account-scoped `Account Analytics Read` token — wider than anything destroy
+  // holds, and the exact credential ADR-015 §6 keeps out of this codepath. Even with the token it
+  // would be a network call in the middle of a destructive flow: a slow or failed count would
+  // either stall the teardown or print nothing, and "nothing" reads as "no records". A flat
+  // statement that records exist is accurate without asking, and cannot fail open.
+  console.log(`  · ${c.bold("View records")} — up to ${c.bold("three months")} of them, in Analytics Engine, not KV.`);
+  console.log(`    ${c.dim("Which documents were opened and when — and for anything read through Access,")}`);
+  console.log(`    ${c.dim("the viewer's email address. Cloudflare documents no way to delete a dataset,")}`);
+  console.log(`    ${c.dim("so waiting out the window is the only mechanism. If a client ever asks you to")}`);
+  console.log(`    ${c.dim("erase their data, that is the honest answer — and `pagevault views` still reads")}`);
+  console.log(`    ${c.dim("them after this deployment is gone.")}`);
+  console.log();
+  console.log(`  · ${c.bold("Anything this deployment's state never named.")} Teardown deletes what`);
+  console.log(`    ${c.dim(".pagevault.json points at. A KV namespace left by an older PageVault under a")}`);
+  console.log(`    ${c.dim("different title is orphaned, not removed — check Storage & Databases → KV.")}`);
   // `make deploy` at EVERY rung, not `make provision` at rung 3: provision writes the config and
   // creates the Access apps, then stops without deploying the Worker or setting the secrets. Deploy
   // is rung-aware and calls provisionAccess() itself, so it is the complete answer. See #119.

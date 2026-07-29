@@ -573,6 +573,17 @@ document.
   them, so there was never an identity to withhold.
 - **Retention is three months.** This is a rolling window, not a history. A nine-month
   engagement outlives its own view data, and nothing in the UI should imply otherwise.
+- **The dataset is account-level and outlives the deployment.** Nothing in a view record names
+  which deployment wrote it, so after a teardown and rebuild `views` blends records from a
+  deployment that no longer exists with the current one's, and presents all of it as current.
+  Documented rather than fixed: stamping every record with a deployment id would cost a field on
+  the hot path for the life of the product to tidy a case that only arises after a teardown. The
+  reader's escape hatch is `pagevault list` (#129).
+- **Teardown cannot clear it, and neither can anything else.** `destroy` removes KV, the Worker
+  and the Access apps; the view records stay for the rest of their window. Cloudflare documents no
+  way to delete a dataset. That matters beyond tidiness: for `/v/` reads the records hold a
+  viewer's email, so "delete everything about this client" is not a thing the tool can honestly
+  promise. `destroy` says so out loud (#128).
 - **Counts come from `sum(_sample_interval)`.** Analytics Engine samples under load; `count()`
   under-reports by exactly the amount that still looks plausible. No count is stored, so the
   wrong query cannot be written by accident.

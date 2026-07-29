@@ -56,6 +56,18 @@ test("singularises every count, in both the empty and populated summaries", () =
   assert.match(formatViews({ days: 30, rows: [row({ views: 2 })] }, null), /2 views across 1 document, last 30 days\./);
 });
 
+test("warns that the dataset outlives the deployment, every time it shows rows", () => {
+  // #129: the dataset is account-level, so after a teardown and rebuild these rows can name
+  // documents the current deployment never created. The note exists because someone hit exactly
+  // that and reasonably read the output as current. Unpinned, it is one tidy-up away from gone.
+  const out = formatViews({ days: 30, rows: [row()] }, null);
+  assert.match(out, /outlives any single deployment/);
+  assert.match(out, /pagevault list/);
+  // Unconditional on purpose — `upgrade` redeploys, so a "predates this deployment" test would
+  // fire on nearly every run and train the reader to skip it.
+  assert.match(formatViews({ days: 1, rows: [row({ views: 1 })] }, null), /outlives any single deployment/);
+});
+
 test("columns line up even when a cell carries ANSI", () => {
   const colour = { dim: (s) => `\x1b[2m${s}\x1b[0m`, bold: (s) => s };
   const out = formatViews({ days: 30, rows: [row({ viewer: null }), row({ doc: "b", title: "A much longer title" })] }, colour);
