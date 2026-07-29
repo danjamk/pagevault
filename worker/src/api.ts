@@ -38,6 +38,7 @@ import {
   putMembers,
   putPortal,
 } from "./store.js";
+import { getViewSummary, parseViewSummary, putViewSummary, withStats } from "./views.js";
 import { log } from "./log.js";
 
 /**
@@ -126,6 +127,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       return fail(405, "method_not_allowed", `${request.method} not allowed on /api/access/sync`);
     }
 
+    if (rest === "/views/summary") {
+      if (request.method === "POST") return await putViewSummaryHandler(request, env);
+      return fail(405, "method_not_allowed", `${request.method} not allowed on /api/views/summary`);
+    }
+
     if (rest === "/portals") {
       if (request.method === "POST") return await createPortal(request, env);
       if (request.method === "GET") return json({ portals: await listPortals(env) });
@@ -207,6 +213,25 @@ async function accessSyncHandler(request: Request, env: Env): Promise<Response> 
   });
 }
 
+/**
+ * `POST /api/views/summary` — the operator's machine hands back what it read from Analytics
+ * Engine (#127). One KV key, one write. Owner-bearer only, like every `/api` route.
+ *
+ * This is the only way view metrics enter the Worker. There is no GET counterpart and no query
+ * path: the Worker stores the result and serves it joined onto documents, which is the whole of
+ * ADR-019 — data in, never the credential that produced it.
+ */
+async function putViewSummaryHandler(request: Request, env: Env): Promise<Response> {
+  const summary = parseViewSummary(await readJson(request));
+  await putViewSummary(env, summary);
+  return json({
+    ok: true,
+    syncedAt: summary.syncedAt,
+    windowDays: summary.windowDays,
+    documents: Object.keys(summary.docs).length,
+  });
+}
+
 async function createDoc(request: Request, env: Env): Promise<Response> {
   const declared = Number(request.headers.get("Content-Length") ?? 0);
   if (declared > MAX_BODY_BYTES) {
@@ -243,7 +268,14 @@ async function listDocsHandler(request: Request, env: Env): Promise<Response> {
   const docs = (await listDocs(env, portal)).filter((doc) => !tag || doc.tags?.includes(tag));
   docs.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-  return json({ docs });
+  // One KV read per request for the whole listing, never one per document (#127). `viewsSyncedAt`
+  // rides at the top level so a caller can say "as of Tuesday" rather than implying it just
+  // looked; both it and the per-document fields are absent when no sync has run.
+  const summary = await getViewSummary(env);
+  return json({
+    docs: docs.map((doc) => withStats(doc, summary)),
+    ...(summary ? { viewsSyncedAt: summary.syncedAt, viewsWindowDays: summary.windowDays } : {}),
+  });
 }
 
 async function getDocHandler(request: Request, env: Env, id: string): Promise<Response> {
@@ -254,10 +286,12 @@ async function getDocHandler(request: Request, env: Env, id: string): Promise<Re
   // (and any /api client) hand back a URL without a second round-trip.
   const portal = await getPortal(env, meta.portal);
   const base = baseUrl(request, env);
+  const summary = await getViewSummary(env);
   const body: Record<string, unknown> = {
-    ...meta,
+    ...withStats(meta, summary),
     url: portal ? `${base}${documentPath(portal, id)}` : `${base}/v/${encodeURIComponent(meta.portal)}/${id}`,
   };
+  if (summary) body["viewsSyncedAt"] = summary.syncedAt;
   if (meta.publicToken) body["publicUrl"] = `${base}/p/${meta.publicToken}`;
   return json(body);
 }

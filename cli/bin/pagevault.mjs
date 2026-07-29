@@ -14,7 +14,7 @@ import { api, apiText, requireConfig, saveLoginConfig, waitReadable, PvError } f
 import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "../lib/format.mjs";
 import { helpText, usageError } from "../lib/help.mjs";
 import { buildExport } from "../lib/export.mjs";
-import { formatViews, queryViews } from "../lib/views.mjs";
+import { formatViews, plural, queryViews, summarizeViews } from "../lib/views.mjs";
 
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
@@ -610,6 +610,7 @@ Operate your deployment:
   pagevault health [--json]           assert /health reports the version you shipped
   pagevault sync-access [--reap] [--yes] [--json]  reconcile the Access viewer group with KV
   pagevault views [--days 30] [--portal s] [--doc id] [--json]  which documents were opened
+  pagevault views --sync              push those counts to MCP (one write; not live after)
   pagevault backup [--out <file.json>]  snapshot KV — same-host disaster recovery
   pagevault restore <file.json> [--force]  replay a backup (never deletes; asks first)
   pagevault destroy [--keep-data]     tear the deployment down (asks; irreversible)
@@ -625,9 +626,12 @@ Export writes a browsable folder (index.html + one folder per portal); its path 
  * `pagevault views` — one of the three commands that talk to Cloudflare rather than to a PageVault
  * deployment (`backup` and `restore` are the others). Analytics Engine's binding is write-only;
  * reading needs an account-scoped token that the Worker deliberately does not hold (ADR-015,
- * decision 6), which is also why there is no MCP equivalent. Documented exception to CLI/MCP parity.
+ * decision 6), which is why the *query* has no MCP equivalent. `--sync` pushes the aggregated
+ * answer back so MCP can serve it (#127, ADR-019) — the Worker gains data, never the credential.
  */
 async function views(flags) {
+  if (flags.sync !== undefined) return syncViews(flags);
+
   const { loadContext, loadCloudToken } = await import("../lib/provision/context.mjs");
   const ctx = loadContext();
 
@@ -647,6 +651,72 @@ async function views(flags) {
   // pipe: `pagevault views --json | jq` should carry data and nothing else.
   if (flags.json) return out(JSON.stringify(result, null, 2));
   note(formatViews(result, null));
+}
+
+/**
+ * `pagevault views --sync` — read Analytics Engine here, hand the Worker the result (#127).
+ *
+ * The two credentials never meet: the account-scoped analytics token stays on this machine and
+ * the deployment bearer carries only the aggregate. That is the whole of ADR-019, and the reason
+ * this is a flag on `views` rather than something the Worker could ever do for itself.
+ */
+async function syncViews(flags) {
+  // A filtered sync would store a summary that CLAIMS to cover the deployment while holding one
+  // portal — and every document outside it would then report a *measured* zero views, which is a
+  // lie in the one direction that matters ("the client never opened it"). Refuse, never narrow.
+  for (const flag of ["portal", "doc"]) {
+    if (flags[flag] !== undefined) {
+      throw new PvError(`--${flag} cannot be combined with --sync — the summary covers the whole deployment or it is wrong.`);
+    }
+  }
+
+  const { loadContext, loadCloudToken } = await import("../lib/provision/context.mjs");
+  const ctx = loadContext();
+  const cfg = requireConfig();
+
+  // 90 days, not the table's 30. "Have they ever opened it" is a lifetime question, and Analytics
+  // Engine retains about three months — so a sync takes the whole window it can still see.
+  const days = Number(flags.days ?? 90);
+  // Rows are grouped per (portal, doc, title, surface, viewer), so one document can be many rows.
+  // The table's default limit of 100 would truncate an aggregate silently.
+  const limit = Number(flags.limit ?? 10000);
+
+  let result;
+  try {
+    result = await queryViews(
+      { accountId: flags.account || ctx.accountId, token: process.env.CLOUDFLARE_API_TOKEN || loadCloudToken() },
+      { days, limit },
+    );
+  } catch (err) {
+    throw new PvError(err.message);
+  }
+
+  // What still exists, so the summary can drop rows for documents that were revoked or torn down.
+  const { docs = [] } = await api(cfg, "GET", "/docs");
+  const knownIds = new Set(docs.map((d) => d.id));
+
+  const { summary, skipped } = summarizeViews(result, { syncedAt: new Date().toISOString(), knownIds });
+  const res = await api(cfg, "POST", "/views/summary", summary);
+
+  // A truncated query would under-report views as confidently as a complete one, so say it.
+  const truncated = result.rows.length >= limit;
+  const counted = Object.keys(summary.docs).length;
+  const total = Object.values(summary.docs).reduce((n, d) => n + d.views, 0);
+
+  if (flags.json) return out(JSON.stringify({ ...res, skipped, truncated }, null, 2));
+
+  note(
+    [
+      `Synced ${plural(counted, "document")} · ${plural(total, "view")} · last ${plural(days, "day")}.`,
+      ...(skipped.length
+        ? [`Skipped ${plural(skipped.length, "document")} no longer published — the dataset outlives the deployment.`]
+        : []),
+      ...(truncated
+        ? [`⚠ Hit the ${limit}-row query limit, so the summary may be incomplete. Narrow it with --days.`]
+        : []),
+      `read_document and list_documents now report these over MCP, as of the sync — not live.`,
+    ].join("\n"),
+  );
 }
 
 main().catch((err) => {

@@ -1,5 +1,5 @@
 import { SELF, env } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { mintSession } from "../src/session.js";
 import { putMembers, putPortal } from "../src/store.js";
 
@@ -903,5 +903,105 @@ describe("🔴 email grants sync to the Access group (ADR-002 hot path)", () => 
     expect(out).toContain("until 'sync-access' reconciles");
     // Removal is not the hot path — it must not claim an Access sync happened.
     expect(out).not.toContain("Email-secured access is not enabled");
+  });
+});
+
+describe("view metrics ride along with the read tools (#127)", () => {
+  /**
+   * The metrics reach MCP by sync, never by query — the Worker holds no analytics credential
+   * (ADR-019). What these assert is the *honesty* half: absent when unmeasured, zero only when
+   * genuinely measured, and always stamped with when the sync ran.
+   */
+  const SYNCED = "2026-07-29T12:00:00.000Z";
+
+  const sync = (docs: Record<string, unknown>, syncedAt = SYNCED) =>
+    SELF.fetch(`${HOST}/api/views/summary`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ syncedAt, windowDays: 90, docs }),
+    });
+
+  /** Publish through MCP, then backdate it so it falls inside the measured window. */
+  async function publishBackdated(title: string): Promise<string> {
+    const { structured } = await callToolFull("publish_document", { title, html: `<h1>${title}</h1>` });
+    const id = structured["id"] as string;
+    const { getMeta, putMeta } = await import("../src/store.js");
+    const meta = (await getMeta(env, id))!;
+    await putMeta(env, { ...meta, createdAt: "2026-01-01T00:00:00.000Z" });
+    return id;
+  }
+
+  beforeEach(async () => {
+    await env.PAGEVAULT.delete("views:summary");
+  });
+
+  it("read_document carries no view fields until a sync has run", async () => {
+    const id = await publishBackdated("Unmeasured");
+    const { structured } = await callToolFull("read_document", { id });
+
+    // Absent, not zero: an agent must not be able to say "the client never opened it" on the
+    // strength of a number nobody ever measured.
+    expect(structured["views"]).toBeUndefined();
+    expect(structured["viewsSyncedAt"]).toBeUndefined();
+  });
+
+  it("read_document reports counts, surfaces and when they were measured", async () => {
+    const id = await publishBackdated("Measured");
+    await sync({ [id]: { views: 4, lastViewedAt: "2026-07-28T09:00:00Z", surfaces: { link: 3, public: 0, portal: 1 } } });
+
+    const { structured, text } = await callToolFull("read_document", { id });
+
+    expect(structured).toMatchObject({ views: 4, viewsSyncedAt: SYNCED });
+    expect(structured["surfaces"]).toEqual({ link: 3, public: 0, portal: 1 });
+    // The prose half carries it too — a host that shows only text must not lose the caveat.
+    expect(text).toContain("views: 4");
+    expect(text).toContain("as of 2026-07-29");
+  });
+
+  it("says 'not opened yet' in prose for a measured zero", async () => {
+    const id = await publishBackdated("Ignored");
+    await sync({});
+
+    const { structured, text } = await callToolFull("read_document", { id });
+    expect(structured["views"]).toBe(0);
+    // "0 views" is the datum; "not opened yet" is the sentence the operator actually wants back.
+    expect(text).toContain("not opened yet");
+  });
+
+  it("list_documents stamps the listing once and never leaks a viewer identity", async () => {
+    const id = await publishBackdated("Listed");
+    await sync({ [id]: { views: 2, lastViewedAt: "2026-07-28T09:00:00Z", surfaces: { link: 2, public: 0, portal: 0 } } });
+
+    const { structured, text } = await callToolFull("list_documents", {});
+
+    expect(structured["viewsSyncedAt"]).toBe(SYNCED);
+    const docs = structured["documents"] as Record<string, unknown>[];
+    expect(docs.find((d) => d["id"] === id)).toMatchObject({ views: 2 });
+    // ADR-019 decision 4: counts and surfaces reach the model, emails do not.
+    expect(JSON.stringify(structured)).not.toMatch(/@[a-z]+\.(com|org)/);
+    expect(text).toContain("views: 2");
+    // Once at the foot, and in the PROSE: a host that renders only text would otherwise show a
+    // column of counts with nothing saying when they were measured.
+    expect(text).toContain("as of the last sync, 2026-07-29 — not live");
+    expect(text.match(/as of the last sync/g)).toHaveLength(1);
+  });
+
+  it("says nothing about staleness when there is nothing to be stale", async () => {
+    await publishBackdated("No Sync Yet");
+    const { text } = await callToolFull("list_documents", {});
+    expect(text).not.toContain("as of the last sync");
+  });
+
+  it("both read tools tell the model the numbers are as of the sync, not live", async () => {
+    const res = await result(await rpc("tools/list"));
+    const tools = res["tools"] as { name: string; description: string }[];
+
+    for (const name of ["read_document", "list_documents"]) {
+      const tool = tools.find((t) => t.name === name)!;
+      // Without this the model reports a three-day-old count as if it just looked — the exact
+      // liability ADR-019 decision 6 names.
+      expect(tool.description).toContain("viewsSyncedAt");
+      expect(tool.description).toContain("not from");
+    }
   });
 });

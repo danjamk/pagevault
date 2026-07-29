@@ -813,16 +813,25 @@ describe("GET /api/docs", () => {
     }
   });
 
-  it("⭐ issues exactly one KV list() call and zero reads", async () => {
+  it("⭐ issues exactly one KV list() call, and a read count that does not scale with documents", async () => {
     // The whole point of the listing design. An N+1 passes every other test in this
     // file and quietly eats the 100k/day read quota in production.
+    //
+    // This asserted zero reads until the view summary arrived (#127), which is one `get` for
+    // the whole listing. The invariant worth protecting was never "no reads" — it is that the
+    // count is constant in the number of documents, so it is pinned to an exact key here and
+    // checked against a listing several documents long.
     const list = vi.spyOn(env.PAGEVAULT, "list");
     const get = vi.spyOn(env.PAGEVAULT, "get");
 
-    await SELF.fetch(`${HOST}/api/docs`, { headers: auth() });
+    const { docs } = (await (await SELF.fetch(`${HOST}/api/docs`, { headers: auth() })).json()) as {
+      docs: unknown[];
+    };
 
+    expect(docs.length).toBeGreaterThan(2);
     expect(list).toHaveBeenCalledTimes(1);
-    expect(get).not.toHaveBeenCalled();
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(get).toHaveBeenCalledWith("views:summary", "json");
 
     list.mockRestore();
     get.mockRestore();
