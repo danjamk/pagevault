@@ -227,6 +227,11 @@ function page(session: string, nonce: string, owner: string, version: string, de
   .side-foot { display:flex; flex-direction:column; gap:6px; padding:16px 8px 0; margin-top:20px;
                border-top:1px solid var(--pv-border); }
   .side-foot .tagline { font-size:11.5px; color:var(--pv-faint); line-height:1.5; }
+  /* Access seats (#44). Muted until it matters, red at the limit — where "the limit" is the free
+     plan's 50, which we assume rather than observe, so the label always names the plan. */
+  .side-foot .seats { font-size:11.5px; color:var(--pv-faint); line-height:1.5; }
+  .side-foot .seats .n { color:var(--pv-muted); font-variant-numeric:tabular-nums; }
+  .side-foot .seats.hot, .side-foot .seats.hot .n { color:var(--pv-danger); font-weight:600; }
   .side-foot .build { font-size:11px; color:var(--pv-faint); line-height:1.5; word-break:break-word;
                       font-variant-numeric:tabular-nums; }
   .side-foot .build a { color:var(--pv-muted); text-decoration:none; }
@@ -275,6 +280,7 @@ function page(session: string, nonce: string, owner: string, version: string, de
   .dochead-act { display:flex; align-items:center; gap:10px; }
   .dochead h2 { font-size:16px; font-weight:600; letter-spacing:-0.3px; margin:0; color:var(--pv-ink); }
   .dochead .cnt { font-size:13px; color:var(--pv-muted); }
+  .dochead-act .fresh { font-size:11.5px; color:var(--pv-faint); white-space:nowrap; }
   .doclist { background:var(--pv-surface); border:1px solid var(--pv-border); border-radius:14px;
              overflow:hidden; }
   .item + .item { border-top:1px solid var(--pv-border-2); }
@@ -460,6 +466,7 @@ ${ICON_DEFS}
       </div>
     </div>
     <div class="side-foot">
+      <span class="seats" id="seats" hidden></span>
       <span class="tagline">Self-hosted &middot; Cloudflare &middot; MIT</span>
       <span class="build">
         <a href="${changelogUrl}" target="_blank" rel="noopener" title="Changelog">v${esc(version)}</a>${deployedAt ? ` &middot; deployed <span data-utc="${esc(deployedAt)}" title="${esc(deployDate)}">${deployDate}</span>` : ""}
@@ -584,7 +591,8 @@ ${ICON_DEFS}
   const nav = document.getElementById("nav");
   const PORTALS = {};      // slug -> { slug, name, kind, description, docCount, members }
   const DOCS = {};         // slug -> docs[] (lazy, cached after first view)
-  let selected = null;     // selected portal slug
+  const FETCHED = {};      // slug -> ms when DOCS[slug] was filled, for the staleness check below
+  let selected = null;     // selected portal slug — mirrored into location.hash (#92)
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const ico = (id, cls) => '<svg class="icon' + (cls ? ' ' + cls : '') + '" aria-hidden="true"><use href="#i-' + id + '"/></svg>';
 
@@ -850,13 +858,45 @@ ${ICON_DEFS}
     app.innerHTML = head +
       '<div class="dochead"><div class="h"><h2>Documents</h2><span class="cnt">' + (docs ? docs.length : "") + '</span></div>' +
       '<div class="dochead-act">' +
+        freshLabel(p.slug) +
         '<button class="btn sm" data-act="refresh" title="Re-fetch the document list — picks up anything published from the CLI or an agent since this loaded">' + ico("refresh") + 'Refresh</button>' +
         '<button class="btn" id="pub-here"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>Upload to ' + esc(p.name) + '</button>' +
       '</div></div>' + list;
   }
 
+  // "Read at 14:32" beside the Refresh button. A clock time, not "2 minutes ago": a relative
+  // label has to be re-rendered to stay true, and one that silently stops ticking is worse than
+  // no label at all. This says when the list came from the server and lets you judge it.
+  function freshLabel(slug) {
+    const at = FETCHED[slug];
+    if (!at) return "";
+    const t = new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    return '<span class="fresh" title="When this list was last read from the server">Read at ' + esc(t) + '</span>';
+  }
+
+  // The portal named by the URL fragment, if any: "#acme" -> "acme". Written with slice rather
+  // than a regex on purpose — this whole script lives inside a TS template literal, where a
+  // regex containing a slash needs double-escaping and reads like a puzzle.
+  function hashPortal() {
+    try {
+      let h = location.hash || "";
+      if (h.charAt(0) === "#") h = h.slice(1);
+      if (h.charAt(0) === "/") h = h.slice(1);
+      return decodeURIComponent(h).trim();
+    } catch (e) { return ""; }
+  }
+
   async function selectPortal(slug) {
     selected = slug;
+    // Mirror the selection into the URL so a reload lands where you were, and a portal view can
+    // be bookmarked or linked (#92). replaceState, NOT an assignment to location.hash: assigning
+    // the hash pushes a history entry per click, so Back would walk back through portals instead
+    // of leaving the console. replaceState also does not fire hashchange, so the listener below
+    // cannot loop.
+    //
+    // (No backticks in this comment — it lives inside the template literal that page() returns,
+    // where a bare backtick ends the string. tsc reports it 300 lines away, if at all.)
+    try { history.replaceState(null, "", "#" + encodeURIComponent(slug)); } catch (e) {}
     renderNav();
     renderMain();
     if (!DOCS[slug]) {
@@ -864,6 +904,7 @@ ${ICON_DEFS}
         const res = await api("/api/docs?portal=" + encodeURIComponent(slug));
         DOCS[slug] = res.docs || [];
       } catch (e) { DOCS[slug] = []; }
+      FETCHED[slug] = Date.now();
       if (selected === slug) renderMain();
     }
   }
@@ -871,9 +912,21 @@ ${ICON_DEFS}
   // Re-fetch from the server, keeping the selected portal (#92). load() re-reads the portal list
   // (so a portal created out-of-band appears) and re-selects the current one; clearing its doc
   // cache first forces the selected portal's documents to reload — the out-of-band-publish case.
+  //
+  // This is the EXPENSIVE one: a portal detail read is a KV list() each, so a full refresh costs
+  // one list per portal. It is wired to the explicit Refresh button only.
   async function refresh() {
     if (selected) delete DOCS[selected];
     await load();
+  }
+
+  // The cheap one: re-read just the selected portal's documents — a single list(). This is what
+  // the out-of-band publish actually needs ("I published from Claude in another window"), and it
+  // is what the tab-back below uses. A portal created elsewhere still needs the Refresh button.
+  async function reselect() {
+    if (!selected) return;
+    delete DOCS[selected];
+    await selectPortal(selected);
   }
 
   async function load() {
@@ -889,7 +942,12 @@ ${ICON_DEFS}
       // list quota than fetching every portal's docs up front).
       const details = await Promise.all(portals.map((p) => api("/api/portals/" + encodeURIComponent(p.slug))));
       details.forEach((d) => { PORTALS[d.slug] = d; });
+      // Precedence: whatever is already selected (a refresh keeps your place), then the URL
+      // fragment (a reload or a pasted link), then today's default-portal fallback. An unknown
+      // slug in the hash falls through rather than showing an empty portal.
+      const fromHash = hashPortal();
       const want = (selected && PORTALS[selected]) ? selected
+        : (fromHash && PORTALS[fromHash]) ? fromHash
         : (PORTALS["default"] ? "default" : Object.keys(PORTALS)[0]);
       await selectPortal(want);
     } catch (e) {
@@ -900,6 +958,63 @@ ${ICON_DEFS}
   nav.addEventListener("click", (ev) => {
     const b = ev.target.closest("[data-nav]");
     if (b) selectPortal(b.dataset.nav);
+  });
+
+  // Someone edited the fragment, or followed a link to another portal in this same console.
+  addEventListener("hashchange", () => {
+    const s = hashPortal();
+    if (s && PORTALS[s] && s !== selected) selectPortal(s);
+  });
+
+  // ── Access seats (#44) ─────────────────────────────────────────────────────
+  //
+  // At the free plan's 50 seats Cloudflare BLOCKS new logins — silently, with no notification at
+  // any tier. The first sign is a client saying your report will not open. This is the whole
+  // feature: the running total, where the operator already looks when something is wrong.
+  //
+  // Fetched after load() rather than rendered into the page, so a slow Cloudflare API call cannot
+  // hold up the console. Failure and "no Access on this deployment" both leave it hidden — a seat
+  // readout that shows 0 because it could not ask would read as plenty of room at exactly the
+  // moment logins are being refused.
+  async function loadSeats() {
+    const el = document.getElementById("seats");
+    if (!el) return;
+    let s;
+    try { s = await api("/api/access/seats"); } catch (e) { return; }
+    if (!s || s.status !== "ok") return;
+
+    const atLimit = s.used >= s.limit;
+    el.className = "seats" + (atLimit ? " hot" : "");
+    el.innerHTML = 'Access seats <span class="n">' + esc(s.used) + " of " + esc(s.limit) + "</span>" +
+      (atLimit ? " &middot; limit reached, new logins blocked" : "");
+    // The ceiling is the FREE plan's, which we assume — the Worker holds no billing scope to read
+    // the real one. Say so on hover instead of implying we know the operator's plan.
+    el.title = atLimit
+      ? "Cloudflare is refusing new logins. Free Zero Trust allows " + s.limit +
+        " seats; a seat is consumed when someone authenticates, and is not released until it expires."
+      : "Seats consumed by people who have logged in. " + s.limit +
+        " is Cloudflare's free Zero Trust allowance — if you are on a paid plan your limit is higher.";
+    el.hidden = false;
+  }
+
+  // Come back to the tab and the list is current (#92). A publish from the CLI, an agent, or
+  // another tab leaves this stale with nothing on screen to say so, and the operator publishing
+  // is the same person watching — there is no third party to race, so an event stream would be
+  // a Durable Object and a new failure mode for no one's benefit.
+  //
+  // Two guards, because "refresh whenever the tab is focused" is a poll wearing a disguise and
+  // the house rule is that the console must not poll list(): a staleness window, so rapid
+  // tab-switching is free, and a per-page-load ceiling, so a pathological day still cannot spend
+  // the 1000/day quota. Both reset on a deliberate reload.
+  const STALE_MS = 30000;
+  const AUTO_MAX = 60;
+  let autoUsed = 0;
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible" || !selected) return;
+    if (Date.now() - (FETCHED[selected] || 0) < STALE_MS) return;
+    if (autoUsed >= AUTO_MAX) return;
+    autoUsed++;
+    reselect();
   });
 
   // Expand/collapse a row, reading full meta lazily on first open.
@@ -1242,6 +1357,9 @@ ${ICON_DEFS}
   }
 
   load();
+  // Independent of load() on purpose: the seat count is a Cloudflare API round-trip, and the
+  // document list must not wait on it.
+  loadSeats();
 </script>
 </body>
 </html>`;
