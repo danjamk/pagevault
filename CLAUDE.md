@@ -106,8 +106,10 @@ and reaching those surfaces is the entire differentiator. See ADR-006.
 
 - **KV is eventually consistent** (~60s). There is no read-after-write guarantee,
   not even at the same edge. Never build anything that depends on one.
-- **KV write quota is 1000/day free.** A publish costs 2–3 writes. `list()` has a
-  separate 1000/day quota — do not poll it from the console.
+- **KV write quota is 1000/day free.** A publish costs 2–3 writes; a **rename** costs 9–11
+  (it moves every key and deletes the old ones, and deletes count as writes) — fine for a
+  correction, not for a workflow. A display-only edit is one. `list()` has a separate
+  1000/day quota — do not poll it from the console.
 - **Access rotates signing keys ~every 6 weeks.** Use JWKS, match on `kid`, never
   pin a key.
 - **Disable the `workers.dev` subdomain and Preview URLs.** They route around

@@ -6,8 +6,11 @@ import { isAuthorized } from "./auth.js";
 import {
   BadRequest,
   Conflict,
+  type DocEdit,
   Misconfigured,
+  NameTaken,
   documentPath,
+  editDocument,
   patchDocument,
   publishDocument,
   readDocument,
@@ -625,6 +628,92 @@ function buildServer(env: Env, origin: string): McpServer {
         return text(`Deleted "${meta.title}" from portal "${meta.portal}". This cannot be undone.`);
       } catch (err) {
         return toolError(err, "revoke_document");
+      }
+    },
+  );
+
+  server.registerTool(
+    "edit_document",
+    {
+      title: "Edit document",
+      // Not destructive: nothing is lost, and re-sending the same edit reaches the same state.
+      // A rename does move the document's URL, which the description says plainly.
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      description: [
+        "Rename a document, or fix its title, summary or tags. Does NOT touch the contents —",
+        "use publish_document with confirm: true to replace those.",
+        "",
+        "filename is the document's IDENTITY. Changing it moves the document to a new URL; the",
+        "old URL redirects for a year, and any public /p/ link keeps working unchanged. Changing",
+        "only the title, summary or tags moves nothing.",
+        "",
+        "Use this to correct a mistake — a typo'd filename, a wrong title. To publish a NEW",
+        "version of a document, use publish_document.",
+      ].join("\n"),
+      inputSchema: {
+        id: z.string(),
+        filename: z
+          .string()
+          .optional()
+          .describe("The new filename, e.g. 'q3-review.md'. Moves the document to a new URL."),
+        title: z.string().optional().describe("Display title. Never affects identity or the URL."),
+        summary: z.string().optional().describe("One line for the portal index. Empty string clears it."),
+        tags: z.array(z.string()).optional().describe("Replaces the existing tags. Empty array clears them."),
+      },
+    },
+    async (args) => {
+      try {
+        const edit: DocEdit = {};
+        if (args.filename !== undefined) edit.name = args.filename;
+        if (args.title !== undefined) edit.title = args.title;
+        if (args.summary !== undefined) edit.summary = args.summary;
+        if (args.tags !== undefined) edit.tags = args.tags;
+        if (Object.keys(edit).length === 0) {
+          throw new BadRequest("invalid_field", "Nothing to edit — pass at least one of: filename, title, summary, tags");
+        }
+
+        const result = await editDocument(env, args.id, edit);
+        if (!result) throw new BadRequest("not_found", `No such document: ${args.id}`);
+
+        const { meta, movedFrom } = result;
+        const portal = await getPortal(env, meta.portal);
+        const url = `${baseUrl(env, origin)}${portal ? documentPath(portal, meta.id) : `/v/${meta.portal}/${meta.id}`}`;
+
+        return text(
+          [
+            `Updated: ${meta.title}`,
+            `Name:   ${meta.name}`,
+            `URL:    ${url}`,
+            `Portal: ${meta.portal}`,
+            ...(movedFrom
+              ? [
+                  "",
+                  `Renamed, so the document MOVED: its id changed from ${movedFrom} to ${meta.id}.`,
+                  `The old URL redirects here for a year.${meta.publicToken ? " The public /p/ link is unchanged and still works." : ""}`,
+                  `Tell the user the canonical link changed.`,
+                ]
+              : []),
+          ].join("\n"),
+        );
+      } catch (err) {
+        // The requested filename belongs to another document. Deliberately NOT overridable —
+        // say what is in the way and let the human decide (#140).
+        if (err instanceof NameTaken) {
+          return text(
+            [
+              err.message,
+              "",
+              `  id:    ${err.existing.id}`,
+              `  title: ${err.existing.title}`,
+              "",
+              "Renaming onto it would need to destroy it, so this is refused outright. Pick a",
+              "different filename, or — if replacing that document is genuinely the intent —",
+              "ask the user, then use publish_document with confirm: true.",
+            ].join("\n"),
+            true,
+          );
+        }
+        return toolError(err, "edit_document");
       }
     },
   );

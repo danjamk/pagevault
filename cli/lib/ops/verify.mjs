@@ -284,43 +284,78 @@ export async function verifyCmd({ json = false } = {}) {
   }
 
   {
-    // A publish → read → revoke round-trip through the MCP *tools* — the write path, not just /api.
-    // An ownerOnly draft (invisible to clients) that we revoke, so a passing run leaves nothing
-    // behind. confirm:true so a leftover from a failed prior run updates in place rather than erroring.
+    // A publish → rename → read → revoke round-trip through the MCP *tools* — the write path,
+    // not just /api. An ownerOnly draft (invisible to clients) that we revoke, so a passing run
+    // leaves nothing behind.
+    //
+    // Both filenames are unique per run. Identity is the filename (ADR-017), and `edit_document`
+    // refuses to rename onto a name already in use — with no override, deliberately (ADR-020). A
+    // STABLE rename target would therefore mean one crashed run blocks every future verify with
+    // `name_taken`, reporting a broken product when the real cause is its own litter. A check
+    // that cannot pass is as bad as one that cannot fail.
     const title = "__pagevault_verify_smoke__";
+    const run = Date.now().toString(36);
+    const fileFrom = `pagevault-verify-${run}.html`;
+    const fileTo = `pagevault-verify-${run}-renamed.html`;
+    // publish_document and edit_document both print `URL: <url>`; the id is its last segment.
+    const idOf = (r) => (r.result?.content?.[0]?.text?.match(/URL:\s*(\S+)/)?.[1] ?? "").split("/").pop();
+
     const pub = await mcpCall(base, bearer, "tools/call", {
       name: "publish_document",
       arguments: {
         title,
+        filename: fileFrom,
         html: "<!doctype html><meta charset=utf-8><title>verify smoke</title><h1>verify smoke</h1><p>Transient — safe to delete.</p>",
         ownerOnly: true,
         confirm: true,
       },
     });
-    const id = (pub.result?.content?.[0]?.text?.match(/URL:\s*(\S+)/)?.[1] ?? "").split("/").pop();
+    const id = idOf(pub);
     if (!pub.ok || pub.result?.isError || !id) {
       record("mcp_roundtrip", false, "publish failed");
       swarn(`publish_document (MCP) failed (HTTP ${pub.status})${pub.result?.isError ? " — the tool returned an error" : ""}`);
       return finish(false, { reason: "mcp_publish" });
     }
 
-    const read = await mcpCall(base, bearer, "tools/call", { name: "read_document", arguments: { id } }, 2);
+    // #140: renaming MOVES the document, because the id hashes the filename. The assertion is
+    // that the id actually CHANGED — a rename that came back with the same id would mean the
+    // move silently degraded to a metadata write, which is the one failure a green
+    // publish→read→revoke would otherwise hide. Cleanup follows the document to its new id.
+    let liveId = id;
+    const ren = await mcpCall(
+      base, bearer, "tools/call",
+      { name: "edit_document", arguments: { id, filename: fileTo } },
+      2,
+    );
+    const newId = idOf(ren);
+    const renOk = ren.ok && !ren.result?.isError && !!newId && newId !== id;
+    if (renOk) liveId = newId;
+    record("mcp_rename", renOk, renOk ? `${id} → ${newId}` : "rename failed");
+
+    const read = await mcpCall(base, bearer, "tools/call", { name: "read_document", arguments: { id: liveId } }, 3);
     const readOk = read.ok && !read.result?.isError && (read.result?.content?.[0]?.text ?? "").includes("verify smoke");
 
     // Clean up regardless of the read result, so a failed read still doesn't leave litter.
-    const rev = await mcpCall(base, bearer, "tools/call", { name: "revoke_document", arguments: { id } }, 3);
+    const rev = await mcpCall(base, bearer, "tools/call", { name: "revoke_document", arguments: { id: liveId } }, 4);
     const revOk = rev.ok && !rev.result?.isError;
 
-    if (!readOk || !revOk) {
-      record("mcp_roundtrip", false, `read=${readOk ? "ok" : "FAIL"} revoke=${revOk ? "ok" : "FAIL"}`);
+    if (!renOk || !readOk || !revOk) {
+      const state = `rename=${renOk ? "ok" : "FAIL"} read=${readOk ? "ok" : "FAIL"} revoke=${revOk ? "ok" : "FAIL"}`;
+      record("mcp_roundtrip", false, state);
       swarn(
-        `MCP round-trip incomplete (read=${readOk ? "ok" : "FAIL"}, revoke=${revOk ? "ok" : "FAIL"})` +
-          (revOk ? "." : ` — an ownerOnly draft "${title}" may remain in the default portal (invisible to clients).`),
+        `MCP round-trip incomplete (${state})` +
+          // Name BOTH filenames: which one survives depends on how far the rename got, and the
+          // operator should not have to reason about that to find the draft and delete it.
+          (revOk
+            ? "."
+            : ` — an ownerOnly draft titled "${title}" may remain in the default portal (invisible to clients),` +
+              ` as "${fileFrom}" or "${fileTo}". Delete it with: pagevault rm <id> --yes`),
       );
-      return finish(false, { reason: "mcp_roundtrip" });
+      return finish(false, { reason: renOk ? "mcp_roundtrip" : "mcp_rename" });
     }
     record("mcp_roundtrip", true);
-    say(`  ${c.green("✓")} publish → read → revoke — the MCP write path works, nothing left behind`);
+    say(`  ${c.green("✓")} publish → rename → read → revoke — the MCP write path works, nothing left behind`);
+    say(`  ${c.green("✓")} edit_document moved the document ${c.dim(`${id} → ${newId}`)}`);
   }
 
   {

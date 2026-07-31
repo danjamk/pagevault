@@ -260,6 +260,76 @@ describe("CLI against a live Worker — Public (no Access)", { timeout: 180_000 
     assert.equal(r.stdout, "", "a failed publish must print nothing to stdout");
   });
 
+  it("edit fixes a typo'd filename: the document moves, the old link redirects, the body survives (#140)", async () => {
+    // The bug that started #140, end to end: publish with a typo, correct it, and check that
+    // nothing a client is already holding breaks. Its own portal — a rename changes what a
+    // listing contains, and the shared fixtures are asserted exhaustively elsewhere.
+    //
+    // Public, so the forward is observable here: `/v/` is deliberately dead on a no-Access
+    // deployment (it answers noPortalsHere), so `/pub/` is the route a rung-1/2 reader uses.
+    await createPortal(worker.base, { slug: "renames", name: "Renames", kind: "public" });
+
+    const body = "<!doctype html><title>Q3 Review</title><h1>Q3</h1>";
+    const file = fixture(scratch, "q3-reveiw.html", body);
+    ok(run, "publish", file, "--portal", "renames");
+    const before = JSON.parse(ok(run, "list", "--portal", "renames", "--json").stdout).find(
+      (d) => d.name === "q3-reveiw.html",
+    );
+    const publicUrl = soleUrl(ok(run, "link", before.id));
+
+    // Title-only first: display edits must not move anything.
+    ok(run, "edit", before.id, "--title", "Q3 Review (final)");
+    const retitled = JSON.parse(ok(run, "read", before.id, "--json").stdout);
+    assert.equal(retitled.id, before.id, "a title edit must not move the document");
+    assert.equal(retitled.title, "Q3 Review (final)");
+
+    // Now the rename. stdout stays pipe-clean — one URL, the one that now works.
+    const renamed = run("edit", before.id, "--name", "q3-review.html");
+    assert.equal(renamed.status, 0, renamed.text);
+    soleUrl(renamed);
+    assert.match(renamed.stderr, /Renamed, so it moved/);
+
+    const listed = JSON.parse(ok(run, "list", "--portal", "renames", "--json").stdout);
+    const after = listed.find((d) => d.name === "q3-review.html");
+    assert.ok(after, "the document should now be listed under the corrected filename");
+    assert.notEqual(after.id, before.id, "renaming must move the document to a new id");
+    assert.deepEqual(listed.map((d) => d.name), ["q3-review.html"], "the old document must be gone, not duplicated");
+
+    // The body came with it, byte for byte.
+    assert.equal(ok(run, "read", after.id, "--source").stdout, body);
+
+    // ⭐ The two link promises. The /p/ capability URL is untouched — its token was never a
+    // function of the id — and the pre-rename portal URL forwards rather than 404ing.
+    const stillPublic = await fetch(publicUrl);
+    assert.equal(stillPublic.status, 200, "the public link must survive a rename unchanged");
+
+    const old = await fetch(`${worker.base}/pub/renames/${before.id}`, { redirect: "manual" });
+    assert.equal(old.status, 301, "the pre-rename URL must forward, not 404");
+    assert.equal(old.headers.get("location"), `${worker.base}/pub/renames/${after.id}`);
+  });
+
+  it("edit refuses to rename onto a filename another document already uses", async () => {
+    await createPortal(worker.base, { slug: "clashes", name: "Clashes", kind: "restricted" });
+    fixture(scratch, "taken-a.html", "<!doctype html><title>A</title><h1>a</h1>");
+    fixture(scratch, "taken-b.html", "<!doctype html><title>B</title><h1>b</h1>");
+    ok(run, "publish", join(scratch, "taken-a.html"), "--portal", "clashes");
+    ok(run, "publish", join(scratch, "taken-b.html"), "--portal", "clashes");
+    const docs = JSON.parse(ok(run, "list", "--portal", "clashes", "--json").stdout);
+    const a = docs.find((d) => d.name === "taken-a.html");
+
+    const r = run("edit", a.id, "--name", "taken-b.html");
+    assert.equal(r.status, 1, "renaming onto a taken filename must refuse");
+    // No --confirm escape hatch here on purpose — point at the operation that DOES replace.
+    assert.match(r.stderr, /already has a document named "taken-b.html"/);
+    assert.match(r.stderr, /publish .* --confirm/);
+    assert.equal(r.stdout, "", "a failed edit must print nothing to stdout");
+
+    // Both documents are untouched.
+    const after = JSON.parse(ok(run, "list", "--portal", "clashes", "--json").stdout);
+    assert.ok(after.find((d) => d.name === "taken-a.html"));
+    assert.ok(after.find((d) => d.name === "taken-b.html"));
+  });
+
   it("markdown round-trips byte-for-byte through read --source", () => {
     const body = "# Decision Record\n\nWe chose **Debezium** over Fivetran.\n\n- lower cost\n- we run Kafka\n";
     const file = fixture(scratch, "decision.md", body);
@@ -672,10 +742,17 @@ describe("verify against a live Worker", { timeout: 180_000 }, () => {
     // The checks that make this command worth running: it proved the Worker is ours, that /mcp
     // speaks the protocol, and that a document can be written and read back through the MCP tools.
     const names = r.json.checks.map((c) => c.name);
-    for (const required of ["worker_live", "root", "mcp_initialize", "mcp_tools", "mcp_roundtrip"]) {
+    for (const required of ["worker_live", "root", "mcp_initialize", "mcp_tools", "mcp_roundtrip", "mcp_rename"]) {
       assert.ok(names.includes(required), `${required} should have run`);
     }
     assert.equal(r.json.checks.find((c) => c.name === "mcp_roundtrip").ok, true);
+
+    // #140: the rename leg has to prove the document actually MOVED. Its detail carries both
+    // ids, and they must differ — a same-id "rename" is the failure this leg exists to catch.
+    const rename = r.json.checks.find((c) => c.name === "mcp_rename");
+    assert.equal(rename.ok, true, `rename leg failed: ${JSON.stringify(rename)}`);
+    const [from, to] = (rename.detail ?? "").split(" → ");
+    assert.ok(from && to && from !== to, `rename detail should carry two different ids, got ${rename.detail}`);
   });
 
   it("FAILS when a check fails, rather than warning and exiting 0", () => {

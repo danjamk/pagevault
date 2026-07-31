@@ -75,7 +75,7 @@ formats and relationships. Namespacing (a common prefix) both groups related too
 defends against name collisions with other connected servers. Spec naming rules (2025-11-25,
 SEP-986): 1–128 chars, `A–Z a–z 0–9 _ - .`, unique within a server.
 
-**Where we stand.** Good. Twelve tools, `verb_noun`, consistent, each narrowly scoped
+**Where we stand.** Good. Thirteen tools, `verb_noun`, consistent, each narrowly scoped
 (`server_info` was added in #98 as the in-chat "what am I connected to, and is it current?"
 check). Two standing calls worth recording so they don't get re-litigated:
 
@@ -109,6 +109,7 @@ asserts the read tools are `readOnlyHint` and the four destructive tools are fla
 | `list_portals` / `list_documents` / `read_document` / `search_portal` | ✅ | — | ✅ | "List portals", … |
 | `create_portal` | — | — | — | "Create portal" |
 | `publish_document` | — | ⚠️ overwrites in place | — | "Publish document" |
+| `edit_document` | — | — (a rename MOVES the URL) | ✅ | "Edit document" |
 | `update_portal_members` | — | — | ✅ | "Update portal members" |
 | `mint_public_link` | — | — | ✅ (returns existing) | "Mint public link" |
 | `rotate_public_link` | — | ✅ kills old URL | — | "Rotate public link" |

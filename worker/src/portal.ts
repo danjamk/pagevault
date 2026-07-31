@@ -8,6 +8,7 @@ import {
   type Portal,
   getMembers,
   getMeta,
+  getMovedTarget,
   getPortal,
   listDocs,
 } from "./store.js";
@@ -70,7 +71,7 @@ export async function handlePortalRoute(
 
   return id === null
     ? portalIndex(env, portal, members, email)
-    : portalDocument(env, portal, members, email, id, "portal");
+    : portalDocument(env, portal, members, email, id, "portal", request.url);
 }
 
 /**
@@ -94,6 +95,7 @@ export async function handlePublicPortalRoute(
   env: Env,
   slug: string,
   id: string | null,
+  requestUrl: string,
 ): Promise<Response> {
   const portal = await getPortal(env, slug);
 
@@ -111,7 +113,42 @@ export async function handlePublicPortalRoute(
   // a seat. That is an economic property of the route, not an afterthought.
   return id === null
     ? portalIndex(env, portal, [], null)
-    : portalDocument(env, portal, [], null, id, "public");
+    : portalDocument(env, portal, [], null, id, "public", requestUrl);
+}
+
+/**
+ * `meta:{id}` missed — did this document get renamed out from under the link? (#140)
+ *
+ * A rename moves a document to a new id because the id hashes the filename (ADR-017), so an
+ * already-shared `/v/` or `/pub/` URL would otherwise 404. The tombstone forwards it.
+ *
+ * The redirect is issued ONLY after the target passes exactly the checks the document itself
+ * would have faced — same portal, and `canView` — so a forwarding address can never become a
+ * way to learn that a document exists, let alone reach one. Everything else is the same bare
+ * 404 a miss has always been.
+ */
+async function movedDocument(
+  env: Env,
+  portal: Portal,
+  members: string[],
+  email: string | null,
+  id: string,
+  requestUrl: string,
+): Promise<Response> {
+  const target = await getMovedTarget(env, id);
+  if (!target) return notFound();
+
+  const meta = await getMeta(env, target);
+  // A tombstone outliving the document it points at: renamed, then deleted. Nothing to forward
+  // to, and the visitor gets the same 404 the delete alone would have given them.
+  if (!meta || meta.portal !== portal.slug) return notFound();
+  if (!canView(meta, portal, members, email, env.OWNER_EMAIL)) {
+    log("warn", "denied_moved_document", { portal: portal.slug, doc: meta.id, from: id, email });
+    return notFound();
+  }
+
+  log("info", "followed_moved_document", { portal: portal.slug, doc: meta.id, from: id });
+  return Response.redirect(new URL(documentPath(portal, target), requestUrl).toString(), 301);
 }
 
 async function portalIndex(
@@ -143,9 +180,15 @@ async function portalDocument(
   email: string | null,
   id: string,
   surface: ViewSurface,
+  requestUrl: string,
 ): Promise<Response> {
   const meta = await getMeta(env, id);
-  if (!meta) return notFound();
+  // 🔴 Meta FIRST, tombstone only on a miss (#140). A document's id hashes its filename, so a
+  // rename moves it — `moved:{id}` is the forwarding address that keeps an already-shared link
+  // alive. Checking meta first is what makes that self-healing: publish a NEW document under a
+  // reclaimed filename and it lands on this very id, shadowing the stale tombstone with no
+  // cleanup write. Reversing this order would serve the redirect and hide the live document.
+  if (!meta) return await movedDocument(env, portal, members, email, id, requestUrl);
 
   // 🔴 The document must actually live in the portal named in the URL.
   //

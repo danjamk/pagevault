@@ -91,7 +91,7 @@ claude.ai and Claude Code do not share that ceiling.
 
 ## What you get once connected
 
-Twelve tools, split into a write side (`publish_document`, `create_portal`,
+Thirteen tools, split into a write side (`publish_document`, `edit_document`, `create_portal`,
 `update_portal_members`, the public-link lifecycle — `mint_public_link`, `rotate_public_link`,
 `revoke_public_link` — and `revoke_document`) and the read side that makes the portal *memory*
 rather than an outbox (`list_portals`, `list_documents`, `read_document`, `search_portal`, plus

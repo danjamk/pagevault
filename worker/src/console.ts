@@ -1,6 +1,15 @@
 import { emailsMatch } from "./access.js";
 import { identify } from "./auth.js";
 import { SORA_WORDMARK_WOFF2 } from "./console-font.js";
+// The real limits, interpolated into the UI rather than retyped. A hint that says "max 300"
+// while the server enforces something else is worse than no hint — it gets believed.
+import {
+  MAX_NAME_CHARS,
+  MAX_SUMMARY_CHARS,
+  MAX_TAG_CHARS,
+  MAX_TAGS,
+  MAX_TITLE_CHARS,
+} from "./documents.js";
 import type { Env } from "./env.js";
 import { FAVICON_SVG, consoleForbidden } from "./pages.js";
 import { mintSession } from "./session.js";
@@ -256,17 +265,25 @@ function page(session: string, nonce: string, owner: string, version: string, de
   .lv-link { color:var(--pv-lv-link); }
   .lv-public { color:var(--pv-lv-public); }
 
-  /* ── Portal header card ── */
+  /* ── Portal header card ──
+     Base access stays top-right beside the title; the buttons get their own right-aligned row
+     under the description. As one right-hand column all five stacked, and that column set the
+     card's height while leaving a band of empty space beside the portal name. */
   .phead { background:var(--pv-surface); border:1px solid var(--pv-border); border-radius:14px;
-           padding:24px 26px; margin-bottom:26px; }
-  .phead-top { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
-  .phead h1 { font-size:24px; font-weight:600; letter-spacing:-0.6px; margin:0; color:var(--pv-ink); }
-  .phead .titrow { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+           padding:18px 22px; margin-bottom:20px; }
+  .phead-top { display:flex; align-items:flex-start; justify-content:space-between; gap:16px;
+               flex-wrap:wrap; }
+  .phead h1 { font-size:22px; font-weight:600; letter-spacing:-0.6px; margin:0; color:var(--pv-ink); }
+  .phead .titrow { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
   .phead .slug { font-size:13px; color:var(--pv-muted); }
-  .phead p { font-size:14px; line-height:1.55; color:var(--pv-text-2); margin:9px 0 0; max-width:560px; }
-  .phead .base { display:flex; flex-direction:column; align-items:flex-end; gap:10px; flex:none; }
-  .phead .base .lb { font-size:11px; letter-spacing:1px; text-transform:uppercase; color:var(--pv-faint); }
-  .seats { margin-top:22px; padding-top:20px; border-top:1px solid var(--pv-border-2); }
+  .phead p { font-size:13.5px; line-height:1.5; color:var(--pv-text-2); margin:6px 0 0; max-width:560px; }
+  .phead .base { display:flex; align-items:center; gap:8px; flex:none; }
+  .phead .base .lb { font-size:11px; letter-spacing:1px; text-transform:uppercase; color:var(--pv-faint);
+                     flex:none; }
+  .pacts { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap;
+           margin-top:12px; }
+  .pacts:empty { display:none; }
+  .seats { margin-top:16px; padding-top:14px; border-top:1px solid var(--pv-border-2); }
   .seats .cap { display:flex; align-items:center; gap:8px; margin-bottom:4px; font-size:13.5px;
                 color:var(--pv-ink); }
   .seats .cap .icon { width:15px; height:15px; color:var(--pv-text-2); }
@@ -326,6 +343,19 @@ function page(session: string, nonce: string, owner: string, version: string, de
                    border:1px solid var(--pv-code-bd); border-radius:7px; padding:6px 11px;
                    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .sharebar.dim code { color:var(--pv-muted); text-decoration:line-through; }
+  /* The details block (#140) — what the document IS, as opposed to who can open it. */
+  .meta { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; margin:0 0 2px; font-size:12.5px; }
+  .meta dt { display:inline-flex; align-items:center; gap:.35rem; color:var(--pv-faint);
+             font-size:11px; text-transform:uppercase; letter-spacing:.5px; padding-top:5px; }
+  .meta dt .icon { width:14px; height:14px; color:var(--pv-muted); }
+  .meta dd { margin:0; min-width:0; display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; }
+  .meta dd code { color:var(--pv-code-tx); background:var(--pv-code-bg); min-width:0;
+                  border:1px solid var(--pv-code-bd); border-radius:7px; padding:4px 9px;
+                  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .meta .sub { color:var(--pv-muted); font-size:12px; }
+  .tags { display:flex; flex-wrap:wrap; gap:6px; }
+  .tag { background:var(--pv-chip); border:1px solid var(--pv-chip-bd); border-radius:6px;
+         padding:2px 8px; font-size:12px; color:var(--pv-text-2); }
   .reason { display:flex; align-items:flex-start; gap:.5rem; font-size:13px; margin:14px 0 2px; }
   .reason .icon { width:16px; height:16px; margin-top:1px; }
   .reason.link .icon { color:var(--pv-lv-link); }
@@ -384,7 +414,10 @@ function page(session: string, nonce: string, owner: string, version: string, de
   .dlg-head .icon { width:17px; height:17px; color:var(--pv-accent); }
   .dlg-body { padding:18px; display:flex; flex-direction:column; gap:14px; }
   .field { display:flex; flex-direction:column; gap:5px; }
-  .field > label { font-size:12.5px; color:var(--pv-muted); }
+  .field > label, .flabel label { font-size:12.5px; color:var(--pv-muted); }
+  /* The info button is a SIBLING of the label, never inside it: a button nested in a label is
+     invalid HTML, and the label's activation behavior competes with the button's own click. */
+  .flabel { display:flex; align-items:center; gap:6px; }
   .field input[type=text], .field input[type=email], .field select {
     padding:8px 11px; border:1px solid var(--pv-field-bd); border-radius:8px; font:inherit;
     font-size:14px; background:var(--pv-field-bg); color:var(--pv-ink); }
@@ -407,6 +440,35 @@ function page(session: string, nonce: string, owner: string, version: string, de
               border-top:1px solid var(--pv-border); }
   .dlg-err { color:var(--pv-danger); font-size:12.5px; }
   .dlg-err[hidden] { display:none; }
+
+  /* ── Field help (#140) ──
+     Native popover: the toggle is the popovertarget ATTRIBUTE, so there is no inline handler
+     and nothing for the nonced CSP to block. It renders in the top layer, so it sits above the
+     dialog that opened it, and light-dismisses on Esc or an outside click for free. */
+  .infobtn { width:15px; height:15px; padding:0; border-radius:50%; cursor:pointer;
+             border:1px solid var(--pv-field-bd); background:var(--pv-field-bg);
+             color:var(--pv-muted); font:inherit; font-size:10px; font-weight:700;
+             font-style:italic; line-height:1; vertical-align:middle; }
+  .infobtn:hover { border-color:var(--pv-accent); color:var(--pv-ink); }
+  .pop { max-width:26rem; width:calc(100% - 2rem); padding:16px 18px; border-radius:12px;
+         border:1px solid var(--pv-border); background:var(--pv-surface); color:var(--pv-ink);
+         font-size:12.5px; line-height:1.55; }
+  .pop::backdrop { background:rgba(0,0,0,.35); }
+  .pop h3 { margin:0 0 8px; font-size:13.5px; color:var(--pv-ink); }
+  .pop p { margin:0 0 8px; color:var(--pv-text-2); }
+  .pop ul { margin:0 0 8px; padding-left:18px; color:var(--pv-text-2); }
+  .pop li { margin:2px 0; }
+  .pop code { background:var(--pv-code-bg); border:1px solid var(--pv-code-bd); border-radius:5px;
+              padding:1px 5px; font-size:11.5px; color:var(--pv-code-tx); }
+  .pop .btn { margin-top:4px; }
+  /* Without popover support the panels have no UA display:none, so they would dump their whole
+     body into the dialog and the button would do nothing. Hide both rather than degrade to that. */
+  @supports not selector(:popover-open) { .pop, .infobtn { display:none; } }
+  /* Live character budget. Silent until it matters — a counter on every field from the first
+     keystroke reads as a constraint you are about to hit, which is the wrong default. */
+  .count { color:var(--pv-faint); }
+  .count.near { color:var(--pv-warn); }
+  .count.over { color:var(--pv-danger); font-weight:600; }
   .dropzone { display:flex; align-items:center; justify-content:center; text-align:center; gap:.5rem;
               border:1.5px dashed var(--pv-field-bd); border-radius:10px; padding:18px 16px;
               color:var(--pv-muted); font-size:13px; cursor:pointer; background:var(--pv-surface-2); }
@@ -541,6 +603,82 @@ ${ICON_DEFS}
     </div>
   </form>
 </dialog>
+<dialog id="dlg-doc" aria-labelledby="dlg-doc-title">
+  <form id="form-doc" method="dialog">
+    <div class="dlg-head" id="dlg-doc-title"><svg class="icon" aria-hidden="true"><use href="#i-edit"/></svg>Edit document</div>
+    <div class="dlg-body">
+      <div class="field">
+        <div class="flabel"><label for="ed-name">Filename</label><button type="button" class="infobtn" popovertarget="pop-name" aria-label="What the filename means, and what renaming does">i</button></div>
+        <input type="text" id="ed-name" maxlength="${MAX_NAME_CHARS}" placeholder="q3-review.md" autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false">
+        <p class="hint">The document&rsquo;s identity. <span class="count" id="ed-name-count"></span></p>
+      </div>
+      <div class="pop" id="pop-name" popover>
+        <h3>The filename is the document&rsquo;s identity</h3>
+        <p>It is the <strong>update key</strong>: publishing a file with this name again replaces
+           this document in place, at the same URL. That is how you ship v2 of a report without
+           the client&rsquo;s link going stale.</p>
+        <p><strong>Renaming moves the document to a new URL.</strong> The address is derived from
+           the filename, so the two cannot change independently. When you rename:</p>
+        <ul>
+          <li>the old URL <strong>redirects</strong> to the new one for a year;</li>
+          <li>a public <code>/p/</code> link keeps working, completely unchanged;</li>
+          <li>the document, its contents and its history all come with it &mdash; nothing is re-uploaded.</li>
+        </ul>
+        <p>Case does not count: <code>Report.md</code> and <code>report.md</code> are the same
+           document, so fixing capitalization moves nothing. The extension is part of the name,
+           though &mdash; <code>report.md</code> and <code>report.html</code> are two documents.</p>
+        <p>A name another document in this portal already uses is refused. Rename is for fixing a
+           mistake; replacing a document is a publish, and it asks first.</p>
+        <button type="button" class="btn sm" popovertarget="pop-name" popovertargetaction="hide">Got it</button>
+      </div>
+      <div class="warnline" id="ed-movewarn" hidden>
+        <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>
+        <span>Renaming moves this document to a <strong>new URL</strong>. The old one redirects for a year, and any public <code>/p/</code> link keeps working unchanged.</span>
+      </div>
+      <div class="field">
+        <label for="ed-title">Title</label>
+        <input type="text" id="ed-title" maxlength="${MAX_TITLE_CHARS}" placeholder="Q3 Review" autocomplete="off">
+        <p class="hint">Display only &mdash; what the client sees in the portal index. Changing it never moves the document. <span class="count" id="ed-title-count"></span></p>
+      </div>
+      <div class="field">
+        <label for="ed-summary">Summary <span class="hint">(optional)</span></label>
+        <input type="text" id="ed-summary" maxlength="${MAX_SUMMARY_CHARS}" placeholder="One line, shown in the portal index" autocomplete="off">
+        <p class="hint">One line under the title, for the client. <span class="count" id="ed-summary-count"></span></p>
+      </div>
+      <div class="field">
+        <div class="flabel"><label for="ed-tags">Tags <span class="hint">(optional)</span></label><button type="button" class="infobtn" popovertarget="pop-tags" aria-label="What tags are for, with examples">i</button></div>
+        <input type="text" id="ed-tags" placeholder="q3, type:report, client-facing" autocapitalize="none" autocomplete="off">
+        <p class="hint">Comma-separated, for your own filing. <span class="count" id="ed-tags-count"></span></p>
+      </div>
+      <div class="pop" id="pop-tags" popover>
+        <h3>Tags are for you, not the client</h3>
+        <p>They never appear in the portal or on the document. They are how <em>you</em> find
+           things later, across a nine-month engagement:</p>
+        <ul>
+          <li>in the console, and in <code>pagevault list --tag type:report</code>;</li>
+          <li>as filters an agent can use over MCP when you ask what you sent a client.</li>
+        </ul>
+        <p>Anything works, but a <code>key:value</code> habit pays off once there are more than a
+           handful. Some that hold up:</p>
+        <ul>
+          <li><code>type:report</code> &middot; <code>type:proposal</code> &middot; <code>type:adr</code> &mdash; what it is</li>
+          <li><code>q3</code> &middot; <code>2026-h1</code> &mdash; when it belongs to</li>
+          <li><code>phase:discovery</code> &middot; <code>phase:delivery</code> &mdash; where in the engagement</li>
+          <li><code>draft</code> &middot; <code>final</code> &mdash; how settled it is</li>
+        </ul>
+        <p>Up to ${MAX_TAGS} tags, each up to ${MAX_TAG_CHARS} characters. Separate them with
+           commas; duplicates are dropped. Clearing the box removes them all.</p>
+        <button type="button" class="btn sm" popovertarget="pop-tags" popovertargetaction="hide">Got it</button>
+      </div>
+      <p class="hint">Contents aren&rsquo;t editable here &mdash; publish the file again to update them. Who can open it stays on the panel behind this dialog.</p>
+      <div class="dlg-err" id="ed-err" role="alert" hidden></div>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" class="btn" id="ed-cancel">Cancel</button>
+      <button type="submit" class="btn primary" id="ed-save">Save</button>
+    </div>
+  </form>
+</dialog>
 <dialog id="dlg-upload" aria-labelledby="dlg-upload-title">
   <form id="form-upload" method="dialog">
     <div class="dlg-head" id="dlg-upload-title"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg>New document</div>
@@ -636,9 +774,17 @@ ${ICON_DEFS}
     const r = await fetch(path, { method: opts.method || "GET", headers, body: opts.body });
     if (r.status === 401) { location.reload(); throw new Error("reauth"); }
     if (!r.ok) {
-      let msg = path + " -> " + r.status;
-      try { const j = JSON.parse(await r.text()); if (j && j.error) msg = j.error; } catch (e) {}
-      throw new Error(msg);
+      let msg = path + " -> " + r.status, code = null, details = null;
+      try {
+        const j = JSON.parse(await r.text());
+        if (j && j.error) msg = j.error;
+        if (j && j.code) { code = j.code; details = j; }
+      } catch (e) {}
+      // Carry the machine-readable code, so a caller can answer a specific failure specifically
+      // instead of forwarding the server's one-liner and leaving the operator to guess the fix.
+      const err = new Error(msg);
+      err.code = code; err.details = details;
+      throw err;
     }
     const text = await r.text();
     return text ? JSON.parse(text) : null;
@@ -789,6 +935,27 @@ ${ICON_DEFS}
       }
     }
 
+    // What the document IS, as opposed to who can open it. Until #140 none of this was here:
+    // not the filename (the identity — so a typo made at upload was invisible as well as
+    // uncorrectable), not the summary, and not the tags.
+    const tags = m.tags || [];
+    parts.push(
+      '<div class="subrow"><span class="lb">' + ico("edit") + 'Details</span>' +
+      '<span class="grow"></span>' +
+      '<button class="btn sm" data-act="edit-doc" data-id="' + esc(m.id) + '">' + ico("edit") + 'Edit</button></div>' +
+      '<dl class="meta">' +
+        '<dt>' + ico(m.sourceKind === "markdown" ? "doc-md" : "doc-html") + 'Filename</dt>' +
+        '<dd><code>' + esc(m.name || "") + '</code>' +
+          '<span class="sub">the update key &mdash; republishing this filename replaces this document</span></dd>' +
+        '<dt>Summary</dt>' +
+        '<dd>' + (m.summary ? esc(m.summary) : '<span class="sub">None. Shown to the client in the portal index.</span>') + '</dd>' +
+        '<dt>Tags</dt>' +
+        '<dd>' + (tags.length
+          ? '<span class="tags">' + tags.map((t) => '<span class="tag">' + esc(t) + '</span>').join("") + '</span>'
+          : '<span class="sub">None. Yours only &mdash; the client never sees them.</span>') + '</dd>' +
+      '</dl>'
+    );
+
     // "Make draft" sits quietly by Delete when not already a draft (Publish lives in the draftbar).
     parts.push('<div class="foot"><span class="grow"></span>' +
       (draft ? '' : '<button class="btn sm warn" data-act="toggle" data-id="' + esc(m.id) + '" data-owneronly="0">Make draft</button>') +
@@ -833,7 +1000,7 @@ ${ICON_DEFS}
         esc(p.kind === "public"
           ? "Anyone with this link can browse this portal — no login."
           : "Your team can browse this portal after signing in. Not forwardable to outsiders.") +
-        '">' + ico("link") + 'Copy portal link</button>'
+        '">' + ico("link") + 'Copy link</button>'
       : '';
     // Open the portal page itself, the way a document row can be opened. Only where the index is
     // reachable by its audience — a private portal has no browsable page to open (portalUrl null).
@@ -845,7 +1012,11 @@ ${ICON_DEFS}
       '<div class="phead"><div class="phead-top"><div class="min0">' +
         '<div class="titrow"><h1>' + esc(p.name) + '</h1><span class="slug mono">/' + esc(p.slug) + '</span></div>' +
         (p.description ? '<p>' + esc(p.description) + '</p>' : '') +
-      '</div><div class="base"><span class="lb">Base access</span>' + badge(r) + openBtn + shareBtn + editBtn + '</div></div>' +
+      '</div><div class="base"><span class="lb">Base access</span>' + badge(r) + '</div></div>' +
+      // Actions sit on their own row under the description, right-aligned to line up with the
+      // badge above them. Inline with the badge they crowded it; stacked in a column they set
+      // the card's height.
+      '<div class="pacts">' + openBtn + shareBtn + editBtn + '</div>' +
       memberEditor(p) + '</div>';
 
     let list;
@@ -1123,6 +1294,7 @@ ${ICON_DEFS}
           renderMain(); return;
         }
         if (a === "edit-portal") { openEdit(actEl.dataset.portal); return; }
+        if (a === "edit-doc") { openDocEdit(id); return; }
       } catch (e) {
         alert("Failed: " + e.message);
       }
@@ -1209,6 +1381,125 @@ ${ICON_DEFS}
       renderMain();
     } catch (e) {
       showEpErr(e.message);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ── Edit-document dialog (#140): filename, title, summary, tags ───────────────
+  // Deliberately not the contents (publish the file again) and not who can open it — reach is
+  // the panel's whole job (ADR-011), and burying it in a modal would undo that.
+  const dlgDoc = document.getElementById("dlg-doc");
+  const edErr = document.getElementById("ed-err");
+  const edName = document.getElementById("ed-name");
+  const edMoveWarn = document.getElementById("ed-movewarn");
+  let editDocId = null;
+  let editDocName = "";
+  function showEdErr(msg) { edErr.textContent = msg; edErr.hidden = false; }
+  // Identity is case-insensitive (ADR-017), so Report.md -> report.md moves nothing — the
+  // warning has to agree with the server or it cries wolf on a capitalization fix.
+  const sameName = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  const syncMoveWarn = () => { edMoveWarn.hidden = sameName(edName.value, editDocName); };
+
+  // The real server limits, interpolated at build time rather than retyped (see console.ts).
+  const LIMITS = { name: ${MAX_NAME_CHARS}, title: ${MAX_TITLE_CHARS}, summary: ${MAX_SUMMARY_CHARS}, tags: ${MAX_TAGS}, tag: ${MAX_TAG_CHARS} };
+
+  // Counters stay quiet until a field is most of the way used. Showing "0/300" from the first
+  // keystroke frames a generous limit as a constraint you are about to hit.
+  function syncCount(field, used, max, label) {
+    const el = document.getElementById("ed-" + field + "-count");
+    if (!el) return;
+    const ratio = max ? used / max : 0;
+    el.textContent = ratio >= 0.75 ? used + "/" + max + (label ? " " + label : "") : "";
+    el.className = "count" + (used > max ? " over" : ratio >= 0.9 ? " near" : "");
+  }
+  function syncCounts() {
+    syncCount("name", edName.value.trim().length, LIMITS.name);
+    syncCount("title", document.getElementById("ed-title").value.trim().length, LIMITS.title);
+    syncCount("summary", document.getElementById("ed-summary").value.trim().length, LIMITS.summary);
+    const tags = parseList(document.getElementById("ed-tags").value);
+    syncCount("tags", tags.length, LIMITS.tags, "tags");
+  }
+
+  function openDocEdit(id) {
+    const m = (DOCS[selected] || []).find((d) => d.id === id);
+    if (!m) return;
+    editDocId = id;
+    editDocName = m.name || "";
+    edErr.hidden = true; edErr.textContent = "";
+    edName.value = editDocName;
+    document.getElementById("ed-title").value = m.title || "";
+    document.getElementById("ed-summary").value = m.summary || "";
+    document.getElementById("ed-tags").value = (m.tags || []).join(", ");
+    syncMoveWarn();
+    syncCounts();
+    dlgDoc.showModal();
+    edName.focus();
+  }
+  edName.addEventListener("input", syncMoveWarn);
+  // One listener for the whole form — the counters read every field anyway.
+  document.getElementById("form-doc").addEventListener("input", syncCounts);
+  document.getElementById("ed-cancel").addEventListener("click", () => dlgDoc.close());
+  document.getElementById("form-doc").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    edErr.hidden = true;
+    if (!editDocId) return;
+    const name = edName.value.trim();
+    const title = document.getElementById("ed-title").value.trim();
+    const summary = document.getElementById("ed-summary").value.trim();
+    const tags = parseList(document.getElementById("ed-tags").value);
+    if (!name) { showEdErr("A filename is required — it is the document's identity."); return; }
+    if (!title) { showEdErr("A title is required."); return; }
+    // Catch the countable limits here so the answer is specific, rather than bouncing off the
+    // server with a generic one. The server still enforces all of them — this only gets there first.
+    if (tags.length > LIMITS.tags) {
+      showEdErr("Too many tags: " + tags.length + ", and the limit is " + LIMITS.tags + ". Remove " + (tags.length - LIMITS.tags) + ".");
+      return;
+    }
+    const longTag = tags.find((t) => t.length > LIMITS.tag);
+    if (longTag) {
+      showEdErr('The tag "' + longTag + '" is ' + longTag.length + " characters; the limit is " + LIMITS.tag + ".");
+      return;
+    }
+    const btn = document.getElementById("ed-save");
+    btn.disabled = true;
+    try {
+      // Always send summary and tags so emptying a box actually clears the field.
+      const res = await patch(editDocId, { name, title, summary, tags });
+      dlgDoc.close();
+      // A rename changes the id, so the row and its cache entry are both keyed by the OLD one.
+      // Re-key them in place and render from the RESPONSE — never a re-fetch, which would read
+      // back a write KV has not propagated yet. Same reason replaceItem exists.
+      if (res.movedFrom) {
+        const item = app.querySelector('[data-item="' + res.movedFrom + '"]');
+        if (item) item.setAttribute("data-item", res.id);
+        const cache = DOCS[res.portal];
+        if (cache) { const i = cache.findIndex((d) => d.id === res.movedFrom); if (i >= 0) cache[i] = res; }
+      }
+      replaceItem(res.movedFrom ? res.id : editDocId, res);
+      if (res.movedFrom) {
+        alert('Renamed to "' + res.name + '".\\n\\nIts link changed:\\n' + (res.url || "") + '\\n\\nThe old link redirects here for a year' + (res.publicUrl ? ", and the public link is unchanged." : "."));
+      }
+    } catch (e) {
+      // Title, summary, tags and the filename share ONE 1024-byte index budget in KV, so each
+      // can be under its own limit while the combination is not. The server is the authority on
+      // that — but "too long to index" with no numbers leaves you poking at fields, so name the
+      // budget and point at the field that is almost always the one to cut.
+      if (e.code === "metadata_too_large") {
+        const used = name.length + title.length + summary.length + tags.join("").length;
+        showEdErr(
+          "Together, the filename, title, summary and tags are too long to index — they share one " +
+          "budget, so each can be under its own limit while the total is not. About " + used +
+          " characters here. Shorten the summary (usually the longest) or drop a tag, then save again."
+        );
+      } else if (e.code === "name_taken") {
+        showEdErr(
+          e.message + ". Pick a different filename — renaming onto it would destroy it. " +
+          "To replace that document deliberately, publish over it instead."
+        );
+      } else {
+        showEdErr(e.message);
+      }
     } finally {
       btn.disabled = false;
     }
