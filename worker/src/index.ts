@@ -108,7 +108,7 @@ const router = {
     // that is public by design. See portal.ts.
     const pubPortal = /^\/pub\/([^/]+)(?:\/([^/]+))?\/?$/.exec(pathname);
     if (pubPortal?.[1]) {
-      return handlePublicPortalRoute(env, pubPortal[1], pubPortal[2] ?? null);
+      return handlePublicPortalRoute(env, pubPortal[1], pubPortal[2] ?? null, request.url);
     }
 
     // Access app A. Portal index and documents, gated by canView.

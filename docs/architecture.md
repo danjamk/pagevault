@@ -160,6 +160,7 @@ doc:{id}          → string (the served bytes: HTML, or markdown rendered to HT
 raw:{id}          → string (markdown only: the original .md, for download + read-back)
 meta:{id}         → JSON DocMeta       [+ KV key metadata]
 pub:{token}       → string (doc id)
+moved:{old id}    → string (doc id)    (a renamed document's forwarding address; 1-year TTL)
 ```
 
 **The prefixes are disjoint on purpose.** The obvious layout — `portal:{slug}:members` —
@@ -216,6 +217,18 @@ the first time two publishes race.
 
 **KV is eventually consistent** (~60s), with no read-after-write guarantee even at
 the same edge. The CLI retries before printing a URL. Nothing may depend on one.
+
+**Renaming moves a document, and leaves a tombstone.** The id hashes the filename, so a new
+filename is a new id — there is no way to change one and keep the other. `editDocument` writes
+the complete new document before deleting the old keys (a crash leaves *both*, never neither),
+repoints `pub:{token}` so the `/p/` link the client already holds survives untouched, and writes
+`moved:{old id}`. The `/v/` and `/pub/` routes read `meta:{id}` **first** and consult the
+tombstone only on a miss — which is what makes it self-healing, since a later publish under the
+reclaimed filename lands on that same id and shadows it with no cleanup write. The redirect is
+issued only after the target passes the same portal check and `canView` the document itself would
+have faced. Editing only the title, summary, tags — or only the *case* of the filename — is one
+write at the same id. See [ADR-020](adr/ADR-020-rename-leaves-a-forwarding-address.md), which is
+also where the "why not stable GUIDs like Google Drive" argument lives.
 
 ## 5. Authorization — one function, no exceptions
 
@@ -503,13 +516,14 @@ Claude Desktop, claude.ai, mobile, Cowork, *and* Claude Code.**
 server instance is created **per request** — sharing one across requests leaks
 cross-client response data.
 
-**Write:** `publish_document`, `create_portal`, `update_portal_members`,
+**Write:** `publish_document`, `edit_document` (filename/title/summary/tags — a filename change
+MOVES the document, see ADR-020), `create_portal`, `update_portal_members`,
 `mint_public_link` (widening — the tool description must say so), `revoke_public_link`,
 `rotate_public_link` (widening), `revoke_document` (deletes the document — the mirror of
 the CLI's `rm`, not a link-only revoke).
 
 **Read — the differentiator:** `list_portals`, `list_documents`, `read_document`,
-`search_portal`, `server_info` (version + host, readable in-chat). Twelve tools in all.
+`search_portal`, `server_info` (version + host, readable in-chat). Thirteen tools in all.
 
 Documents are also exposed as **MCP Resources** (`pagevault://{portal}/{id}`), so a host can
 attach one directly rather than round-tripping through a tool call. See

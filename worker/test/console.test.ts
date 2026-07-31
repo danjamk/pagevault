@@ -2,6 +2,13 @@ import { SELF } from "cloudflare:test";
 import { type JWK, SignJWT, exportJWK, generateKeyPair } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetJWKSCache } from "../src/auth.js";
+import {
+  MAX_NAME_CHARS,
+  MAX_SUMMARY_CHARS,
+  MAX_TAG_CHARS,
+  MAX_TAGS,
+  MAX_TITLE_CHARS,
+} from "../src/documents.js";
 
 /**
  * 🔴 The owner console at /admin (ADR-004). Two walls (Access + owner check), a session
@@ -231,6 +238,84 @@ describe("edit-portal control (#70)", () => {
   });
 });
 
+describe("edit-document control (#140)", () => {
+  it("shows the filename — the identity field the console never displayed", async () => {
+    // The bug that started #140: the operator typo'd a filename at upload and could neither
+    // see it nor fix it here. A rename affordance is useless if the field stays invisible.
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain("Filename");
+    expect(body).toContain('data-act="edit-doc"');
+  });
+
+  it("renders a dialog covering filename, title, summary and tags", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain('id="dlg-doc"');
+    expect(body).toContain('id="form-doc"');
+    for (const field of ["ed-name", "ed-title", "ed-summary", "ed-tags"]) {
+      expect(body).toContain(`id="${field}"`);
+    }
+  });
+
+  it("🔴 warns that renaming moves the URL, and carries no reach controls", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    const dialog = body.slice(body.indexOf('id="dlg-doc"'), body.indexOf('id="dlg-upload"'));
+    // Renaming changes the canonical link. Saying so is the difference between a rename the
+    // operator understands and a link that mysteriously stopped being canonical (ADR-020).
+    expect(dialog).toContain("new URL");
+    expect(dialog).toContain("redirects");
+    // Reach is the panel's job (ADR-011) — burying it in a modal would undo that.
+    expect(dialog).not.toMatch(/type="radio"|type="email"/i);
+  });
+
+  it("explains renaming and tags in popovers, opened without an inline handler", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    const dialog = body.slice(body.indexOf('id="dlg-doc"'), body.indexOf('id="dlg-upload"'));
+
+    // Native popover: the toggle is an ATTRIBUTE, so it survives the nonced CSP with no script.
+    expect(dialog).toContain('popovertarget="pop-name"');
+    expect(dialog).toContain('popovertarget="pop-tags"');
+    expect(dialog).toContain('id="pop-name" popover');
+    expect(dialog).toContain('id="pop-tags" popover');
+
+    // The filename popover has to carry the consequences, not just the definition.
+    const namePop = dialog.slice(dialog.indexOf('id="pop-name"'), dialog.indexOf('id="ed-title"'));
+    expect(namePop).toContain("update key");
+    expect(namePop).toContain("redirects");
+    expect(namePop).toContain("/p/");
+    expect(namePop).toMatch(/case/i); // Report.md and report.md are one document
+
+    // Tags were the "not very clear" one — examples, not just a definition.
+    const tagPop = dialog.slice(dialog.indexOf('id="pop-tags"'));
+    expect(tagPop).toContain("type:report");
+    expect(tagPop).toContain("--tag");
+    expect(tagPop).toMatch(/never (appear|sees)|not the client/i);
+  });
+
+  it("🔴 states the real limits — taken from the server constants, not retyped", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    // A hint that says "max 300" while the server enforces something else gets believed. These
+    // assertions fail if documents.ts changes a limit and the console is not rebuilt from it.
+    expect(body).toContain(`maxlength="${MAX_TITLE_CHARS}"`);
+    expect(body).toContain(`maxlength="${MAX_SUMMARY_CHARS}"`);
+    expect(body).toContain(`maxlength="${MAX_NAME_CHARS}"`);
+    expect(body).toContain(`Up to ${MAX_TAGS} tags`);
+    expect(body).toContain(`${MAX_TAG_CHARS} characters`);
+    expect(body).toContain(`tags: ${MAX_TAGS}`); // the client-side LIMITS object
+  });
+
+  it("turns the shared metadata budget into an instruction, not just a rejection", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    // Title, summary, tags and filename share one 1024-byte KV index budget, so each can be
+    // under its own limit while the combination is not. "Too long to index" alone leaves the
+    // operator poking at fields.
+    expect(body).toContain("metadata_too_large");
+    expect(body).toContain("share one");
+    expect(body).toContain("Shorten the summary");
+    // And the API error code has to reach the handler at all.
+    expect(body).toContain("err.code = code");
+  });
+});
+
 describe("browser upload control (#6)", () => {
   it("renders the New document button and an upload dialog with file/portal/emails/tags", async () => {
     const body = await (await getAdmin(await adminJwt(OWNER))).text();
@@ -320,7 +405,10 @@ describe("shareable portal link on the portal card", () => {
   // only for the owner, so there is nothing to hand out).
   it("copies the portal's index URL for public and team portals, but not private", async () => {
     const body = await (await getAdmin(await adminJwt(OWNER))).text();
-    expect(body).toContain("Copy portal link");
+    // The label is short because it sits in a one-line action cluster beside Open and Edit; the
+    // button's title attribute carries the longer explanation.
+    expect(body).toContain("Copy link");
+    expect(body).toContain("Anyone with this link can browse this portal");
     expect(body).toContain("function portalUrl");
     expect(body).toContain('"/pub/"'); // public portal index
     expect(body).toContain('"/v/"'); // restricted portal index

@@ -202,7 +202,7 @@ get made ([ADR-006](docs/adr/ADR-006-remote-mcp.md)).
 | Claude Code | a bearer token, the one the CLI already uses. Works at either tier |
 | Hosted surfaces on a **Public** deployment | bridge with `mcp-remote` and the bearer — with no Access there's nothing for OAuth discovery to find |
 
-Same server, same twelve tools, every surface. The tools carry annotations, so a host knows
+Same server, same thirteen tools, every surface. The tools carry annotations, so a host knows
 which are safe to auto-run and which should ask first — publishing over an existing document
 and minting a public link both require an explicit confirmation.
 

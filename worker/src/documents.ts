@@ -12,6 +12,7 @@ import {
   type DocSummary,
   type Portal,
   type SourceKind,
+  deleteDocKeys,
   deletePublicToken,
   getDoc,
   getMembers,
@@ -26,9 +27,11 @@ import {
   defaultDocName,
   mintPublicToken,
   normalizeEmail,
+  normalizeName,
   putDoc,
   putMembers,
   putMeta,
+  putMoved,
   putPortal,
   putPublicToken,
 } from "./store.js";
@@ -108,6 +111,20 @@ export class Conflict extends Error {
       `Ask the user. To replace it, call publish_document again with confirm: true. To keep both,`,
       `publish under a different filename.`,
     ].join("\n");
+  }
+}
+
+/**
+ * The requested filename is already another document's identity in this portal.
+ *
+ * Distinct from `Conflict`, which publish throws and `confirm: true` overrides. There is no
+ * override here on purpose: a rename is a correction, and completing one by destroying a
+ * different client deliverable is never what was meant. Replacing a document is `publish`
+ * with `confirm`, an operation that says so out loud.
+ */
+export class NameTaken extends Error {
+  constructor(readonly existing: DocMeta) {
+    super(`Portal "${existing.portal}" already has a document named "${existing.name}"`);
   }
 }
 
@@ -240,6 +257,125 @@ export async function publishDocument(env: Env, input: PublishInput): Promise<Pu
   const result: PublishResult = { meta, created: existing === null, portal };
   if (addedEmails.length > 0) result.sync = await syncGroupMembers(env, addedEmails);
   return result;
+}
+
+export interface DocEdit {
+  /**
+   * The filename — the document's IDENTITY (ADR-017). Changing it MOVES the document to a new
+   * id, and therefore to a new `/v/` or `/pub/` URL. Case-only changes (`Report.md` →
+   * `report.md`) normalize to the same identity and move nothing.
+   */
+  name?: string | undefined;
+  /** Display only. Editing it never moves the document. */
+  title?: string | undefined;
+  /** `""` clears it. */
+  summary?: string | undefined;
+  /** `[]` clears them. */
+  tags?: string[] | undefined;
+}
+
+export interface DocEditResult {
+  meta: DocMeta;
+  /**
+   * The id this document had before, present only when a filename change actually moved it.
+   * Callers surface it: the URL changed, and saying so is the difference between a rename the
+   * operator understands and a link that mysteriously stopped being canonical.
+   */
+  movedFrom?: string;
+}
+
+/**
+ * Edit a published document's identity and display metadata — the one service the console,
+ * `/api`, the CLI and MCP all call.
+ *
+ * ⭐ Two operations wear one word here, and the difference is the whole design:
+ *
+ * - **Retitling** (or editing summary/tags, or changing only the CASE of the filename) is a
+ *   single metadata write. Same id, same URL, nothing moves.
+ * - **Renaming the file** moves the document, because the id hashes the filename (ADR-013's
+ *   mechanism, ADR-017's key). There is no way to keep the URL and change the filename; the
+ *   alternative — an id decoupled from the name — needs a `filename → id` lookup at publish
+ *   time, which is the #74 fork race ADR-013 exists to kill.
+ *
+ * So a rename leaves a forwarding address instead. `moved:{oldId}` → newId keeps every link
+ * anyone already holds alive, and the `/p/` capability link survives untouched because its
+ * token was never a function of the id.
+ *
+ * Returns `null` when the document does not exist, so the caller answers 404 rather than this
+ * throwing a BadRequest that would surface as a 400.
+ */
+export async function editDocument(env: Env, id: string, edit: DocEdit): Promise<DocEditResult | null> {
+  const meta = await getMeta(env, id);
+  if (!meta) return null;
+
+  const next: DocMeta = { ...meta };
+
+  if (edit.title !== undefined) next.title = parseTitle(edit.title);
+
+  // `""` and `[]` mean "clear this", which is why they are checked before the parsers — both
+  // treat an empty value as "absent" and would otherwise make a field unclearable.
+  if (edit.summary !== undefined) {
+    const summary = parseSummary(edit.summary === "" ? undefined : edit.summary);
+    if (summary) next.summary = summary;
+    else delete next.summary;
+  }
+  if (edit.tags !== undefined) {
+    const tags = parseTags(edit.tags);
+    if (tags?.length) next.tags = tags;
+    else delete next.tags;
+  }
+
+  if (edit.name !== undefined) {
+    const name = parseFilename(edit.name);
+    if (!name) throw new BadRequest("invalid_field", `"name" cannot be blank — it is the document's identity`);
+    next.name = name;
+  }
+
+  next.updatedAt = new Date().toISOString();
+  if (!metadataFits(next)) {
+    throw new BadRequest("metadata_too_large", "Title, summary and tags are too long to index");
+  }
+
+  // Identity is case-insensitive, so compare NORMALIZED names: this is what decides whether we
+  // write one key or move a document. A pre-ADR-017 document (random id, backfilled `name`)
+  // therefore keeps its id on a title edit and only adopts a deterministic one if actually
+  // renamed — a title edit must never silently re-key a document.
+  if (normalizeName(next.name) === normalizeName(meta.name)) {
+    await putMeta(env, next);
+    return { meta: next };
+  }
+
+  const newId = await docId(meta.portal, next.name);
+  // Belt-and-braces: a 60-bit hash landing back on the same id is not going to happen, but if
+  // it did, the move below would delete the document it had just written.
+  if (newId === id) {
+    await putMeta(env, next);
+    return { meta: next };
+  }
+
+  const clash = await getMeta(env, newId);
+  if (clash) throw new NameTaken(clash);
+
+  const body = await getDoc(env, id);
+  if (body === null) {
+    // The metadata outlived its body — a torn write or a half-finished delete. Refuse rather
+    // than "move" a document into an empty one; there is nothing here to carry across.
+    throw new BadRequest("not_found", `No stored body for document: ${id}`);
+  }
+  const raw = await getRawSource(env, id);
+
+  next.id = newId;
+
+  // Ordering, as everywhere else in this file: write the whole new document BEFORE touching
+  // the old one, so a crash anywhere in here leaves both readable — never neither. The public
+  // token is repointed before the old keys go, so the /p/ link is on a live document
+  // throughout. The tombstone is last before the delete, for the same reason.
+  await putDoc(env, next, body, raw ?? undefined);
+  if (next.publicToken) await putPublicToken(env, next.publicToken, newId);
+  await putMoved(env, id, newId);
+  await deleteDocKeys(env, meta);
+
+  return { meta: next, movedFrom: id };
 }
 
 export interface DocPatch {

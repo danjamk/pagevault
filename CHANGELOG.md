@@ -7,6 +7,54 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **Edit a published document** — filename, title, summary and tags — from the console, the CLI
+  (`pagevault edit <id>`), and MCP (`edit_document`). Found by dogfooding: a document was uploaded
+  through the console with a typo in its filename, and there was no way to correct it anywhere.
+  The console did not even *display* the filename, so the identity field was invisible as well as
+  uncorrectable. ([#140](../../issues/140))
+
+  A document's id is derived from its filename (ADR-017), so **renaming moves the document to a
+  new URL** — that is not a choice, it is the same fact stated twice. So a rename now leaves a
+  forwarding address: the old URL redirects for a year, and any `/p/` public link keeps working
+  completely unchanged, because its token was never derived from the id. Changing only the title,
+  summary, tags — or only the *case* of a filename — moves nothing.
+  ([ADR-020](docs/adr/ADR-020-rename-leaves-a-forwarding-address.md))
+
+  Renaming onto a filename another document already holds is refused outright, with no override.
+  Publish has `--confirm` for replacing a document; rename deliberately does not, because
+  finishing a correction by destroying a different client deliverable is never what was meant.
+
+- **The console explains the fields instead of just exposing them.** Info popovers on Filename and
+  Tags — native `popover`, so the toggle is an attribute and there is no script for the nonced CSP
+  to block. The filename panel covers what "identity" actually costs you: renaming moves the URL,
+  the old one redirects, the `/p/` link is unaffected, case does not count but the extension does.
+  The tags panel leads with *tags are for you, not the client* and gives conventions worth copying
+  (`type:report`, `phase:discovery`, `q3`).
+
+  Field limits are shown, and they are **interpolated from the server constants** rather than
+  retyped — a hint saying "max 300" while the server enforces something else gets believed. Counters
+  stay silent until a field is 75% used. Tag count and tag length are checked before the request so
+  the answer is specific; and when the shared 1024-byte KV index budget blows, the dialog now says
+  which field to shorten and stays open, instead of forwarding "too long to index" and leaving you
+  to poke at boxes.
+
+- **The console shows a document's summary and tags at all,** in a details block alongside the
+  filename. None of the three were displayed before.
+
+### Changed
+- **The portal header is one row, not a right-hand column.** Base access, Open, Copy link and Edit
+  stacked vertically, which set the card's height and left a band of empty space beside the portal
+  name.
+
+### Notes
+- **Stable Google-Drive-style GUIDs were considered and rejected**, and ADR-020 records why so it
+  does not get re-litigated. Decoupling the id from the filename requires a `filename → id` lookup
+  at publish time; KV caches *misses* at the edge, so a second publish of the same filename inside
+  the window would likely hit a cached miss and fork the document — #74 verbatim, the exact bug
+  deterministic ids exist to prevent. Drive can do this because it sits on a strongly consistent
+  metadata store; PageVault runs on KV on purpose.
+
 ## [0.26.0] — 2026-07-29
 
 The portal could always tell you what you sent. Now it can tell you what got opened.

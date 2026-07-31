@@ -4,9 +4,12 @@ import { verifySession } from "./session.js";
 import {
   BadRequest,
   Conflict,
+  type DocEdit,
   type DocPatch,
   Misconfigured,
+  NameTaken,
   documentPath,
+  editDocument,
   parseEmails,
   parseSourceKind,
   parseSummary,
@@ -151,6 +154,16 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       // replace, --name to fork, mint to change only the link). The message stays generic; the
       // CLI-specific guidance is the CLI's to build. See ADR-017.
       return fail(409, "already_exists", err.message, {
+        id: err.existing.id,
+        name: err.existing.name,
+        portal: err.existing.portal,
+      });
+    }
+    // A rename onto a filename that is already taken. Separate code from publish's
+    // `already_exists` because the remedies differ: publish offers `--confirm` to replace,
+    // and a rename deliberately offers no such thing (#140).
+    if (err instanceof NameTaken) {
+      return fail(409, "name_taken", err.message, {
         id: err.existing.id,
         name: err.existing.name,
         portal: err.existing.portal,
@@ -332,10 +345,29 @@ async function deleteDocHandler(env: Env, id: string): Promise<Response> {
  * the single write and the Access-group sync — the same service the MCP tools reach for, so
  * the sync cannot be present on one path and forgotten on another.
  *
- * Title and body are NOT patchable here — they go through publish (create-or-update).
+ * It ALSO carries the edit fields — `name`, `title`, `summary`, `tags` (#140) — routed to
+ * `editDocument`. The body is not patchable anywhere: it goes through publish (create-or-update).
  */
 async function patchDocHandler(request: Request, env: Env, id: string): Promise<Response> {
   const body = await readJson(request);
+
+  const EDIT_FIELDS = ["name", "title", "summary", "tags"] as const;
+  const REACH_FIELDS = ["ownerOnly", "makePublic", "rotatePublic", "addEmails", "removeEmails"] as const;
+  const editing = EDIT_FIELDS.some((f) => f in body);
+  const reaching = REACH_FIELDS.some((f) => f in body);
+
+  // Refused rather than sequenced. A `name` change moves the document to a new id, so a
+  // combined request would have to answer "which id did the reach change apply to?" — and the
+  // honest answer depends on ordering the caller can't see. Two calls, unambiguous each.
+  if (editing && reaching) {
+    return fail(
+      400,
+      "invalid_field",
+      "Edit fields (name, title, summary, tags) and reach fields (ownerOnly, makePublic, rotatePublic, addEmails, removeEmails) cannot be combined — renaming moves the document to a new id. Send them as two requests.",
+    );
+  }
+
+  if (editing) return await editDocHandler(request, env, id, body);
 
   const patch: DocPatch = {};
   let any = false;
@@ -363,7 +395,7 @@ async function patchDocHandler(request: Request, env: Env, id: string): Promise<
     any = true;
   }
   if (!any) {
-    return fail(400, "invalid_field", `PATCH expects one of: ownerOnly, makePublic, rotatePublic, addEmails, removeEmails`);
+    return fail(400, "invalid_field", `PATCH expects one of: name, title, summary, tags, ownerOnly, makePublic, rotatePublic, addEmails, removeEmails`);
   }
 
   const result = await patchDocument(env, id, patch);
@@ -377,6 +409,49 @@ async function patchDocHandler(request: Request, env: Env, id: string): Promise<
   // Surface the group-sync outcome so a grant that landed in KV but that Access still blocks
   // is never silent (ADR-002). Absent when the patch granted no new email.
   if (result.sync) out["sync"] = result.sync.status;
+  return json(out);
+}
+
+/**
+ * The edit half of PATCH (#140): filename, title, summary, tags.
+ *
+ * `name` is the document's identity, so changing it moves the document to a new id — and the
+ * response therefore carries a DIFFERENT `id` and `url` than the ones the caller asked about,
+ * plus `movedFrom` and the old URL so a client can tell the operator what just happened rather
+ * than silently swapping the link under them.
+ */
+async function editDocHandler(
+  request: Request,
+  env: Env,
+  id: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  const edit: DocEdit = {};
+  if ("name" in body) edit.name = requireString(body["name"], "name");
+  if ("title" in body) edit.title = parseTitle(body["title"]);
+  // Distinguishable from absent: `""` and `[]` clear the field, so the console's Save can send
+  // the whole form and have an emptied box actually empty the field.
+  if ("summary" in body) edit.summary = typeof body["summary"] === "string" ? body["summary"] : "";
+  if ("tags" in body) edit.tags = parseTags(body["tags"]) ?? [];
+
+  const result = await editDocument(env, id, edit);
+  if (!result) return fail(404, "not_found", `No such document: ${id}`);
+
+  const base = baseUrl(request, env);
+  const portal = await getPortal(env, result.meta.portal);
+  const out: Record<string, unknown> = {
+    ...result.meta,
+    url: portal
+      ? `${base}${documentPath(portal, result.meta.id)}`
+      : `${base}/v/${encodeURIComponent(result.meta.portal)}/${result.meta.id}`,
+  };
+  if (result.meta.publicToken) out["publicUrl"] = `${base}/p/${result.meta.publicToken}`;
+  if (result.movedFrom) {
+    out["movedFrom"] = result.movedFrom;
+    out["movedFromUrl"] = portal
+      ? `${base}${documentPath(portal, result.movedFrom)}`
+      : `${base}/v/${encodeURIComponent(result.meta.portal)}/${result.movedFrom}`;
+  }
   return json(out);
 }
 

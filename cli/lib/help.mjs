@@ -104,6 +104,27 @@ A document's metadata — portal, filename, format, visibility, and its shareabl
   --json     the metadata as an object`,
   ),
 
+  edit: H(
+    "Usage: pagevault edit <id> [--name f] [--title t] [--summary s] [--tags a,b]",
+    `
+Fix a published document's filename, title, summary or tags. Not its contents — republish the
+file for those.
+
+  --name <filename>   THE IDENTITY (ADR-017). Renaming MOVES the document to a new URL: the old
+                      one redirects for a year, and any public /p/ link keeps working unchanged
+  --title "Q3 Review" display only. Changing it never moves the document
+  --summary "…"       one line, shown in listings and used by search. --summary "" clears it
+  --tags a,b,c        replaces the existing tags. --tags "" clears them
+
+Only the flags you pass are changed. Renaming onto a filename another document already uses is
+refused outright — there is no --confirm here, because finishing a rename by destroying a
+different deliverable is never what was meant. Replace a document deliberately instead:
+
+  pagevault publish <file> --name <that-filename> --confirm
+
+The new URL is printed to stdout: \`pagevault edit <id> --name q3.md | pbcopy\`.`,
+  ),
+
   link: H(
     "Usage: pagevault link <id>",
     `

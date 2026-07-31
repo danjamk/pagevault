@@ -59,6 +59,8 @@ async function main() {
       return list(flags);
     case "read":
       return read(positional, flags);
+    case "edit":
+      return edit(positional, flags);
     case "link":
       return link(positional, flags);
     case "search":
@@ -238,6 +240,55 @@ async function read(pos, flags) {
   if (meta.summary) lines.push(`  summary   ${meta.summary}`);
   lines.push("", `Body: pagevault read ${id} --source   ·   URL only: pagevault link ${id}`);
   out(lines.join("\n"));
+}
+
+/**
+ * `pagevault edit <id>` — fix a published document's filename, title, summary or tags (#140).
+ *
+ * NOT the contents: those go through `publish` (create-or-update). The filename is the
+ * document's identity (ADR-017), so renaming MOVES the document to a new URL — which is why
+ * this prints the new link and says the old one redirects, rather than swapping it silently.
+ */
+async function edit(pos, flags) {
+  const id = pos[0];
+  if (!id) throw new PvError(usageError("edit"));
+
+  const body = {};
+  for (const [flag, field] of [["name", "name"], ["title", "title"], ["summary", "summary"]]) {
+    if (typeof flags[flag] === "string") body[field] = flags[flag];
+  }
+  // `--tags ""` clears them; the flag being absent leaves them alone.
+  if (typeof flags.tags === "string") body.tags = splitList(flags.tags) ?? [];
+  if (Object.keys(body).length === 0) throw new PvError(usageError("edit"));
+
+  const cfg = requireConfig();
+
+  let res;
+  try {
+    res = await api(cfg, "PATCH", `/docs/${encodeURIComponent(id)}`, body);
+  } catch (err) {
+    // The filename belongs to another document. There is no --confirm for this on purpose:
+    // finishing a rename by destroying a different deliverable is never the intent. Point at
+    // the operation that DOES replace a document, and let them choose it deliberately.
+    if (err instanceof PvError && err.code === "name_taken" && err.details?.id) {
+      throw new PvError(
+        `${err.message}\n` +
+          `  It is document ${err.details.id}.\n` +
+          `  Pick a different --name, or replace that document deliberately:\n` +
+          `    pagevault publish <file> --name ${body.name} --confirm`,
+      );
+    }
+    throw err;
+  }
+
+  note(`Updated "${res.title}" (${res.name}) in portal "${res.portal}".`);
+  if (res.movedFrom) {
+    note(`Renamed, so it moved: ${res.movedFrom} → ${res.id}. The old link redirects here for a year.`);
+    if (res.publicUrl) note("Its public /p/ link is unchanged and still works.");
+  }
+  // The canonical URL → stdout, so `pagevault edit <id> --name x.md | pbcopy` hands back the
+  // link that now works. A public document's /p/ link is the one you actually give people.
+  out(res.publicUrl || res.url);
 }
 
 async function link(pos) {
@@ -589,6 +640,8 @@ Publish & manage documents:
                                 --name sets the update key (default: the filename); --title is display only
   pagevault list [--portal s] [--tag t] [--json]
   pagevault read <id> [--source] [--json]
+  pagevault edit <id> [--name f] [--title t] [--summary s] [--tags a,b]
+                                fix a published document's filename/title; --name moves its URL
   pagevault link <id>                 print the shareable URL to stdout (| pbcopy)
   pagevault search <portal> <query …> [--limit N] [--json]
   pagevault mint <id>                 mint a public /p/ link for an existing document

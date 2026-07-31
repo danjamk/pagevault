@@ -304,6 +304,7 @@ export const EXPECTED_MCP_TOOLS = [
   "revoke_public_link",
   "rotate_public_link",
   "revoke_document",
+  "edit_document",
   "server_info",
 ];
 

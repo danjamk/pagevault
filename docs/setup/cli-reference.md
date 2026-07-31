@@ -83,6 +83,22 @@ filename) unless you pass `--title`.
 ### `pagevault list [--portal s] [--tag t] [--json]`
 Your documents, newest first.
 
+### `pagevault edit <id> [--name f] [--title t] [--summary s] [--tags a,b]`
+Fix a published document's filename, title, summary or tags. Not its contents — republish the file
+for those. Only the flags you pass change; `--summary ""` and `--tags ""` clear those fields.
+
+`--name` is the document's **identity** (ADR-017), so renaming **moves the document to a new URL**.
+The old URL redirects for a year, and any `/p/` public link keeps working unchanged — its token was
+never derived from the id. Changing only the title (or only the *case* of the filename) moves
+nothing. See [ADR-020](../adr/ADR-020-rename-leaves-a-forwarding-address.md).
+
+Renaming onto a filename another document already uses is refused outright — there is no
+`--confirm` here, because finishing a rename by destroying a different deliverable is never what
+was meant. To replace a document deliberately, use `publish <file> --name <that-filename> --confirm`.
+
+The new URL is printed to stdout, so `pagevault edit <id> --name q3.md | pbcopy` hands back the
+link that now works.
+
 ### `pagevault link <id>`
 Print a document's shareable URL to stdout, and nothing else — so `pagevault link <id> | pbcopy`
 just works. A public document hands back its `/p/` capability link; otherwise the portal viewer URL,

@@ -164,6 +164,7 @@ describe("/mcp — protocol", () => {
 
     expect(names).toEqual([
       "create_portal",
+      "edit_document",
       "list_documents",
       "list_portals",
       "mint_public_link",
