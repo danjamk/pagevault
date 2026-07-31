@@ -231,7 +231,12 @@ running deployment. To confirm the two agree, use \`pagevault health\`.
     `
 Smoke-test the live deployment end to end — run it after \`init\` or \`upgrade\`. Checks that the
 Worker is ours, that the root serves, that /health reports the build you shipped, that /mcp
-answers, and that a publish → read → revoke round-trip works through the MCP tools.
+answers, and that a publish → rename → read → revoke round-trip works through the MCP tools. The
+rename leg checks that the document's id actually moved — that is what renaming means, and a
+same-id "rename" is the one failure the rest of the round-trip would pass straight through.
+
+The round-trip's own documents are owner-only drafts under unique per-run filenames, revoked on the
+way out. If a run dies partway it warns and names the draft to delete; it never blocks the next run.
 
 It publishes a sample document so you have something to open. That matters during a recovery:
 restore BEFORE you verify, or the sample's keys will be sitting in the namespace when the restore

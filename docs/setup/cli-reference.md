@@ -169,7 +169,8 @@ To confirm the deployment agrees, run [`pagevault health`](#pagevault-health---j
 
 ### `pagevault verify [--json]`
 The post-deploy smoke test: the Worker is live and ours, the root behaves for the tier, the `/mcp`
-surface answers a real `publish → read → revoke` round-trip, OAuth discovery, and a sample publish
+surface answers a real `publish → rename → read → revoke` round-trip (the rename leg asserts the
+document's id actually *moved*, which is what a rename means &mdash; ADR-020), OAuth discovery, and a sample publish
 that hands back an openable link. `--json` emits a per-check verdict; the exit code (0/1) drives an
 agent.
 

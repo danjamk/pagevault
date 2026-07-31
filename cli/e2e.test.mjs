@@ -742,10 +742,17 @@ describe("verify against a live Worker", { timeout: 180_000 }, () => {
     // The checks that make this command worth running: it proved the Worker is ours, that /mcp
     // speaks the protocol, and that a document can be written and read back through the MCP tools.
     const names = r.json.checks.map((c) => c.name);
-    for (const required of ["worker_live", "root", "mcp_initialize", "mcp_tools", "mcp_roundtrip"]) {
+    for (const required of ["worker_live", "root", "mcp_initialize", "mcp_tools", "mcp_roundtrip", "mcp_rename"]) {
       assert.ok(names.includes(required), `${required} should have run`);
     }
     assert.equal(r.json.checks.find((c) => c.name === "mcp_roundtrip").ok, true);
+
+    // #140: the rename leg has to prove the document actually MOVED. Its detail carries both
+    // ids, and they must differ — a same-id "rename" is the failure this leg exists to catch.
+    const rename = r.json.checks.find((c) => c.name === "mcp_rename");
+    assert.equal(rename.ok, true, `rename leg failed: ${JSON.stringify(rename)}`);
+    const [from, to] = (rename.detail ?? "").split(" → ");
+    assert.ok(from && to && from !== to, `rename detail should carry two different ids, got ${rename.detail}`);
   });
 
   it("FAILS when a check fails, rather than warning and exiting 0", () => {

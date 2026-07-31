@@ -42,6 +42,13 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 - **The console shows a document's summary and tags at all,** in a details block alongside the
   filename. None of the three were displayed before.
 
+- **`pagevault verify` now exercises the rename live.** Its MCP round-trip is
+  `publish → rename → read → revoke`, and the rename leg asserts the document's id actually
+  *moved* — a same-id "rename" would mean the move silently degraded to a metadata write, which is
+  the one failure the rest of the round-trip passes straight through. Both filenames are unique per
+  run: `edit_document` refuses a name already in use, so a stable rename target would let one
+  crashed run block every future verify with `name_taken`.
+
 ### Changed
 - **The portal header is one row, not a right-hand column.** Base access, Open, Copy link and Edit
   stacked vertically, which set the card's height and left a band of empty space beside the portal
