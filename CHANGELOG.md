@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.27.0] — 2026-07-30
+
+You could publish a document. You could not fix its name.
+
 ### Added
 - **Edit a published document** — filename, title, summary and tags — from the console, the CLI
   (`pagevault edit <id>`), and MCP (`edit_document`). Found by dogfooding: a document was uploaded
@@ -1040,7 +1044,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/danjamk/pagevault/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/danjamk/pagevault/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/danjamk/pagevault/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/danjamk/pagevault/compare/v0.23.2...v0.24.0
