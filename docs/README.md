@@ -35,6 +35,7 @@ Start with the question you came here to answer.
 - [`engineering/implementation/`](engineering/implementation/) — the build plans, phase by phase. Open plans sit at the top; [`complete/`](engineering/implementation/complete/) holds the ones whose work has shipped, which is currently all of them.
 - [`engineering/state-versioning.md`](engineering/state-versioning.md) — the `.pagevault.json` schema and its migrations.
 - [`engineering/deploy-prod.md`](engineering/deploy-prod.md) — how I run PageVault's own production through CI (one operator's rig, not required).
+- [`engineering/windows-smoke-test.md`](engineering/windows-smoke-test.md) — a hand-run protocol for the one platform CI cannot reach: native Windows.
 
 ## Contribute
 

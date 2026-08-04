@@ -25,11 +25,20 @@ const expected = pkg.version;
 // `--version` from cli/package.json, the deploy stamp from dist/version.txt (#87).
 const productVersion = JSON.parse(readFileSync(join(cliDir, "..", "package.json"), "utf8")).version;
 
+// The one place this test has to know what platform it is on. npm's bin shim on Windows is
+// `pagevault.cmd`, not the extensionless script POSIX gets — and since CVE-2024-27980 Node refuses
+// to spawn a `.cmd` at all without a shell. So name the shim explicitly and opt into the shell,
+// which in turn means the path must be quoted: a temp dir can contain a space, and this suite exists
+// precisely to catch the class of bug where it doesn't.
+const isWindows = process.platform === "win32";
+const shim = (bin) => (isWindows ? `"${bin}.cmd"` : bin);
+const spawnOpts = (extra = {}) => ({ encoding: "utf8", shell: isWindows, ...extra });
+
 // Run the installed binary and return its combined output. `help` prints to stderr (the CLI
 // keeps stdout a clean URL channel), so we merge the streams — and a non-zero exit is itself a
 // failure (a broken shebang or entrypoint).
 function run(bin, args) {
-  const r = spawnSync(bin, args, { encoding: "utf8" });
+  const r = spawnSync(shim(bin), args, spawnOpts());
   if (r.error) throw new Error(`could not run the installed binary (${args.join(" ")}): ${r.error.message}`);
   if (r.status !== 0) throw new Error(`\`${args.join(" ")}\` exited ${r.status}: ${(r.stderr || "").trim() || "(no output)"}`);
   return `${r.stdout || ""}${r.stderr || ""}`;
@@ -116,7 +125,11 @@ try {
     throw new Error("`help` does not mention `status` — the operator commands (status/verify/health/destroy) didn't ship");
   }
   {
-    const r = spawnSync(bin, ["status", "--json"], { encoding: "utf8", env: { ...process.env, HOME: temp, PAGEVAULT_HOME: temp } });
+    // USERPROFILE alongside HOME: `os.homedir()` reads USERPROFILE on Windows and ignores HOME, so
+    // without it this "fresh machine" probe would find the real ~/.pagevault. PAGEVAULT_HOME already
+    // overrides both, but the isolation should not rest on a single variable.
+    const env = { ...process.env, HOME: temp, USERPROFILE: temp, PAGEVAULT_HOME: temp };
+    const r = spawnSync(shim(bin), ["status", "--json"], spawnOpts({ env }));
     if (r.status !== 0) throw new Error(`installed \`status --json\` exited ${r.status}: ${(r.stderr || "").trim() || "(no output)"}`);
     let parsed;
     try {

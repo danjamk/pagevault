@@ -56,7 +56,8 @@ Public links anyone with the URL can open — on `workers.dev`, or your own doma
 Zero Trust, no card. ~10 minutes.
 
 **You need:** a [Cloudflare account](https://dash.cloudflare.com/sign-up) ·
-Node 22+ · a Cloudflare API token.
+Node 22+ · a Cloudflare API token · macOS, Linux, or Windows
+([which OS?](docs/setup/prerequisites.md#which-operating-system)).
 Full detail in [`docs/setup/prerequisites.md`](docs/setup/prerequisites.md).
 
 ### Create your Cloudflare API token

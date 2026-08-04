@@ -21,6 +21,10 @@ export const CONFIG_PATH = join(process.env.PAGEVAULT_HOME || join(homedir(), ".
  * (it holds a bearer). The single writer, shared by the `login` command and `pagevault init` so a
  * successful install leaves you ready to publish with no second `login` step. `url`'s trailing
  * slash is trimmed to match loadConfig.
+ *
+ * The mode is a POSIX guarantee only: NTFS ignores it, so on Windows this file is protected by the
+ * profile directory's ACL rather than by anything asked for here. Kept because it is correct where
+ * it is honored, and stated because the code otherwise reads as a promise it cannot keep everywhere.
  */
 export function saveLoginConfig({ url, token }) {
   mkdirSync(dirname(CONFIG_PATH), { recursive: true });

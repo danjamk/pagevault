@@ -7,6 +7,49 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+The npm package is the product, and it did not install on Windows.
+
+### Fixed
+- **`pagevault init` failed on every Windows machine.** The prebuilt Worker's absolute path is
+  written into the generated wrangler config, and it was spliced in as a raw string. On Windows
+  that path is `C:\Users\…\npm\node_modules\…`, where `\U` is an invalid JSON escape and `\n` is a
+  newline — so the config did not parse, and the error named neither Windows nor the path. The path
+  is now escaped as a JSON string literal. ([#139](../../issues/139))
+
+- **A space anywhere in the home path broke the deploy.** The `--config` argument was interpolated
+  into a shell command unquoted, so `C:\Users\First Last\…` reached wrangler as
+  `--config C:\Users\First`. Not Windows-only: a macOS home under `~/My Drive/…` failed identically. The
+  command is now built by `deployCommand()`, which quotes it — and which exists as a separate
+  function so the quoting is asserted by a test instead of a live deploy. ([#139](../../issues/139))
+
+- **`pagevault verify` gave WSL users advice that clears the wrong cache.** WSL looks like Linux,
+  but it resolves through the Windows host — so a stale `NXDOMAIN` is cached on the Windows side and
+  `resolvectl flush-caches` inside the distro does nothing. Verify now detects WSL and says
+  `ipconfig.exe /flushdns`, with a line explaining why. This is the destroy → rebuild path, which is
+  where `verify` earns its keep. ([#123](../../issues/123), [#139](../../issues/139))
+
+### Changed
+- **Color is dropped when nothing is watching.** ANSI escapes were emitted unconditionally, which
+  littered redirected output and rendered as raw garbage in legacy Windows conhost. Color is now off
+  when neither stdout nor stderr is a terminal, `NO_COLOR` forces it off, and `FORCE_COLOR` forces it
+  on. It keys on *either* stream because `pagevault publish report.html | pbcopy` pipes stdout while
+  a human still reads stderr. ([#139](../../issues/139))
+
+- **CI runs on Windows.** A `windows-latest` job runs the CLI test suites and the pack-and-install
+  smoke test. It deliberately does not run the Worker suite — that would test Cloudflare's workerd
+  port, not this package — and it cannot cover provisioning, which needs a real Cloudflare account.
+  That gap is closed by hand: [`docs/engineering/windows-smoke-test.md`](docs/engineering/windows-smoke-test.md).
+
+### Documentation
+- **Which operating systems are supported is now written down.** It appeared nowhere before. Added
+  to [prerequisites](docs/setup/prerequisites.md#which-operating-system), the README's "You need"
+  line, the [CLI reference](docs/setup/cli-reference.md), and the
+  [AI-guided setup](docs/setup/ai-guided-setup.md) — including the PowerShell 5.1 trap, where
+  `echo … > .env.local` writes UTF-16, PageVault reads UTF-8, and the token is invisible while the
+  file looks correct.
+- `export --zip` is documented as leaving the folder uncompressed on Windows, which is what it has
+  always done — there is no `zip` command there. It degrades on purpose; now it says so in advance.
+
 ## [0.27.0] — 2026-07-30
 
 You could publish a document. You could not fix its name.

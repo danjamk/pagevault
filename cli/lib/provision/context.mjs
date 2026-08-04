@@ -84,10 +84,19 @@ export const BUNDLE_PATH = fileURLToPath(new URL("../../dist/worker.js", import.
  * the installed package doesn't have.
  */
 export function applyBundleMode(config, bundlePath) {
+  // JSON.stringify, not raw interpolation. The path is ABSOLUTE, so on Windows it is
+  // `C:\Users\…\npm\node_modules\pagevault\dist\worker.js` — and spliced into JSON raw, `\U` is an
+  // invalid escape and `\n` is a newline. The generated config then fails to parse and `init` dies
+  // naming neither Windows nor the path. That is every Windows install, not an edge case.
+  // stringify emits the surrounding quotes too, so this replaces `"main": "…"` whole.
+  //
+  // The replacements are FUNCTIONS because String.replace interprets `$&`/`$'`/`$1` in a string
+  // replacement — a `$` in a path would otherwise be silently rewritten.
+  const main = `"main": ${JSON.stringify(bundlePath)}`;
   const out = config
-    .replace(/"main": "src\/index\.ts"/, `"main": "${bundlePath}"`)
-    .replace(/"no_bundle": false/, '"no_bundle": true');
-  if (!out.includes(`"main": "${bundlePath}"`) || !out.includes('"no_bundle": true')) {
+    .replace(/"main": "src\/index\.ts"/, () => main)
+    .replace(/"no_bundle": false/, () => '"no_bundle": true');
+  if (!out.includes(main) || !out.includes('"no_bundle": true')) {
     throw new Error("Failed to switch the config to bundle mode — did the template's main/no_bundle change?");
   }
   return out;
@@ -97,15 +106,47 @@ export function applyBundleMode(config, bundlePath) {
 // many dark-mode terminals render 2m as near-invisible, which collapses a bold/normal/dim
 // hierarchy into mush. So structure is carried by hue — cyan for headers and labels — and
 // readability never leans on three shades of white. Kept moderate: no bright fills.
+/**
+ * Should we emit ANSI at all? Pure, so it can be tested without faking a terminal.
+ *
+ * Precedence: FORCE_COLOR (keep color through a pager or a CI that renders it) → NO_COLOR (the
+ * informal cross-tool standard: set to ANYTHING, including empty, means off) → is a human watching.
+ *
+ * "A human watching" is EITHER stream being a TTY, not just stdout. The CLI splits its channels —
+ * `publish` prints the URL to stdout and everything human to stderr, so `pagevault publish r.html |
+ * pbcopy` is a documented flow where stdout is a pipe and the person is still reading stderr.
+ * Keying on stdout alone would drain the color out of exactly that session.
+ *
+ * The payoff is wider than Windows: clean CI logs, clean `> file`, and no escape-sequence litter in
+ * legacy conhost, which prints raw ANSI as garbage instead of interpreting it.
+ */
+export function shouldUseColor({ env = process.env, stdoutTTY = false, stderrTTY = false } = {}) {
+  if (env.FORCE_COLOR !== undefined && env.FORCE_COLOR !== "") return env.FORCE_COLOR !== "0";
+  if (env.NO_COLOR !== undefined) return false;
+  return Boolean(stdoutTTY || stderrTTY);
+}
+
+const USE_COLOR = shouldUseColor({
+  env: process.env,
+  stdoutTTY: process.stdout?.isTTY,
+  stderrTTY: process.stderr?.isTTY,
+});
+
+// Wrap in an escape only when color is on; otherwise hand back the text untouched. The GLYPHS
+// (✓ → ! ✗) are deliberately NOT stripped here — they carry meaning, they are valid UTF-8, and
+// modern Windows Terminal renders them correctly. If legacy conhost turns out to mangle them,
+// that is a separate call made on evidence, not a guess.
+const paint = (codes) => (s) => (USE_COLOR ? `\x1b[${codes}m${s}\x1b[0m` : String(s));
+
 export const c = {
-  dim: (s) => `\x1b[38;5;245m${s}\x1b[0m`, // a fixed mid-gray (256-color) — readable on dark
-  bold: (s) => `\x1b[1m${s}\x1b[0m`, // one key value on a line
-  green: (s) => `\x1b[32m${s}\x1b[0m`,
-  red: (s) => `\x1b[31m${s}\x1b[0m`,
-  yellow: (s) => `\x1b[33m${s}\x1b[0m`,
-  cyan: (s) => `\x1b[36m${s}\x1b[0m`, // labels, in-progress →
-  blue: (s) => `\x1b[36m${s}\x1b[0m`, // alias for existing callers
-  head: (s) => `\x1b[1m\x1b[36m${s}\x1b[0m`, // bold cyan — the top line of a command
+  dim: paint("38;5;245"), // a fixed mid-gray (256-color) — readable on dark
+  bold: paint("1"), // one key value on a line
+  green: paint("32"),
+  red: paint("31"),
+  yellow: paint("33"),
+  cyan: paint("36"), // labels, in-progress →
+  blue: paint("36"), // alias for existing callers
+  head: paint("1;36"), // bold cyan — the top line of a command
 };
 
 export const ok = (s) => console.log(`${c.green("✓")} ${s}`);
