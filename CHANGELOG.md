@@ -7,6 +7,8 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.28.0] — 2026-08-04
+
 The npm package is the product, and it did not install on Windows.
 
 ### Fixed
@@ -1087,7 +1089,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/danjamk/pagevault/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/danjamk/pagevault/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/danjamk/pagevault/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/danjamk/pagevault/compare/v0.24.0...v0.25.0
