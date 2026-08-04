@@ -30,7 +30,7 @@
 //
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync, execFileSync } from "node:child_process";
 import { createServer } from "node:net";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -85,9 +85,15 @@ async function startWorker({ access = false } = {}) {
   // The repo's own wrangler (a devDependency), not `npx wrangler@4`. The provisioning code uses
   // npx because it runs from an installed package with no node_modules; this file only ever runs
   // from the repo, so resolving locally keeps CI off the registry and off a version drift.
+  // On Windows the bin shim is `wrangler.cmd`, not the extensionless script npm writes on POSIX —
+  // and since CVE-2024-27980 Node refuses to spawn a `.cmd` without a shell. Without both halves
+  // this is `spawn … ENOENT (-4058)` and every e2e test cancels behind a boot that never happened.
+  const isWindows = process.platform === "win32";
+  const wrangler = join(REPO, "node_modules", ".bin", isWindows ? "wrangler.cmd" : "wrangler");
+
   const port = await freePort();
   const child = spawn(
-    join(REPO, "node_modules/.bin/wrangler"),
+    isWindows ? `"${wrangler}"` : wrangler,
     [
       "dev",
       "--config", "worker/wrangler.jsonc",
@@ -98,7 +104,8 @@ async function startWorker({ access = false } = {}) {
       "--persist-to", join(dir, "state"),
       "--env-file", envFile,
     ],
-    { cwd: REPO, stdio: ["ignore", "pipe", "pipe"] },
+    // `shell` on Windows for the `.cmd` above; the quoted path handles a checkout dir with a space.
+    { cwd: REPO, stdio: ["ignore", "pipe", "pipe"], shell: isWindows },
   );
 
   // Keep the output for the failure message — a Worker that won't boot (a bad binding, a build
@@ -124,7 +131,19 @@ async function startWorker({ access = false } = {}) {
 }
 
 function stopWorker(child, dir) {
-  child.kill("SIGTERM");
+  // On Windows `child` is the cmd.exe wrapper that `shell: true` created, so killing it leaves
+  // wrangler and workerd running — orphaned, still holding their ports, and keeping the runner
+  // alive after the suite ends. taskkill /T walks the tree; /F because workerd does not stop
+  // politely, and SIGTERM is not a real Windows signal anyway.
+  if (process.platform === "win32" && child.pid) {
+    try {
+      execFileSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+    } catch {
+      /* already exited — nothing left to kill */
+    }
+  } else {
+    child.kill("SIGTERM");
+  }
   rmSync(dir, { recursive: true, force: true });
 }
 

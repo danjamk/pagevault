@@ -32,6 +32,39 @@ const DNS_FLUSH = {
 };
 
 /**
+ * Is this Linux actually WSL? Both WSL1 and WSL2 carry "microsoft" in `/proc/version`; nothing else
+ * does. Uncached on purpose — it runs at most once per process, on a failure path, and a cache keyed
+ * on a defaulted argument is a test-order footgun for no measurable gain.
+ */
+export function isWsl(plat = platform) {
+  if (plat !== "linux") return false;
+  try {
+    return readFileSync("/proc/version", "utf8").toLowerCase().includes("microsoft");
+  } catch {
+    return false; // not a Linux that exposes /proc — assume not WSL
+  }
+}
+
+/**
+ * The flush command for THIS machine, plus a note when the obvious command is the wrong one.
+ *
+ * WSL is the trap. It looks like Linux to `process.platform`, but `/etc/resolv.conf` points at the
+ * Windows host resolver — so the stale NXDOMAIN is cached on the *Windows* side and
+ * `resolvectl flush-caches` inside the distro clears a cache that was never consulted. The user
+ * flushes, retries, sees the identical failure, and concludes the deploy is broken. WSL's interop
+ * lets `ipconfig.exe` run straight from the Linux shell, so the fix stays one pasteable line.
+ */
+export function dnsFlushHint(plat = platform, wsl = isWsl(plat)) {
+  if (plat === "linux" && wsl) {
+    return {
+      cmd: "ipconfig.exe /flushdns",
+      note: "WSL resolves through the Windows host, so the stale answer is cached there — flushing inside the distro clears the wrong cache. If interop refuses, run `ipconfig /flushdns` in an elevated PowerShell.",
+    };
+  }
+  return { cmd: DNS_FLUSH[plat] ?? DNS_FLUSH.linux, note: null };
+}
+
+/**
  * Why isn't this hostname answering? Distinguishes two failures that look identical from here and
  * have completely different fixes.
  *
@@ -164,7 +197,9 @@ export async function verifyCmd({ json = false } = {}) {
       say(`  ${c.dim("The hostname resolves at a public resolver but not on this machine — so something")}`);
       say(`  ${c.dim("here is still remembering that it didn't exist. Common right after a teardown and")}`);
       say(`  ${c.dim("rebuild on the same hostname. Waiting will not fix it; flushing will:")}`);
-      say(`\n     ${c.bold(DNS_FLUSH[platform] ?? DNS_FLUSH.linux)}\n`);
+      const flush = dnsFlushHint();
+      say(`\n     ${c.bold(flush.cmd)}\n`);
+      if (flush.note) say(`  ${c.dim(flush.note)}\n`);
       say(`  ${c.dim("Then re-run")} ${c.bold("pagevault verify")}${c.dim(".")}\n`);
       return finish(false, { reason: "dns_local_cache" });
     }

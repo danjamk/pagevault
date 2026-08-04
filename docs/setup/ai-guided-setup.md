@@ -75,12 +75,21 @@ Confirm the person has these before touching a command. Details and the exact to
 1. **A Cloudflare account** (free) — <https://dash.cloudflare.com/sign-up>.
 2. **Node 22 or newer** — `node -v`. The deploy step bundles the Worker and needs 22+. If they're on
    an older Node, point them at [nvm](https://github.com/nvm-sh/nvm).
-3. **A Cloudflare API token** — created at
+3. **An operating system you can advise on.** Ask, and do not assume — the shell commands below are
+   POSIX and will not run as written in PowerShell.
+   - **macOS or Linux** — everything on this page applies verbatim. Linux is covered by CI.
+   - **Windows** — supported natively as of 0.28.0. Translate the shell snippets to PowerShell, and
+     never have them write the token with `echo … > .env.local`: PowerShell 5.1 writes UTF-16 and
+     PageVault reads UTF-8, so the token goes invisible while the file looks right. Use
+     `pagevault init` and have them **paste at the prompt**.
+   - **WSL2** — treat it as Linux, because it is. Warn them that `~/.pagevault` inside the distro is
+     a different install from the Windows one; mixing the two produces a second empty config.
+4. **A Cloudflare API token** — created at
    <https://dash.cloudflare.com/profile/api-tokens>. Have them grant **all** the scopes in the README
    table now, even for Public, so climbing later never means re-scoping.
-4. **(a domain, for Secured or for Public-on-your-own-domain)** already added to that same
+5. **(a domain, for Secured or for Public-on-your-own-domain)** already added to that same
    Cloudflare account.
-5. **(Secured only) Zero Trust enabled** on the account — this is the step that asks for a card,
+6. **(Secured only) Zero Trust enabled** on the account — this is the step that asks for a card,
    and the one that cannot be automated.
 
 ## Step 4 — Install and deploy
@@ -151,6 +160,10 @@ For publishing from inside a chat (the MCP server), send them to
 | the published link **404s for a few seconds** | Cloudflare KV is eventually consistent | wait a moment and refresh — the CLI already polls, so this is brief |
 | `/admin` or `/v/` is refused on a **Public** deployment | correct — there is no Access there, so those doors fail closed | ignore it unless they climb to Secured |
 | a brand-new `workers.dev` URL isn't live yet | a fresh subdomain can take a minute to route | wait and re-run `pagevault verify` |
+| **Windows:** deploy fails naming a **truncated path** (`C:\Users\First`) | their home path has a space in it and they're on a PageVault older than 0.28.0 | `npm update -g pagevault`, then re-run `pagevault init`. Nothing to work around — it was a quoting bug |
+| **Windows:** `init` fails with **`Bad escaped character in JSON`** | same vintage — the Worker bundle path was written into the config unescaped, which breaks on every Windows machine | `npm update -g pagevault`, then re-run `pagevault init` |
+| **Windows:** the token "isn't there" but `.env.local` looks correct | they wrote it with `echo … > .env.local` in PowerShell 5.1, which saves UTF-16; PageVault reads UTF-8 | delete the file and run `pagevault init`, pasting the token at its prompt |
+| **WSL:** hostname still won't resolve after `resolvectl flush-caches` | WSL resolves through the Windows host, so the stale answer is cached on the Windows side | `ipconfig.exe /flushdns` from the distro, or `ipconfig /flushdns` in an elevated PowerShell. `pagevault verify` now prints this itself |
 
 If you're stuck, the full design and every command are in the
 [docs](../README.md); the honest limits — including when to use something else — are in the

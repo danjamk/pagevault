@@ -10,6 +10,11 @@ exist as `make` targets (`make deploy`, `make verify`, …) — one engine, two 
 
 - **Node 22+** for the commands that build or deploy (`init`, `upgrade`) — they bundle the Worker.
   The document commands (`publish`, `list`, …) run on Node 18+.
+- **macOS, Linux, or Windows.** Linux is covered by CI; Windows is verified by hand. The one
+  behavioral difference is noted under `export` below. See
+  [prerequisites](prerequisites.md#which-operating-system).
+- Color is dropped automatically when output is not a terminal, so redirected and piped output is
+  clean. `NO_COLOR` forces it off, `FORCE_COLOR` forces it on.
 - On success, `publish`/`mint`/`rotate` print **only the URL** to stdout; every status line, prompt,
   and warning goes to stderr, so `pagevault publish report.html | pbcopy` does the obvious thing.
 - `--json` is available on the read and diagnostic commands, for scripting and for an agent to consume.
@@ -143,6 +148,10 @@ Delete a document. There is no undo. Interactive confirm unless `--yes`.
 Write everything you own to a browsable folder — `index.html`, an `ACCESS.md` naming who can see what,
 one folder per portal. A walk-away copy, not a backup (ids and public tokens are omitted). The final
 path prints to stdout.
+
+`--zip` shells out to `zip`, which **Windows does not have**. There it writes the folder, prints a
+note saying it could not compress, and exits cleanly — you get the export either way, just not
+zipped. Compress it yourself with `Compress-Archive` if you want a single file.
 
 ### `pagevault read <id> [--source] [--json]`
 Read a document's metadata. `--source` prints the stored body (the original `.md` or HTML) to stdout,

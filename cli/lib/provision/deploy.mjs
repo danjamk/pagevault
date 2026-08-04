@@ -21,6 +21,20 @@ import { saveLoginConfig, loadConfig, CONFIG_PATH } from "../client.mjs";
 
 const CONFIG_OUT = generatedConfigPath();
 
+/**
+ * The wrangler deploy command line. Extracted so a test can assert the QUOTING without spawning
+ * wrangler — the live call can't be unit-tested, but the string handed to the shell can.
+ *
+ * The config path is absolute and operator-controlled, and it routinely contains a space: installed,
+ * it is `%USERPROFILE%\.pagevault\…`, and a Windows account named "First Last" puts one right in the
+ * middle. Unquoted, the shell splits there and wrangler gets `--config C:\Users\First` — an error
+ * that never names the cause. macOS and Linux hit the same thing from any home path with a space.
+ * `scripts/build-bundle.mjs` has always quoted this same interpolation; this matches it.
+ */
+export function deployCommand(configPath) {
+  return `npx --yes wrangler@4 deploy --config "${configPath}"`;
+}
+
 export async function deploy(opts = {}) {
   loadCloudToken();
   const ctx = loadContext();
@@ -140,7 +154,7 @@ export async function deploy(opts = {}) {
   info("Deploying the Worker…");
   let out = "";
   try {
-    out = execSync(`npx --yes wrangler@4 deploy --config ${CONFIG_OUT}`, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    out = execSync(deployCommand(CONFIG_OUT), { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
     process.stdout.write(out);
   } catch (err) {
     const output = `${err.stdout ?? ""}${err.stderr ?? ""}`;

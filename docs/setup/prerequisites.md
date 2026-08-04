@@ -13,6 +13,33 @@ if you don't have it).
 
 ---
 
+## Which operating system
+
+Only the person running PageVault needs any of this. People you send links to open a URL in
+a browser, on anything, including a phone.
+
+| | Status |
+| --- | --- |
+| **macOS** | What I develop on. |
+| **Linux** | Tested on every commit — CI runs the full suite on Ubuntu. |
+| **Windows** | The document commands are plain Node and portable. `init` deploys natively. Two path-handling defects were fixed in 0.28.0; before that, `init` failed on Windows. Tested by hand rather than in CI, because provisioning needs a real Cloudflare account. |
+| **WSL2** | Identical to Linux, because it *is* Linux. The safe fallback if native Windows gives you trouble. |
+
+Two things to know if you are on Windows:
+
+- **Do not write your API token with `echo … > .env.local`.** Windows PowerShell 5.1 writes that
+  file as UTF-16, PageVault reads UTF-8, and the result is a token that is invisible to the tool
+  while looking perfectly correct in Notepad. Run `pagevault init` and **paste the token at its
+  prompt** instead — it writes the file through Node and gets the encoding right.
+- **`pagevault export --zip` does not zip on Windows.** There is no `zip` command; the export
+  folder is written and left in place, with a note saying so. Nothing is lost.
+
+WSL is a genuine fallback, not a requirement — but be aware that `~/.pagevault` inside a WSL
+distro is a *different* config from the Windows one. Run `init` in WSL and then `pagevault` from
+PowerShell, and you get a second, empty install with no hint why.
+
+---
+
 ## Public — links anyone with the URL can open
 
 Everything here is free, and none of it needs a credit card.

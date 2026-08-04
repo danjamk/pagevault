@@ -53,3 +53,45 @@ jobs:
       # path, the shebang — which the in-repo unit tests never touch. Catches a broken package at PR
       # time, not at the permanent `npm publish`.
       - run: node cli/smoke.mjs
+
+  # The npm package is the product (ADR-014), and it installs on machines I do not have. This job
+  # covers the part of Windows that CI CAN reach: that the packed tarball installs, that the bin
+  # shim resolves to `pagevault.cmd`, and that the path handling holds up on NTFS (#139).
+  #
+  # SCOPE — read this before trusting a green check. It does NOT cover provisioning. `init`,
+  # `upgrade` and `deploy` need a real Cloudflare account and a live API token, so the two defects
+  # that made this job worth adding — the unquoted `--config` path and the JSON-escaped bundle path
+  # — are guarded by the unit tests above, NOT by anything here. Native Windows provisioning is
+  # verified by hand: docs/engineering/windows-smoke-test.md.
+  #
+  # Deliberately omitted: pnpm test (vitest-pool-workers boots workerd — that tests Cloudflare's
+  # Windows port, not this package), typecheck, check-docs, check-console, check-sandbox. All are
+  # platform-independent and already proven on ubuntu; running them twice buys nothing and doubles
+  # the surface that can go red for reasons unrelated to Windows.
+  windows:
+    runs-on: windows-latest
+    # bash, not the PowerShell default: the test step below relies on glob expansion, which
+    # PowerShell does not do for external commands — node would receive the literal `scripts/*.test.mjs`.
+    # git-bash ships on the runner, so this costs nothing.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The CLI's own suites: path handling, arg parsing, and the #139 regressions (a config path
+      # with a space, a Windows bundle path surviving as JSON, the color guard, the WSL DNS hint).
+      - run: node --test scripts/*.test.mjs cli/*.test.mjs
+
+      # The highest-signal step here: does `npm install` of the real tarball produce a working
+      # `pagevault` command on Windows at all — bin shim, shebang, files allowlist.
+      - run: node cli/smoke.mjs

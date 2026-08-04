@@ -201,7 +201,10 @@ test("saveLoginConfig round-trips through loadConfig and writes 0600", () => {
   const { p, cfg } = JSON.parse(r.stdout);
   assert.equal(cfg.url, "https://share.example.com"); // trailing slash trimmed
   assert.equal(cfg.token, "tok123");
-  assert.equal(statSync(p).mode & 0o777, 0o600); // it holds a bearer
+  // The 0600 is a POSIX guarantee only. NTFS has no mode bits, so Windows reports 0666 here no
+  // matter what we ask for — the file is protected by the profile ACL instead (see client.mjs).
+  // Asserting it there would be asserting a fact about Windows, not about this code.
+  if (process.platform !== "win32") assert.equal(statSync(p).mode & 0o777, 0o600); // it holds a bearer
 });
 
 test("login falls back to PAGEVAULT_URL / PAGEVAULT_API_TOKEN when the flags are omitted", () => {
