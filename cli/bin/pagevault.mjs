@@ -10,7 +10,36 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
-import { api, apiText, requireConfig, saveLoginConfig, waitReadable, PvError } from "../lib/client.mjs";
+import { api, apiText, requireConfig, saveLoginConfig, waitReadable, isCrossDeployment, PvError } from "../lib/client.mjs";
+import { recordUrl } from "../lib/target.mjs";
+
+/**
+ * Refuse a write aimed at a deployment other than the one this install provisioned (#145).
+ *
+ * `sync-access` and `views --sync` are the only two commands that read `.pagevault.json` and write
+ * through `config.json`, so they are the only two that can act across deployments. `views --sync`
+ * is the dangerous one: it queries one deployment's Analytics Engine and POSTs the summary to
+ * another, where no document id matches — storing a near-empty summary that makes every document
+ * report a MEASURED zero over MCP. That is the exact lie `syncViews` refuses when it rejects
+ * `--portal`, arriving through a door nobody guarded.
+ *
+ * Interim. ADR-021 makes this unrepresentable; until then, stop and name both.
+ */
+function assertSameDeployment(ctx, cfg, command) {
+  // `recordUrl` is the one definition of "the URL a build record names" (ADR-021). Deriving it
+  // inline here is how the four commands ended up with four answers in the first place.
+  const provisioned = recordUrl(ctx);
+  if (!isCrossDeployment(provisioned, cfg.url)) return;
+  throw new PvError(
+    `${command} would write to a different deployment than this install provisioned.\n\n` +
+      `  provisioned (.pagevault.json)  ${provisioned}\n` +
+      `  logged in   (config.json)      ${cfg.url}\n\n` +
+      `Refusing: a cross-deployment sync writes a summary whose ids match nothing there, which\n` +
+      `reports a measured zero views for every document. Name the one you mean:\n\n` +
+      `  PAGEVAULT_URL=${provisioned} pagevault ${command}\n` +
+      `  pagevault login --url ${cfg.url} …   (if the login is the one you want)`,
+  );
+}
 import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "../lib/format.mjs";
 import { helpText, usageError } from "../lib/help.mjs";
 import { buildExport } from "../lib/export.mjs";
@@ -385,6 +414,8 @@ async function syncAccess(flags) {
   }
 
   const cfg = requireConfig();
+  const { loadContext } = await import("../lib/provision/context.mjs");
+  assertSameDeployment(loadContext(), cfg, "sync-access");
   const res = await api(cfg, "POST", `/access/sync${reap ? "?reap=true" : ""}`);
 
   if (flags.json) return out(JSON.stringify(res, null, 2));
@@ -726,6 +757,9 @@ async function syncViews(flags) {
   const { loadContext, loadCloudToken } = await import("../lib/provision/context.mjs");
   const ctx = loadContext();
   const cfg = requireConfig();
+  // Before spending a Cloudflare query: the account we are about to read and the deployment we are
+  // about to write to must be the same deployment.
+  assertSameDeployment(ctx, cfg, "views --sync");
 
   // 90 days, not the table's 30. "Have they ever opened it" is a lifetime question, and Analytics
   // Engine retains about three months — so a sync takes the whole window it can still see.
