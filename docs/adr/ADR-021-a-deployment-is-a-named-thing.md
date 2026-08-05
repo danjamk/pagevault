@@ -77,6 +77,22 @@ did not provision simply has no `accountId` — a fact about it, not an error st
 dissolves #144: `status` can say *"prod · connected · not provisioned from this machine"* because
 the model can finally express it.
 
+#### The Cloudflare credential does not move
+
+One exception, and it is not negotiable. `CLOUDFLARE_API_TOKEN` and `CF_RUNTIME_TOKEN` stay in
+`.env.local`, **per clone**, because that placement *is* the #38 safety property:
+
+> The prod credential is never on your laptop. A wrong-clone `make deploy` can't touch prod because
+> the machine simply doesn't hold the prod token.
+
+A global registry holding production's Cloudflare token would put it back on the laptop and undo
+the one guarantee that has been working. So the registry holds **url, bearer, and build metadata**;
+the credential that can create and destroy infrastructure stays where a wrong clone cannot reach
+it.
+
+That the bearer *does* move is the point of this ADR: the bearer was never covered by #38, and
+that gap is the bug.
+
 ### 2. Selection is by where you stand
 
 Resolution order, identical for every command and every front door:
@@ -114,6 +130,34 @@ Credentials stay in `~/.pagevault/deployments.json` at mode 0600, outside every 
 No bearer is ever written into a repository working tree — not even a gitignored one, because a
 gitignore is one `git add -f` or one careless archive away from being wrong.
 
+#### The reader discriminates on content, and keeps accepting the old shape
+
+`.pagevault.json` is not only written by humans. `deploy-prod.yml` **reconstructs it from a
+base64 GitHub secret** on every production deploy:
+
+```yaml
+- name: Restore .pagevault.json (prod intent)
+  run: printf '%s' "$PAGEVAULT_PROD_CONFIG" | base64 -d > .pagevault.json
+```
+
+So the file's build-record shape is baked into a secret and a workflow, and a reader that assumed
+the pointer shape would break production deploys with no local reproduction. The reader therefore
+discriminates on **content**:
+
+| The file contains             | Read as                                                               |
+| ----------------------------- | --------------------------------------------------------------------- |
+| `deployment: "<name>"`        | a pointer into the registry                                           |
+| `rung` / `accountId` / `host` | a build record — an implicit deployment, scoped to where it was found |
+
+CI needs no change, the secret stays valid, and an operator who never migrates keeps working
+indefinitely. Support for the build-record shape is permanent, not a deprecation window.
+
+This has a large consequence: because a build record found by CWD-ascent *is* a deployment, the
+selection rule in (2) works with **no new file and no migration**. Standing in a checkout resolves
+to what that checkout provisioned; standing anywhere else resolves to the global login. The
+registry becomes a convenience for a third deployment rather than a prerequisite for correct
+targeting.
+
 ### 4. Every command states its target, on stderr
 
 Before acting, every command prints the deployment it resolved and why:
@@ -144,6 +188,43 @@ sharing are unaffected.
 
 This is the narrow, declarative version of the guardrail: it is set once on production, it costs
 nothing on test, and it does not train anyone to hit `y` without reading.
+
+## Rollout
+
+The registry is the end state, not the first step. Because a build record found by CWD-ascent is
+already a deployment, correct targeting arrives before any file changes shape:
+
+| Phase | Contents                                                                                                              | Risk     |
+| ----- | --------------------------------------------------------------------------------------------------------------------- | -------- |
+| **1** | A reader that understands both shapes, CWD-ascent, one `resolveTarget()`. No file rewritten, no command changed.      | low      |
+| **2** | Commands use the resolver; each states its target on stderr; the interim #145 guard is deleted; `protected` lands.    | low      |
+| **3** | `deployments.json`, `pagevault use` / `deployments`, and an **opt-in** `migrate`. Only needed for a third deployment. | deferred |
+
+### Migrating, when it is finally run
+
+**Never merge diverging sources.** When `.pagevault.json` and `config.json` name different
+deployments — the normal state on a machine operating a CI-deployed production instance from a
+checkout — combining them produces a record holding production's url and bearer beside test's
+`kvId` and Access AUDs. `publish` would reach production while `destroy` targeted test's KV. So
+divergence produces **two** deployments and a message saying so, never one.
+
+**Names come from the hostname**, lowercased and verbatim. No label parsing: the registrable-domain
+problem is already open as #138, and a migration is the wrong place to meet it. `migrate` prints the
+`rename` commands so `test` and `prod` are one step away.
+
+**Write order matters, because `.pagevault.json` is the only copy of `kvId`, both AUDs and
+`groupId`** — lose it and a deployment can still serve but can no longer be torn down cleanly:
+
+1. copy `.pagevault.json` to `.pagevault.json.pre-adr021`, never removed automatically
+2. write `deployments.json`, fsync, and **read it back to verify**
+3. only then rewrite the marker
+
+A crash at any point leaves a working system: before (3) the original file is still authoritative,
+and the backup survives regardless.
+
+**Explicit, never automatic.** The `MIGRATIONS` machinery in `context.mjs` has never run in anger —
+`SCHEMA_VERSION` is still 1 and the array is empty. Its debut should not be silently rewriting the
+file that knows how to destroy infrastructure.
 
 ## Consequences
 

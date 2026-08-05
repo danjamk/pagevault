@@ -11,6 +11,7 @@ import { basename } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { api, apiText, requireConfig, saveLoginConfig, waitReadable, isCrossDeployment, PvError } from "../lib/client.mjs";
+import { recordUrl } from "../lib/target.mjs";
 
 /**
  * Refuse a write aimed at a deployment other than the one this install provisioned (#145).
@@ -25,7 +26,9 @@ import { api, apiText, requireConfig, saveLoginConfig, waitReadable, isCrossDepl
  * Interim. ADR-021 makes this unrepresentable; until then, stop and name both.
  */
 function assertSameDeployment(ctx, cfg, command) {
-  const provisioned = (ctx.deployedUrl ?? (ctx.host ? `https://${ctx.host}` : "")).replace(/\/+$/, "");
+  // `recordUrl` is the one definition of "the URL a build record names" (ADR-021). Deriving it
+  // inline here is how the four commands ended up with four answers in the first place.
+  const provisioned = recordUrl(ctx);
   if (!isCrossDeployment(provisioned, cfg.url)) return;
   throw new PvError(
     `${command} would write to a different deployment than this install provisioned.\n\n` +
