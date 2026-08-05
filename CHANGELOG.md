@@ -7,6 +7,35 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **A cross-deployment sync is refused instead of silently performed.** `sync-access` and
+  `views --sync` are the only commands that read `.pagevault.json` and write through
+  `config.json`, so they are the only two that can act across deployments — and on a machine that
+  operates a CI-deployed production instance from a repo checkout, those two files routinely name
+  different deployments. `views --sync` in that position queried one deployment's Analytics Engine
+  and wrote the summary to another, where no document id matches: a near-empty summary that makes
+  every document report a **measured zero** views over MCP. That is the same lie `syncViews`
+  already refuses when it rejects `--portal`. Both commands now stop and name both deployments.
+  ([#145](../../issues/145))
+
+- **`pagevault verify` no longer prints a green verdict over failed checks.** "✓ Deployment
+  verified." was emitted mid-run, before the MCP and publish sections had executed — so a run whose
+  root 404'd and whose `tools/list` returned nothing printed it anyway, then failed. The exit code
+  and `--json` were correct throughout; only the sentence a human reads was wrong, which is the one
+  that gets believed. The verdict is now computed inside `finish()`, from the same value that sets
+  the exit code, and printed last. Counted failures render `✗` rather than sharing `!` with
+  advisory notes. ([#146](../../issues/146))
+
+### Documentation
+- **[ADR-021](docs/adr/ADR-021-a-deployment-is-a-named-thing.md) — a deployment is a named thing,
+  selected by where you stand.** Two files describe a deployment and both independently answered
+  "which one am I acting on", so four commands gave four different answers. The #38 credential
+  model — the prod Cloudflare token never lives on your laptop — still holds for everything needing
+  Cloudflare access, but it never covered the *bearer*, and the bearer is what the document surface
+  uses. The ADR makes a deployment a named record, selected by an explicit flag, the environment,
+  the nearest project marker, or the current default. The guard above is explicitly interim: the
+  ADR removes the ambiguity rather than detecting it.
+
 ## [0.28.0] — 2026-08-04
 
 The npm package is the product, and it did not install on Windows.

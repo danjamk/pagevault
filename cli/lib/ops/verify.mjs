@@ -17,7 +17,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { Resolver, lookup } from "node:dns/promises";
 import { platform } from "node:process";
-import { c, ok, warn, die, loadContext, fromEnv, banner, mcpCall, runHint, EXPECTED_MCP_TOOLS } from "../provision/context.mjs";
+import { c, ok, die, loadContext, fromEnv, banner, mcpCall, runHint, EXPECTED_MCP_TOOLS } from "../provision/context.mjs";
 // One source of truth for the sample's title: `restore` keys its "this is disposable" check on it.
 import { SAMPLE_TITLE } from "./restore-plan.mjs";
 import { loadConfig } from "../client.mjs";
@@ -129,17 +129,36 @@ export async function verifyCmd({ json = false } = {}) {
   const tick = (s) => {
     if (!json) process.stdout.write(s);
   };
-  const sok = (s) => {
-    if (!json) ok(s);
-  };
-  const swarn = (s) => {
-    if (!json) warn(s);
+  // A COUNTED failure — one that sets the verdict, so it gets `✗`. Every failure in this command
+  // is counted; `!` used to be shared between these and mere notes, which is what let a failing run
+  // read as a passing one with a remark attached. If an advisory warning is ever needed again
+  // (`record(..., advisory: true)` supports one), it gets its own helper then — and its own glyph.
+  const sfail = (s) => {
+    if (!json) console.log(`${c.red("✗")} ${s}`);
   };
 
   // Every exit — pass or fail — funnels here, so the JSON verdict and the exit code stay in lockstep
   // with the human path.
   const finish = (passed, extra = {}) => {
-    if (json) process.stdout.write(`${JSON.stringify({ ok: passed, ...extra, checks }, null, 2)}\n`);
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ ok: passed, ...extra, checks }, null, 2)}\n`);
+    } else {
+      // The human verdict is computed HERE and printed last, from the same value that sets the exit
+      // code. It used to be a `sok("Deployment verified.")` sitting mid-run, before the MCP and
+      // publish sections had executed — so a run whose root 404'd and whose tools/list returned
+      // nothing still printed a green line, then failed. The exit code and --json were right the
+      // whole time; only the sentence a human reads was wrong, which is the one that gets believed.
+      const failed = checks.filter((ck) => !ck.advisory && !ck.ok);
+      say();
+      if (passed) {
+        ok("Deployment verified.");
+      } else {
+        // console.log, not console.error: verify's whole narrative is one stream, so a redirect
+        // captures the run and its verdict together. The exit code is what a script reads.
+        console.log(`${c.red("✗")} Verification failed — ${failed.length || 1} check${failed.length === 1 ? "" : "s"} did not pass.`);
+        for (const f of failed) console.log(`     ${c.dim("·")} ${f.name}${f.detail ? ` ${c.dim(`— ${f.detail}`)}` : ""}`);
+      }
+    }
     process.exit(passed ? 0 : 1);
   };
 
@@ -242,18 +261,21 @@ export async function verifyCmd({ json = false } = {}) {
     if (rung >= 3) {
       const rootOk = status === 302 && loc.endsWith("/admin");
       record("root", rootOk, `${status}${loc ? ` → ${loc}` : ""}`);
-      rootOk ? say(`  ${c.green("✓")} Root redirects to /admin`) : say(`  ${c.yellow("!")} Root returned ${status}${loc ? ` → ${loc}` : ""} (expected 302 → /admin when Secured)`);
+      // `✗`, not `!` — this is a counted check, so its glyph must match the verdict it produces.
+      rootOk ? say(`  ${c.green("✓")} Root redirects to /admin`) : say(`  ${c.red("✗")} Root returned ${status}${loc ? ` → ${loc}` : ""} (expected 302 → /admin when Secured)`);
     } else {
       record("root", status === 200, String(status));
       status === 200
         ? say(`  ${c.green("✓")} Root serves the landing page`)
-        : say(`  ${c.yellow("!")} Root returned ${status} (expected 200 landing on a Public deployment)`);
+        : say(`  ${c.red("✗")} Root returned ${status} (expected 200 landing on a Public deployment)`);
     }
   }
 
   say();
-  sok("Deployment verified.");
 
+  // No verdict here — the MCP checks and the write path below have not run yet, and `finish` owns
+  // the verdict so it cannot disagree with the exit code.
+  //
   // Report the deployed build (ADR-010) — confirms the version bake landed.
   {
     const { res } = await get("/health");
@@ -298,7 +320,7 @@ export async function verifyCmd({ json = false } = {}) {
     });
     if (!r.ok || r.result?.serverInfo?.name !== "pagevault") {
       record("mcp_initialize", false, `HTTP ${r.status}`);
-      swarn(`MCP initialize failed (HTTP ${r.status})${r.error ? ` — ${r.error.message ?? JSON.stringify(r.error)}` : ""}`);
+      sfail(`MCP initialize failed (HTTP ${r.status})${r.error ? ` — ${r.error.message ?? JSON.stringify(r.error)}` : ""}`);
       return finish(false, { reason: "mcp_initialize" });
     }
     record("mcp_initialize", true);
@@ -311,7 +333,7 @@ export async function verifyCmd({ json = false } = {}) {
     const missing = EXPECTED_MCP_TOOLS.filter((t) => !names.includes(t));
     if (!r.ok || missing.length) {
       record("mcp_tools", false, missing.length ? `missing: ${missing.join(", ")}` : `HTTP ${r.status}`);
-      swarn(`tools/list is wrong (HTTP ${r.status}) — ${missing.length ? `missing: ${missing.join(", ")}` : "request failed"}`);
+      sfail(`tools/list is wrong (HTTP ${r.status}) — ${missing.length ? `missing: ${missing.join(", ")}` : "request failed"}`);
       return finish(false, { reason: "mcp_tools", missing });
     }
     record("mcp_tools", true, `${names.length} tools`);
@@ -348,7 +370,7 @@ export async function verifyCmd({ json = false } = {}) {
     const id = idOf(pub);
     if (!pub.ok || pub.result?.isError || !id) {
       record("mcp_roundtrip", false, "publish failed");
-      swarn(`publish_document (MCP) failed (HTTP ${pub.status})${pub.result?.isError ? " — the tool returned an error" : ""}`);
+      sfail(`publish_document (MCP) failed (HTTP ${pub.status})${pub.result?.isError ? " — the tool returned an error" : ""}`);
       return finish(false, { reason: "mcp_publish" });
     }
 
@@ -377,7 +399,7 @@ export async function verifyCmd({ json = false } = {}) {
     if (!renOk || !readOk || !revOk) {
       const state = `rename=${renOk ? "ok" : "FAIL"} read=${readOk ? "ok" : "FAIL"} revoke=${revOk ? "ok" : "FAIL"}`;
       record("mcp_roundtrip", false, state);
-      swarn(
+      sfail(
         `MCP round-trip incomplete (${state})` +
           // Name BOTH filenames: which one survives depends on how far the rename got, and the
           // operator should not have to reason about that to find the draft and delete it.
@@ -439,13 +461,13 @@ export async function verifyCmd({ json = false } = {}) {
 
   if (result.status === 401 || result.status === 403) {
     record("publish", false, `HTTP ${result.status}`);
-    swarn(`Publish was rejected (HTTP ${result.status}) — the bearer token doesn't match the Worker's.`);
+    sfail(`Publish was rejected (HTTP ${result.status}) — the bearer token doesn't match the Worker's.`);
     say(`  ${c.dim("If you re-deployed into an existing Worker, re-run the deploy to reset the secret.")}\n`);
     return finish(false, { reason: "publish_auth" });
   }
   if (result.status !== 200 && result.status !== 201) {
     record("publish", false, `HTTP ${result.status}`);
-    swarn(`Publish failed (HTTP ${result.status}): ${result.body?.message ?? JSON.stringify(result.body)}`);
+    sfail(`Publish failed (HTTP ${result.status}): ${result.body?.message ?? JSON.stringify(result.body)}`);
     return finish(false, { reason: "publish_failed" });
   }
 

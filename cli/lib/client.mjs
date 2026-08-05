@@ -66,6 +66,41 @@ export function loadConfig(env = process.env) {
   };
 }
 
+/**
+ * Do two URLs name the same deployment? Trailing slashes and host case must never be what decides
+ * a cross-deployment write, so normalize both before comparing.
+ */
+export function sameDeployment(a, b) {
+  const norm = (u) => {
+    const s = String(u ?? "").trim().replace(/\/+$/, "");
+    if (!s) return "";
+    try {
+      const parsed = new URL(s);
+      return `${parsed.protocol}//${parsed.host.toLowerCase()}${parsed.pathname.replace(/\/+$/, "")}`;
+    } catch {
+      return s.toLowerCase(); // not a URL — compare as written rather than pretend it matches
+    }
+  };
+  return norm(a) === norm(b);
+}
+
+/**
+ * Is this about to write to a deployment other than the one this install provisioned? (#145)
+ *
+ * Two files describe a deployment and can name different ones: `.pagevault.json` records what was
+ * provisioned here, `config.json` records what the CLI is logged in to. A repo checkout plus a
+ * global `pagevault login` is the normal state on a machine operating a CI-deployed production
+ * instance, so disagreement is expected — reads survive it, writes must not.
+ *
+ * Returns false when either side is silent: one source naming a deployment is not a conflict.
+ *
+ * Interim guard. ADR-021 removes the ambiguity rather than detecting it; this exists until then.
+ */
+export function isCrossDeployment(provisionedUrl, targetUrl) {
+  if (!provisionedUrl || !targetUrl) return false;
+  return !sameDeployment(provisionedUrl, targetUrl);
+}
+
 /** Config that is actually usable, or a clear error telling you exactly how to set it. */
 export function requireConfig(env = process.env) {
   const cfg = loadConfig(env);
