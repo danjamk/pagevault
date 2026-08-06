@@ -80,7 +80,7 @@ Check automatically, and report each as pass/fail:
   `/health` reports `<version>+<sha>`, `/mcp` answers `initialize` + `tools/list`, and a
   publish → read → revoke round-trip through the MCP tools.
 - `health --json` version matches `node -p "require('./package.json').version"` plus the short SHA.
-- `seed-live --json` returns `ok: true` with 7 documents across 2 portals.
+- `seed-live --json` returns `ok: true` with 8 documents across 3 portals (`acme`, `globex`, `notes`).
 - Every `/p/` URL in the seed output returns **200 with no Authorization header**. Fetch them.
 - On rung 1 there is no Access, so a plain publish is public by nature (#111) — every document
   should come back with a `/p/` link, not a `/v/` one.
@@ -193,9 +193,10 @@ consumed seats are deliberately left alone.
   calling anything a bug; `publish` already polls via `waitReadable`.
 - **KV writes are capped at 1000/day.** One seed run is ~20 writes, so three stages plus retries is
   fine — but do not loop it.
-- **After a rung-3 `destroy`, `.pagevault.json` keeps a stale `kvId` and `deployedUrl`.** Rungs 1
-  and 2 get those stripped; rung 3 does not (`cli/lib/ops/destroy.mjs`). The next deploy reconciles
-  the dead KV id, so it self-heals — but `status` will report a URL that no longer serves.
+- **`destroy` strips the deployment fields at every rung.** It used to leave a stale `kvId` and
+  `deployedUrl` behind at rung 3; verified during the 0.28.0 run that it no longer does — `kvId`,
+  `oauthKvId`, both AUDs, `groupId` and `deployedUrl` are all cleared, leaving only the intent
+  (`rung`, `ownerEmail`, `host`, `accountId`).
 - **The Worker name is hardcoded `pagevault`**, as are the KV titles. One deployment per account.
 - **`destroy` is the only command that requires a TTY.** Everything else takes `--yes`.
 

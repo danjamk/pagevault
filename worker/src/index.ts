@@ -5,7 +5,7 @@ import { handleConsole } from "./console.js";
 import type { Env } from "./env.js";
 import { handleMcp, mcpApiHandler, noteMcpOrigin } from "./mcp.js";
 import { handleAuthorize } from "./oauth.js";
-import { favicon, rootLanding } from "./pages.js";
+import { favicon, rootLanding, linkUnavailable } from "./pages.js";
 import { handlePortalRoute, handlePublicPortalRoute } from "./portal.js";
 import { getMeta, getPublicTokenTarget } from "./store.js";
 import { fingerprint, log } from "./log.js";
@@ -225,4 +225,7 @@ async function handlePublicToken(env: Env, token: string): Promise<Response> {
   });
 }
 
-const notFound = () => new Response("Not found", { status: 404 });
+// The same page a portal miss serves (#148). A capability link that was rotated, revoked, or
+// pointed at an owner-only draft is indistinguishable from one that never existed — and it must
+// stay that way, so both go through `linkUnavailable`.
+const notFound = () => linkUnavailable();

@@ -1,4 +1,5 @@
 import { canView, canViewPortal, emailsMatch } from "./access.js";
+import { esc, linkUnavailable, page } from "./pages.js";
 import type { ViewSurface } from "./analytics.js";
 import { identify } from "./auth.js";
 import { documentPath, portalPath } from "./documents.js";
@@ -509,7 +510,7 @@ function groupByMonth(docs: DocSummary[]): [string, DocSummary[]][] {
 function notFound(env?: Env, email?: string | null, slug?: string): Response {
   const isOwner = env && email && emailsMatch(email, env.OWNER_EMAIL);
 
-  if (!isOwner || !slug) return new Response("Not found", { status: 404 });
+  if (!isOwner || !slug) return linkUnavailable();
 
   return page(
     404,
@@ -561,56 +562,15 @@ const noPortalsHere = (): Response =>
     404,
     "Nothing to see here",
     "This PageVault deployment publishes public links only — it has no login-gated portals.",
-    `<p>Portals — client collections behind a Cloudflare Access login — are a rung-3 feature, and
-this deployment is running at rung 1. A <code>/v/</code> link has no login wall here to check you
-against.</p>
+    `<p>Portals — client collections behind a login — come with the <strong>Secured</strong> tier.
+This deployment is <strong>Public</strong>, so a <code>/v/</code> link has no login wall here to
+check you against.</p>
 <ul>
-  <li>Sent a document? Ask for its public <code>/p/</code> link instead.</li>
-  <li>The operator? <code>pagevault publish</code> already hands back a public link on this
-      deployment. To gate documents behind email, add portals by re-running
-      <code>pagevault init</code> and choosing rung 3.</li>
+  <li>Sent a document? Ask whoever sent it for the link again — on this deployment they share a
+      public one that opens without signing in.</li>
+  <li>The operator? <code>pagevault publish</code> already hands back a public link here. To gate
+      documents behind named people, re-run <code>pagevault init</code> and choose Secured.</li>
 </ul>`,
   );
 
-/** A plain, honest error page. No branding, no cleverness. */
-function page(status: number, title: string, lead: string, detail: string): Response {
-  return new Response(
-    `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)}</title>
-<style>
-${THEME}
-  body { margin:0; padding:3rem 1.25rem; font:16px/1.6 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;
-         color:var(--ink); background:var(--paper); }
-  .wrap { max-width:40rem; margin:0 auto; }
-  h1 { font-size:1.5rem; margin:0 0 .5rem; }
-  .lead { color:var(--muted); }
-  code { background:var(--code-bg); padding:.1rem .3rem; border-radius:3px; font-size:.9em; }
-  pre { background:var(--code-bg); color:var(--ink); border:1px solid var(--border); padding:1rem;
-        border-radius:6px; overflow-x:auto; font-size:.8125rem; line-height:1.5; }
-  pre code { background:none; padding:0; color:inherit; }
-  a { color:var(--accent); }
-  ul { padding-left:1.2rem; } li { margin:.4rem 0; }
-</style></head><body><div class="wrap">
-<h1>${esc(title)}</h1>
-<p class="lead">${lead}</p>
-${detail}
-</div></body></html>`,
-    {
-      status,
-      headers: {
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "private, no-store",
-        "X-Robots-Tag": "noindex, nofollow",
-      },
-    },
-  );
-}
 
-const esc = (s: string): string =>
-  s
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");

@@ -7,6 +7,23 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **A link that does not resolve now serves a real page instead of the word "Not found".** A client
+  following a link to an owner-only draft — or to a revoked document, a rotated `/p/` token, or a
+  renamed URL past its forwarding year — got unstyled plain text. The 404 itself was correct and
+  stays: a 403 for "exists but not yours" would let anyone map a deployment one guessed URL at a
+  time. What changes is that the page now looks like the rest of the product **and says the answer
+  is deliberately the same either way**, so a legitimate visitor does not conclude the document was
+  deleted when they were simply never given it. Pinned by tests asserting the responses are
+  byte-identical, because "make this error more helpful" is precisely the instinct that would turn
+  the page back into an oracle. ([#148](../../issues/148))
+
+- **The Public-tier `/v/` page stopped talking about "rungs".** It told document recipients that
+  portals are "a rung-3 feature" and that "this deployment is running at rung 1" — internal
+  vocabulary, on a page whose own copy addresses someone who was sent a link and has never heard of
+  PageVault. It now says Public and Secured, which is what ADR-018 made the user-facing tiers, and a
+  test fails the build if the word returns. ([#149](../../issues/149))
+
 ### Changed
 - **Every operator command resolves the same way, and says which deployment it chose.**
   `--url` → `PAGEVAULT_URL` → the nearest `.pagevault.json` walking up from the working directory →

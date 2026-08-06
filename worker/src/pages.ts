@@ -112,3 +112,69 @@ export function consoleForbidden(env: Env): Response {
        <p class="foot"><a href="${PROJECT_URL}">How to enable portals</a></p>`;
   return shell("PageVault — console", inner, 403);
 }
+/** A plain, honest error page. No branding, no cleverness. */
+export function page(status: number, title: string, lead: string, detail: string): Response {
+  return new Response(
+    `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(title)}</title>
+<style>
+${THEME}
+  body { margin:0; padding:3rem 1.25rem; font:16px/1.6 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+         color:var(--ink); background:var(--paper); }
+  .wrap { max-width:40rem; margin:0 auto; }
+  h1 { font-size:1.5rem; margin:0 0 .5rem; }
+  .lead { color:var(--muted); }
+  code { background:var(--code-bg); padding:.1rem .3rem; border-radius:3px; font-size:.9em; }
+  pre { background:var(--code-bg); color:var(--ink); border:1px solid var(--border); padding:1rem;
+        border-radius:6px; overflow-x:auto; font-size:.8125rem; line-height:1.5; }
+  pre code { background:none; padding:0; color:inherit; }
+  a { color:var(--accent); }
+  ul { padding-left:1.2rem; } li { margin:.4rem 0; }
+</style></head><body><div class="wrap">
+<h1>${esc(title)}</h1>
+<p class="lead">${lead}</p>
+${detail}
+</div></body></html>`,
+    {
+      status,
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "private, no-store",
+        "X-Robots-Tag": "noindex, nofollow",
+      },
+    },
+  );
+}
+
+export const esc = (s: string): string =>
+  s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+
+/**
+ * The one answer a visitor gets for a link that does not resolve — whatever the reason.
+ *
+ * Revoked, rotated, renamed past its forwarding year, deleted, an owner-only draft, a portal
+ * they are not a member of, or a slug that never existed: all of it, identically. That is not
+ * politeness, it is the security property. A 403 for "exists but not yours" and a 404 for
+ * "no such thing" would let anyone map a deployment one guessed URL at a time.
+ *
+ * 🔴 The copy must never branch on the cause. "Make the error more helpful" is exactly the
+ * instinct that turns this page back into an oracle. The honest thing — and the thing that
+ * stops a legitimate visitor concluding the document was deleted when they simply were not
+ * given it — is to say that the answer is deliberately the same either way.
+ */
+export function linkUnavailable(): Response {
+  return page(
+    404,
+    "Not available",
+    "This link may have been revoked or replaced, or it may not be shared with you.",
+    `<p>PageVault gives the same answer either way, so a link can never be used to discover what
+exists on a deployment. That means this page is not a statement that the document is gone.</p>
+<p>If someone sent you this, ask them for a current link.</p>`,
+  );
+}
