@@ -18,7 +18,7 @@ import {
 import { provisionAccess } from "./provision.mjs";
 import { writeTier0Config } from "./tier0.mjs";
 import { saveLoginConfig, loadConfig, sameDeployment, CONFIG_PATH } from "../client.mjs";
-import { findByUrl, loadRegistry } from "../registry.mjs";
+import { findByUrl, loadRegistry, saveRegistry, shouldAdoptCurrent, upsert } from "../registry.mjs";
 
 const CONFIG_OUT = generatedConfigPath();
 
@@ -271,13 +271,42 @@ export async function deploy(opts = {}) {
   }
 
   // Installed (ADR-014): leave the operator ready to publish with no second `login`. We know the URL
-  // we deployed to and the bearer we just set, so write the CLI's login config (~/.pagevault/config.json)
-  // now. A repo run uses .env.local + make and shouldn't have that file silently repointed at its last
-  // deploy, so this is installed-only. Skipped when the bearer plaintext isn't in hand (a `skip` on a
-  // machine that never held it — e.g. redeploying someone else's Worker); `pagevault login` covers that.
+  // we deployed to and the bearer we just set, so record it now. A repo run uses .env.local + make and
+  // shouldn't have its login silently repointed at its last deploy, so this is installed-only. Skipped
+  // when the bearer plaintext isn't in hand (a `skip` on a machine that never held it — e.g.
+  // redeploying someone else's Worker); `pagevault login` covers that.
+  //
+  // 🔴 This used to write config.json unconditionally, which was right when one machine held one
+  // deployment and wrong the moment it could hold two: `pagevault upgrade` on test overwrote a login
+  // describing production (#171). Where production's bearer lived only in that file, the credential
+  // was destroyed rather than shadowed.
   if (!RUNNING_FROM_REPO && url && bearerValue) {
-    const path = saveLoginConfig({ url, token: bearerValue });
-    ok(`Saved ${path} — ${c.bold("pagevault publish")} is ready, no ${c.bold("login")} step needed.`);
+    const registry = loadRegistry();
+    const known = findByUrl(registry, url);
+
+    if (known) {
+      // A deployment we already know by name. Its bearer belongs on ITS entry — never in the global
+      // slot, which may be describing something else entirely.
+      const file = saveRegistry(upsert(registry, known.name, { url, token: bearerValue }), process.env);
+      ok(`Updated ${c.bold(known.name)} in ${file} — the bearer travels with the deployment.`);
+      if (registry.current && registry.current !== known.name) {
+        console.log(`  ${c.dim(`Still defaulting to ${registry.current} elsewhere. Switch with:`)} ${c.bold(`pagevault use ${known.name}`)}`);
+      }
+    } else if (shouldAdoptCurrent(registry, url, loadConfig({}).url)) {
+      // Nothing else claims the default, or the login already describes this deployment. This is the
+      // ordinary single-deployment install, and it behaves exactly as it always has.
+      const path = saveLoginConfig({ url, token: bearerValue });
+      ok(`Saved ${path} — ${c.bold("pagevault publish")} is ready, no ${c.bold("login")} step needed.`);
+    } else {
+      // Something else is the default and this deployment is not it. Refuse to move it silently; say
+      // what would make this deployment addressable instead.
+      console.log();
+      warn(`Deployed, but ${c.bold("pagevault")}'s document commands still default elsewhere.`);
+      console.log(`  ${c.dim("just deployed")}  ${c.bold(url)}`);
+      console.log(`  ${c.dim("default      ")}  ${loadConfig({}).url || registry?.current || c.dim("—")}`);
+      console.log(`\n  ${c.dim("Not repointing it for you — that is how a deploy loses another deployment's bearer.")}`);
+      console.log(`     ${c.bold(`pagevault login --as <name> --url ${url} --token $PAGEVAULT_API_TOKEN`)}`);
+    }
   } else if (RUNNING_FROM_REPO && url) {
     // We deliberately do NOT repoint a repo run's login config (see above).
     //

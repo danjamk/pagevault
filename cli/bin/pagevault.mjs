@@ -12,7 +12,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { api, apiText, loadConfig, sameDeployment, saveLoginConfig, waitReadable, PvError } from "../lib/client.mjs";
 import { resolveTarget, describeTarget, resolveBearer } from "../lib/target.mjs";
-import { emptyRegistry, findByName, findByUrl, listDeployments, loadRegistry, saveRegistry, upsert } from "../lib/registry.mjs";
+import { emptyRegistry, findByName, findByUrl, listDeployments, loadRegistry, saveRegistry, shouldAdoptCurrent, upsert } from "../lib/registry.mjs";
 
 import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "../lib/format.mjs";
 import { helpText, usageError } from "../lib/help.mjs";
@@ -110,18 +110,6 @@ function announceTarget(target, registry) {
 }
 
 /**
- * The two commands that read a build record and write through a bearer, and so are the only ones
- * that can act ACROSS deployments. `views --sync` is the dangerous one: it queries one deployment's
- * Analytics Engine and POSTs the summary to another, where no document id matches — storing a
- * near-empty summary that makes every document report a MEASURED zero over MCP. That is the exact
- * lie `syncViews` refuses when it rejects `--portal`, arriving through a door nobody guarded.
- *
- * The guard asks the precise question rather than the approximate one it used to: is the deployment
- * whose account we are about to read the same one we are about to write to? Phase 2 compared the
- * marker against the login config, which was a proxy for that and now reports a conflict in cases
- * the registry has already settled correctly.
- */
-/**
  * A deployment may be marked `"protected": true` in the registry. On one, the commands that DESTROY
  * — `rm`, `revoke`, `rotate` — require an explicit `--yes`. Publishing, editing and sharing are
  * untouched (ADR-021 section 6).
@@ -143,6 +131,18 @@ function requireYesOnProtected(cfg, flags, what) {
   );
 }
 
+/**
+ * The two commands that read a build record and write through a bearer, and so are the only ones
+ * that can act ACROSS deployments. `views --sync` is the dangerous one: it queries one deployment's
+ * Analytics Engine and POSTs the summary to another, where no document id matches — storing a
+ * near-empty summary that makes every document report a MEASURED zero over MCP. That is the exact
+ * lie `syncViews` refuses when it rejects `--portal`, arriving through a door nobody guarded.
+ *
+ * The guard asks the precise question rather than the approximate one it used to: is the deployment
+ * whose account we are about to read the same one we are about to write to? Phase 2 compared the
+ * marker against the login config, which was a proxy for that and now reports a conflict in cases
+ * the registry has already settled correctly.
+ */
 function resolveWriteTarget(flags, command) {
   const { url, token, target } = commandTarget(flags);
   if (target.markerUrl && !sameDeployment(url, target.markerUrl)) {
@@ -766,8 +766,7 @@ async function login(flags) {
     // login that describes a DIFFERENT deployment. Registering prod-under-a-name should inherit the
     // selection; registering a second, unrelated deployment should not silently repoint everything
     // that runs outside a checkout. When we decline, `use` is one word away and we say so.
-    const configUrl = loadConfig().url;
-    const adopt = !before.current && (!configUrl || sameDeployment(configUrl, url));
+    const adopt = shouldAdoptCurrent(before, url, loadConfig().url);
     if (adopt) next = { ...next, current: name };
 
     const registryFile = saveRegistry(next, process.env);
