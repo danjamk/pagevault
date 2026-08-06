@@ -165,6 +165,18 @@ describe("rung 1 (no Access) — /v/ is honest, not 'misconfigured' (#111)", () 
     expect(body).toContain("public links only");
   });
 
+  it("🔴 speaks Public/Secured, never 'rung' — a document recipient reads this page (#149)", async () => {
+    // ADR-018 made Public and Secured the user-facing tiers; rungs 1/2/3 are internal. This page
+    // said "a rung-3 feature", "running at rung 1" and "choosing rung 3" to someone whose own copy
+    // addresses them as a person who was sent a link and has never heard of PageVault.
+    const body = await (
+      await handlePortalRoute(new Request(`${HOST}/v/anything`), noAccessEnv, "anything", null)
+    ).text();
+    expect(body).not.toMatch(/\brung\b/i);
+    expect(body).toContain("Secured");
+    expect(body).toContain("Public");
+  });
+
   it("still shows misconfigured (500) when Access IS configured but no JWT arrives", async () => {
     const res = await handlePortalRoute(new Request(`${HOST}/v/anything`), env, "anything", null);
     expect(res.status).toBe(500);
@@ -306,13 +318,21 @@ describe("/v/{slug} — the portal index", () => {
     expect(body).toContain("/api/portals"); // and how to fix it
   });
 
-  it("🔴 gives a STRANGER a bare 404 — no hint that the portal exists or does not", async () => {
-    const res = await SELF.fetch(`${HOST}/v/nosuchclient`, { headers: await as(STRANGER) });
-    const body = await res.text();
+  it("🔴 gives a STRANGER the SAME 404 whether the portal exists or not", async () => {
+    // The page is styled now (#148) rather than bare text — but the property that matters was
+    // never the plainness, it is that the answer cannot be used to tell the two cases apart.
+    // Asserting byte equality pins that directly: a future "let's make this error more helpful"
+    // has to fail this test before it can turn the page back into an oracle.
+    const missing = await SELF.fetch(`${HOST}/v/nosuchclient`, { headers: await as(STRANGER) });
+    const real = await SELF.fetch(`${HOST}/v/realplus`, { headers: await as(STRANGER) });
 
-    expect(res.status).toBe(404);
-    expect(body).toBe("Not found");
-    expect(body).not.toContain("nosuchclient");
+    expect(missing.status).toBe(404);
+    expect(real.status).toBe(404);
+
+    const [missingBody, realBody] = [await missing.text(), await real.text()];
+    expect(missingBody).toBe(realBody);
+    expect(missingBody).not.toContain("nosuchclient");
+    expect(missingBody).not.toContain("realplus");
   });
 
   it("⭐ renders with ZERO KV reads — the index runs off key metadata alone", async () => {
@@ -360,6 +380,32 @@ describe("/v/{slug}/{id} — the document", () => {
     expect(body).toContain("<iframe");
     expect(body).toContain("Architecture Review");
     expect(body).not.toContain(HTML); // the artifact is framed, never inlined
+  });
+
+  it("🔴 a denied document is byte-identical to one that never existed (#148)", async () => {
+    // The case that prompted this: a client following a link to an owner-only draft. They are a
+    // legitimate member of the portal, so they clear Access — and then must not be able to tell
+    // "this draft is not for you" from "no such document". Same page, same bytes, same status.
+    //
+    // Found by dogfooding: it used to be an unstyled `Not found` string, which was secure and
+    // read like a crash. Styling it is only safe while the two cases stay indistinguishable.
+    const denied = await SELF.fetch(`${HOST}/v/realplus/ddd111111111`, { headers: await as(REALPLUS_CTO) });
+    const absent = await SELF.fetch(`${HOST}/v/realplus/zzz999999999`, { headers: await as(REALPLUS_CTO) });
+
+    expect(denied.status).toBe(404);
+    expect(absent.status).toBe(404);
+    expect(await denied.text()).toBe(await absent.text());
+  });
+
+  it("the unavailable page never names what it is hiding", async () => {
+    const body = await (
+      await SELF.fetch(`${HOST}/v/realplus/ddd111111111`, { headers: await as(REALPLUS_CTO) })
+    ).text();
+    expect(body).not.toContain("Secret Draft");
+    expect(body).not.toContain("ddd111111111");
+    // And it says the answer is deliberate, so a legitimate visitor does not conclude the
+    // document was deleted when they simply were not given it.
+    expect(body).toContain("same answer either way");
   });
 
   it("links back to the collection", async () => {
