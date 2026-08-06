@@ -57,12 +57,56 @@ rotates a live one.
 Redeploy the Worker bundle that shipped with your installed package — after `npm update -g pagevault`.
 Keeps your KV, config, and secrets.
 
-### `pagevault login [--url <url>] [--token <token>]`
+### `pagevault login [--url <url>] [--token <token>] [--as <name>]`
 Point the CLI at a deployment: writes `~/.pagevault/config.json` (mode `600` — it holds a bearer) and
 verifies the connection. The flags are optional — it falls back to `PAGEVAULT_URL` /
 `PAGEVAULT_API_TOKEN` from the environment, so `pagevault login` alone persists the config you already
 have exported. `init` already does this for the deployment it stood up; reach for `login` only for a
 **second machine**, or **someone else's** deployment.
+
+`--as <name>` registers the deployment by name in `~/.pagevault/deployments.json` instead, so one
+machine can hold several. Without it, nothing changes: one deployment, one `config.json`.
+
+---
+
+## Several deployments on one machine
+
+One operator, more than one deployment — a production instance deployed by CI and a test one you
+deploy from a checkout. Each named deployment carries **its own bearer**, so a command can never pair
+one deployment's URL with another's credential.
+
+`CLOUDFLARE_API_TOKEN` is deliberately **not** in the registry. It stays in per-clone `.env.local`,
+because that placement is what keeps the production credential off your laptop entirely — a
+wrong-clone `make deploy` cannot touch production by construction rather than by discipline.
+
+### `pagevault deployments [--json]`
+Everything this machine can reach, with `*` marking the default. The login config is listed too, as
+the implicit deployment it has always been.
+
+`PROVISIONED` means the build record is on **this** machine, so `upgrade`, `destroy` and `backup` can
+run. Its absence is the normal state for a CI-deployed instance — a fact about the deployment, not a
+fault.
+
+### `pagevault use <name>`
+Make a registered deployment the default. Writes the registry and nothing else; no file in a working
+tree is touched, and no bearer is ever written into a repository.
+
+### Which deployment a command acts on
+
+| Rung | Source |
+|---|---|
+| 1 | `--deployment <name>` |
+| 2 | `PAGEVAULT_DEPLOYMENT` (direnv, CI, a one-off export) |
+| 3 | the checkout you are standing in — `.pagevault.json`, found by walking up |
+| 4 | the default, `*` in `deployments`, set by `use` |
+| 5 | the login config |
+
+Rung 3 is the guardrail: inside a checkout you get that checkout's deployment whether or not you
+remember to say so, the same way `git` and `npm` find theirs. Every command prints which one it chose
+and why — on stderr, so `pagevault publish report.html | pbcopy` still carries only the URL.
+
+A deployment may be marked `"protected": true` in the registry. On a protected deployment the
+destructive document commands — `rm`, `revoke`, `rotate` — require an explicit `--yes`.
 
 ---
 
