@@ -7,6 +7,11 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.31.0] — 2026-08-06
+
+One machine, several deployments — and a command can no longer act on one while telling you it
+acted on another.
+
 ### Added
 - **Named deployments — one machine can hold several, and each carries its own bearer.**
   `~/.pagevault/deployments.json` (mode 600) records a url + bearer per name.
@@ -1306,7 +1311,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/danjamk/pagevault/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/danjamk/pagevault/compare/v0.29.1...v0.30.0
 [0.29.1]: https://github.com/danjamk/pagevault/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/danjamk/pagevault/compare/v0.28.0...v0.29.0
