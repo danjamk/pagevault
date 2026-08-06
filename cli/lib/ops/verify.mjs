@@ -21,7 +21,7 @@ import { c, ok, die, loadContext, fromEnv, banner, mcpCall, runHint, EXPECTED_MC
 // One source of truth for the sample's title: `restore` keys its "this is disposable" check on it.
 import { SAMPLE_TITLE } from "./restore-plan.mjs";
 import { loadConfig } from "../client.mjs";
-import { resolveTarget, describeTarget } from "../target.mjs";
+import { resolveTarget, describeTarget, resolveBearer } from "../target.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -334,7 +334,12 @@ export async function verifyCmd({ json = false } = {}) {
   // surface, the write path, or authentication is worse than a failure — on a Worker deployed
   // without a bearer at all it reported success for something unusable. A verifier that cannot run
   // its checks has no verdict to give, so it says so and exits non-zero.
-  const bearer = fromEnv("PAGEVAULT_API_TOKEN") || loadConfig({}).token;
+  // Paired with the deployment we resolved, never merely "any token we can find" (#155).
+  const bearer = resolveBearer(target, {
+    env: process.env.PAGEVAULT_API_TOKEN,
+    state: fromEnv("PAGEVAULT_API_TOKEN"),
+    config: loadConfig({}).token,
+  });
   if (!bearer) {
     record("mcp", false, "no bearer available");
     say(`\n  ${c.red("✗")} No ${c.bold("PAGEVAULT_API_TOKEN")} to authenticate with — the MCP and publish checks cannot run.`);

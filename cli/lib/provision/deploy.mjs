@@ -38,7 +38,25 @@ export function deployCommand(configPath) {
 export async function deploy(opts = {}) {
   loadCloudToken();
   const ctx = loadContext();
-  if (!ctx.rung || !ctx.ownerEmail) die("No .pagevault.json yet.", `Run \`${runHint("setup", "init")}\` first.`);
+  if (!ctx.rung || !ctx.ownerEmail) {
+    // "Run `init` first" is the right hint for a machine that has never provisioned anything, and
+    // the WRONG one for a machine holding a login to a deployment someone else deploys — there,
+    // `init` would provision production from a laptop (#144, #155). Distinguish the two by whether
+    // a login exists at all.
+    const { url } = loadConfig({});
+    if (url) {
+      die(`Nothing to deploy from here — this install did not provision ${url}.`, [
+        "It has a login, not a build record, which is what an operator has when the deployment is",
+        "deployed elsewhere (CI, or another machine).",
+        "",
+        `  ${c.bold("Stand in the checkout that provisioned it")}, and re-run this there.`,
+        `  ${c.dim("Or, if this machine really should own it:")} ${c.bold(runHint("setup", "init"))}`,
+        `  ${c.dim("— which will provision and deploy it from here. That is rarely what you want for")}`,
+        `  ${c.dim("a deployment that already exists.")}`,
+      ]);
+    }
+    die("No .pagevault.json yet.", `Run \`${runHint("setup", "init")}\` first.`);
+  }
 
   console.log(banner("deploy", `(${ctx.rung >= 3 ? "Secured" : "Public"} → ${shortId(ctx.accountId)})`));
 

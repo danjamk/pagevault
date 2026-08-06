@@ -9,7 +9,7 @@
 // object (drivable, #33) while keeping the same exit codes.
 //
 import { c, ok, warn, die, releaseTag, banner, fromEnv, mcpCall, runHint } from "../provision/context.mjs";
-import { resolveTarget, describeTarget } from "../target.mjs";
+import { resolveTarget, describeTarget, resolveBearer } from "../target.mjs";
 import { loadConfig } from "../client.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -72,7 +72,14 @@ export async function healthCmd({ json = false, flags = {} } = {}) {
     // The build string matches. But a version-correct deploy with a dead /mcp is still a broken
     // deploy (#75) — assert the MCP surface answers when we have a bearer; skip (don't fail) when
     // we don't, e.g. a CI context without the token.
-    const bearer = fromEnv("PAGEVAULT_API_TOKEN");
+    // It used to read only `.env.local` and then report "No PAGEVAULT_API_TOKEN" while a usable
+    // bearer sat in the login config — the one `verify` picks up seconds later on the same
+    // deployment (#155). Same resolution as verify, same pairing rule.
+    const bearer = resolveBearer(target, {
+      env: process.env.PAGEVAULT_API_TOKEN,
+      state: fromEnv("PAGEVAULT_API_TOKEN"),
+      config: loadConfig({}).token,
+    });
     let mcp = "skipped";
     if (bearer) {
       const r = await mcpCall(base, bearer, "initialize", {
