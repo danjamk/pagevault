@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.29.1] — 2026-08-06
+
+A credential could reach a deployment it did not belong to. It cannot now.
+
 ### Fixed
 - **The state directory follows the deployment, so a credential can no longer be sent to the wrong
   one.** ADR-021 phase 2 gave every operator command one rule for *which URL* it targets and left
@@ -1213,7 +1217,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.29.1...HEAD
+[0.29.1]: https://github.com/danjamk/pagevault/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/danjamk/pagevault/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/danjamk/pagevault/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/danjamk/pagevault/compare/v0.26.0...v0.27.0
