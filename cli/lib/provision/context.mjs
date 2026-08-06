@@ -11,7 +11,7 @@
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, sep } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { fileURLToPath } from "node:url";
@@ -63,7 +63,7 @@ export function stateDir() {
 }
 
 /** A path inside the state dir. Creates the dir when it isn't the cwd (which always exists). */
-function statePath(name) {
+export function statePath(name) {
   const dir = stateDir();
   if (dir !== process.cwd()) mkdirSync(dir, { recursive: true });
   return join(dir, name);
@@ -299,13 +299,32 @@ export const saveContext = (ctx) =>
  * This is also the "multiple accounts on one machine" answer: each clone keeps its own
  * .env.local with its own account's token, and every command in that clone targets it.
  */
+// Where `loadCloudToken` found the provisioning credential, for the line that reports it. An
+// operator with an exported CLOUDFLARE_API_TOKEN and a stale `.env.local` is otherwise guessing
+// which account they are about to deploy to.
+let cloudTokenOrigin;
+export const cloudTokenSource = () => cloudTokenOrigin;
+
 export function loadCloudToken() {
   // CLOUDFLARE_API_TOKEN only — no CF_API_TOKEN fallback. `CF_API_TOKEN` is now reserved for
   // the Worker's *runtime* secret (a separate, narrowly scoped token, #24); reading it here
   // would let that narrow token stand in for the broad provisioning credential and target
   // wrangler at the wrong scope. Using CLOUDFLARE_API_TOKEN also clears wrangler's deprecation
   // warning about CF_API_TOKEN (#23).
-  const token = fromEnv("CLOUDFLARE_API_TOKEN");
+  //
+  // `--cf-token`, not `--token`: `pagevault login --token` already means the PageVault BEARER.
+  // One flag name for two different credentials on adjacent commands is how a broad provisioning
+  // token ends up saved in a login config.
+  const flag = argValue("--cf-token");
+  const shell = process.env.CLOUDFLARE_API_TOKEN;
+  const file = fromEnvFile("CLOUDFLARE_API_TOKEN");
+  const token = flag || shell || file;
+
+  // Resolve the origin on the FIRST call that finds something — the same call that exports it
+  // below. Ask again afterwards and the answer is always "the environment", because we put it
+  // there. `??=` keeps a fruitless early call from pinning `undefined` forever.
+  if (token) cloudTokenOrigin ??= flag ? "--cf-token" : shell ? "the environment" : displayPath(envLocalPath());
+
   if (token) process.env.CLOUDFLARE_API_TOKEN = token; // what wrangler and cfApi both read
   return token;
 }
@@ -432,6 +451,40 @@ export async function mcpCall(base, bearer, method, params = {}, id = 1) {
 export const slug = (s) =>
   String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 54) || "pagevault";
 
+/** The one `.env.local` this run reads and writes. Absolute, and it follows the state dir. */
+export const envLocalPath = () => statePath(".env.local");
+
+/**
+ * A path as it is worth TYPING: bare when the file is IN the cwd, absolute otherwise.
+ *
+ * From a repo checkout the state dir is the cwd, so this keeps printing the `.env.local` that
+ * `make setup` has always shown. Everywhere else it prints the whole path, which is the #157 fix:
+ * a relative path is an instruction to write the file wherever the operator happens to be standing,
+ * and that is not where the loader reads.
+ *
+ * "In the cwd", not "under the cwd" — an operator sitting in `~` would otherwise be handed
+ * `.pagevault/.env.local`, which is correct only until they cd. The bug was a relative path that
+ * quietly meant somewhere else; the narrow rule cannot reintroduce it.
+ */
+export const displayPath = (abs, cwd = process.cwd()) => (dirname(abs) === cwd ? relative(cwd, abs) : abs);
+
+/**
+ * The shell command that saves the token, in the dialect the operator is actually typing into.
+ *
+ * 🔴 `>` is not portable here. Windows PowerShell 5.1 — still the default shell on a stock Windows
+ * box — redirects as UTF-16LE, and `readFileSync(path, "utf8")` cannot parse the result, so the
+ * token is written and then silently unreadable. PowerShell 7 redirects as UTF-8 and would be fine;
+ * we cannot tell which one is running, so we emit `Set-Content -Encoding ascii`, which is correct
+ * in both. A Cloudflare token is ASCII, so nothing is lost. (`utf8` is not the answer: on 5.1 it
+ * means UTF-8 *with* a BOM.)
+ */
+export function saveTokenCommand(path, platform = process.platform) {
+  const line = "CLOUDFLARE_API_TOKEN=<paste>";
+  return platform === "win32"
+    ? `Set-Content '${path}' '${line}' -Encoding ascii`
+    : `echo '${line}' > '${path}'`;
+}
+
 /**
  * The full "create a Cloudflare API token" instructions. Shared by setup and preflight so
  * the link, the name, and the exact scopes live in ONE place — and match the README table.
@@ -456,8 +509,14 @@ export function printTokenSetup() {
     console.log(`       ${c.dim(type.padEnd(7))} ${c.bold(perm)} ${c.dim(`(${access})`)}  ${c.dim("— " + forr)}`);
   }
   console.log();
+  // The absolute path, because the operator is standing wherever they are standing and this file
+  // lives in the state dir. `statePath` creates that dir on the way past, so the command below
+  // cannot fail on a directory that does not exist yet.
+  const env = envLocalPath();
   console.log(`  4. Create it, copy the value, and save it ${c.dim("(gitignored)")}:`);
-  console.log(`       ${c.bold("echo 'CLOUDFLARE_API_TOKEN=<paste>' > .env.local")}`);
+  console.log(`       ${c.bold(saveTokenCommand(displayPath(env)))}`);
+  console.log();
+  console.log(`  ${c.dim("Or skip the file —")} ${c.bold(`${runHint("setup", "init")} --cf-token <paste>`)}`);
 }
 
 /** Update-or-append `KEY=value` in .env.local, leaving any other lines intact. */
@@ -484,7 +543,7 @@ export async function tokenSetupFlow() {
   const pasted = (await rl.question(`\n  Paste your token to save it to .env.local now — or press Enter to save it yourself: `)).trim();
   rl.close();
   if (!pasted) {
-    console.log(`  ${c.dim("Fine —")} ${c.bold("echo 'CLOUDFLARE_API_TOKEN=<paste>' > .env.local")}`);
+    console.log(`  ${c.dim("Fine —")} ${c.bold(saveTokenCommand(displayPath(envLocalPath())))}`);
     return false;
   }
   writeEnvLocalToken(pasted);
@@ -492,15 +551,27 @@ export async function tokenSetupFlow() {
   return true;
 }
 
-/** A value from the environment, or from gitignored .env.local. */
-export function fromEnv(key) {
-  if (process.env[key]) return process.env[key];
-  const envFile = statePath(".env.local");
+/**
+ * A value from gitignored .env.local ONLY. Split out from `fromEnv` so a caller can tell where a
+ * credential came from — `loadCloudToken` exports the token into the environment, which makes
+ * every later "is it in the environment?" check answer yes regardless of its real origin.
+ *
+ * `.trim()` also eats a leading U+FEFF, so a UTF-8-with-BOM file (what Windows PowerShell 5.1
+ * writes for `-Encoding utf8`) still parses. UTF-16LE does not, which is why we never suggest `>`
+ * on Windows — see `saveTokenCommand`.
+ */
+export function fromEnvFile(key) {
+  const envFile = envLocalPath();
   if (!existsSync(envFile)) return undefined;
   const line = readFileSync(envFile, "utf8")
     .split("\n")
     .find((l) => l.trim().startsWith(`${key}=`));
   return line ? line.slice(line.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "") : undefined;
+}
+
+/** A value from the environment, or from gitignored .env.local. */
+export function fromEnv(key) {
+  return process.env[key] ? process.env[key] : fromEnvFile(key);
 }
 
 /** `--name value` or `--name=value` from argv. */

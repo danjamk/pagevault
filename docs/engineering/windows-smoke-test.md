@@ -164,10 +164,28 @@ I will send you a Cloudflare API token separately. It is a long string of letter
 
 Copy it to your clipboard and go straight to step 6, which will ask you to paste it.
 
-**Do not** try to save it to a file with `echo` or `>`. PowerShell writes those files in an
-encoding the tool cannot read, and you will get a confusing "no token" error even though the
-file looks correct in Notepad. Pasting at the prompt is the safe path — and it is the path I
-want tested.
+**Do not** try to save it to a file with `echo` or `>` yourself. PowerShell 5.1 — the blue window,
+still the default on a stock Windows box — writes those files as UTF-16, which the tool cannot
+read. You get a confusing "no token" error even though the file looks perfect in Notepad. (The
+tool now prints a `Set-Content` command that works, if it ever asks you to save one; the warning
+is about improvising.)
+
+**If pasting into the terminal does not work,** you have two ways out. Either is fine — tell me
+which one you used:
+
+```powershell
+# 1. Hand it straight to init, no file and no paste prompt:
+pagevault init --tier public --cf-token (Get-Clipboard).Trim()
+
+# 2. Or put it in the environment for this window only:
+$env:CLOUDFLARE_API_TOKEN = (Get-Clipboard).Trim()
+```
+
+`Get-Clipboard` reads what you copied without you having to paste it anywhere. The `.Trim()`
+matters: a stray newline rides along and turns into an authentication error that says nothing
+useful.
+
+Pasting at the prompt is still the path I most want tested, so try that first.
 
 Treat the token like a password: do not paste it into anything else, and tell me when you are
 done so I can delete it.
