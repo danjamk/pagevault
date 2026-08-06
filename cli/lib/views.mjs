@@ -50,7 +50,24 @@ const SELECT = [
  * past ~90 returns nothing rather than erroring. The callers say so in their help text.
  */
 export async function queryViews({ accountId, token }, opts = {}) {
-  if (!accountId) throw new ViewsError("No Cloudflare account id — run `make setup` (or `pagevault init`) first.");
+  if (!accountId) {
+    // Naming BOTH doors was wrong for an installed package (it does not have `make`), and pointing
+    // an operator whose production is deployed by CI at `init` is worse than unhelpful — that
+    // command would deploy production from their laptop (#144). `--account` has always existed
+    // here; it was simply never mentioned, which left the CI-deployed case with no answer at all.
+    // No `runHint` here: this module is deliberately dependency-free (see the header), and
+    // importing it would drag the whole provision tree in to phrase one sentence. So the message
+    // names the escape hatch rather than the setup command — which is the half that was missing.
+    throw new ViewsError(
+      "No Cloudflare account id. Views come from Analytics Engine, read with YOUR Cloudflare\n" +
+        "credential — the Worker's binding is write-only, so it can never answer this itself\n" +
+        "(ADR-015).\n\n" +
+        "If this machine provisioned the deployment, set it up so the account id is recorded.\n" +
+        "If it did not — production deployed by CI, for instance — name the account yourself:\n\n" +
+        "  CLOUDFLARE_API_TOKEN=… pagevault views --account <account-id>\n\n" +
+        "A token scoped to Account Analytics (Read) is enough, and cannot deploy or destroy.",
+    );
+  }
   if (!token) {
     throw new ViewsError(
       "No CLOUDFLARE_API_TOKEN. Reading views needs a token with the Account Analytics Read permission.",

@@ -7,7 +7,37 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Changed
+- **Every operator command resolves the same way, and says which deployment it chose.**
+  `--url` → `PAGEVAULT_URL` → the nearest `.pagevault.json` walking up from the working directory →
+  the login config. Standing anywhere in a checkout acts on what that checkout provisioned;
+  standing anywhere else acts on the login. `make` and `pagevault` now agree, which they did not:
+  `RUNNING_FROM_REPO` keys on where the *code* lives, so a globally installed `pagevault` run inside
+  a checkout targeted production while `node cli/bin/pagevault.mjs` in the same directory targeted
+  test. `PAGEVAULT_HOME` still overrides everything, exclusively — it is what isolates the test
+  suites. ([ADR-021](docs/adr/ADR-021-a-deployment-is-a-named-thing.md), [#144](../../issues/144))
+
 ### Fixed
+- **A client-only install is a state, not an error.** An install with a login and no build record —
+  what an operator has when production is deployed by CI — reported itself broken and pointed at
+  `pagevault init`, the one command that would deploy production from a laptop. Now: `status` names
+  the deployment and says it was not provisioned here; `health` reports the running version instead
+  of failing because it does not match this install's; `verify` runs, and **infers the tier from the
+  deployment** rather than defaulting to Public — which previously turned a perfectly healthy
+  Secured deployment into a false failure, because root 302s to `/admin` and the check expected 200.
+  ([#144](../../issues/144))
+
+- **`pagevault views` named the wrong door and hid the right one.** Its error said
+  "run `make setup` (or `pagevault init`)" — `make` does not exist in an installed package, and
+  `init` is actively wrong for a deployment someone else deploys. `--account` has always existed and
+  appeared in no help text, which left that case with no answer at all. Both fixed.
+  ([#144](../../issues/144))
+
+- **`VERSION` was read relative to the working directory.** `readFileSync("package.json")` assumed
+  cwd was the repo root — true when everything ran from `make` at the top level, false from `worker/`
+  or `cli/`, where it silently became `0.0.0` and `health` then asserted `0.0.0+<sha>` against the
+  deployment and failed for a reason that had nothing to do with the deployment. Now resolved from
+  the module. Latent before; running from a subdirectory is normal under ADR-021.
 - **A cross-deployment sync is refused instead of silently performed.** `sync-access` and
   `views --sync` are the only commands that read `.pagevault.json` and write through
   `config.json`, so they are the only two that can act across deployments — and on a machine that

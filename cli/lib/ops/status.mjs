@@ -19,6 +19,8 @@
 // `--json` has no tone to read, so the marker has to be a field.
 //
 import { c, banner, loadContext, VERSION, SCHEMA_VERSION, RUNNING_FROM_REPO } from "../provision/context.mjs";
+import { resolveTarget, targetOrigin } from "../target.mjs";
+import { loadConfig } from "../client.mjs";
 
 // The "not set up yet" nudge names the right door: `make setup` from the repo, `pagevault init`
 // from an install. Same reasoning everywhere a hint points at the setup step.
@@ -30,8 +32,10 @@ const CHECK_CMD = RUNNING_FROM_REPO ? "make health" : "pagevault health";
  *   json — emit a machine-readable object instead of the human table (drivable, #33).
  *   out  — where the --json line goes (stdout by default); the human table always uses console.log.
  */
-export async function statusCmd({ json = false, out = (s) => process.stdout.write(`${s}\n`) } = {}) {
+export async function statusCmd({ json = false, flags = {}, out = (s) => process.stdout.write(`${s}\n`) } = {}) {
   const ctx = loadContext();
+  // What this install would ACT on, which is not the same question as what it provisioned (#144).
+  const target = resolveTarget({ flags, config: loadConfig() });
 
   if (json) {
     out(
@@ -41,6 +45,12 @@ export async function statusCmd({ json = false, out = (s) => process.stdout.writ
           // ~/.pagevault/, and none of it was confirmed against the deployment. `pagevault health
           // --json` is the observed-state surface.
           source: "local",
+          // Which deployment the operator commands would act on, and what named it. `configured`
+          // below still means "provisioned from here"; these say whether there is anything to talk
+          // to at all, which is the distinction a client-only install turns on (#144).
+          deployment: target.url || null,
+          deploymentSource: target.source,
+          provisioned: target.provisioned,
           version: VERSION,
           schemaVersion: ctx.schemaVersion ?? SCHEMA_VERSION,
           configured: ctx.rung !== undefined,
@@ -67,6 +77,20 @@ export async function statusCmd({ json = false, out = (s) => process.stdout.writ
   console.log();
 
   if (ctx.rung === undefined) {
+    // Two very different situations used to print the same "not configured — run init" line, and
+    // for one of them that advice is actively dangerous (#144): an operator whose production is
+    // deployed by CI has a login and no build record, and `init` would deploy from their laptop.
+    // Having a login but nothing provisioned here is a SHAPE, not a failure.
+    if (target.url) {
+      row("Deployment", c.bold(target.url));
+      row("Resolved by", c.dim(targetOrigin(target)));
+      console.log();
+      console.log(`  ${c.dim("Connected, but not provisioned from this machine — so there is no tier, account or")}`);
+      console.log(`  ${c.dim("namespace to report here. That is normal when the deployment is deployed elsewhere,")}`);
+      console.log(`  ${c.dim("for instance by CI. The document commands work; the provisioning ones do not.")}\n`);
+      console.log(`  ${c.dim("Ask the deployment itself with")} ${c.bold(CHECK_CMD)}${c.dim(".")}\n`);
+      return;
+    }
     console.log(`  ${c.dim("Not configured yet — run")} ${c.bold(SETUP_CMD)}.\n`);
     return;
   }

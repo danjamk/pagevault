@@ -263,10 +263,15 @@ reports that there is no group, which is expected.
   ),
 
   views: H(
-    "Usage: pagevault views [--days 30] [--portal s] [--doc id] [--json]   ·   views --sync",
+    "Usage: pagevault views [--days 30] [--portal s] [--doc id] [--account id] [--json]   ·   views --sync",
     `
 Which documents were actually opened. Reads Analytics Engine directly with your Cloudflare token
 — the Worker's binding is write-only, so it can never run this query itself (ADR-015).
+
+  --account <id>   the Cloudflare account to query. Defaults to the one this install provisioned;
+                   pass it when this machine did not provision the deployment — production
+                   deployed by CI, say. A token scoped to Account Analytics (Read) is enough,
+                   and cannot deploy or destroy anything.
 
 View records are ACCOUNT-LEVEL and outlive the deployment that wrote them: after a teardown and
 rebuild this shows history the new deployment never created. Cloudflare keeps them three months
