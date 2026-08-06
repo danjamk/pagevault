@@ -53,8 +53,16 @@ test("a registry round-trips, and lands at 0600 because it holds bearers", () =>
     const reg = upsert(emptyRegistry(), "prod", { url: "https://prod.example.com", token: "p", protected: true });
     saveRegistry({ ...reg, current: "prod" }, env);
 
-    const mode = statSync(join(dir, REGISTRY_FILE)).mode & 0o777;
-    assert.equal(mode, 0o600, "a file holding every deployment's bearer is not world-readable");
+    // POSIX only, and deliberately so: NTFS ignores the mode bits, reporting 0o666 for a file
+    // written with 0o600. On Windows this file is protected by the profile directory's ACL rather
+    // than by anything `writeFileSync` asked for — which is what registry.mjs says, and asserting
+    // otherwise would be testing a promise the code does not make. Same guard as the config.json
+    // check in cli/pagevault.test.mjs.
+    assert.ok(statSync(join(dir, REGISTRY_FILE)).isFile());
+    if (process.platform !== "win32") {
+      const mode = statSync(join(dir, REGISTRY_FILE)).mode & 0o777;
+      assert.equal(mode, 0o600, "a file holding every deployment's bearer is not world-readable");
+    }
 
     const back = loadRegistry(env);
     assert.equal(back.current, "prod");
