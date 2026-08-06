@@ -6,12 +6,17 @@ name: Deploy to production
 # story: it deploys to whichever account their .env.local token points at. Delete this workflow in
 # a fork and nothing breaks. It is inert without the `production` environment's secrets.
 #
-# The model (#38): there is no "environment" concept in the product — the environment simply IS
-# whichever Cloudflare credential is active.
+# The model (#38): which Cloudflare account gets deployed IS whichever credential is active.
 #   dev  — the token in a working clone's .env.local; every local `make deploy` hits dev.
 #   prod — a token that lives ONLY in this GitHub Environment's secrets; only this job reaches it.
 # That is what removes the wrong-clone-clobbers-prod footgun: the prod credential is simply not
 # present on a developer's machine.
+#
+# This once said "there is no environment concept in the product". ADR-021 made that false — a
+# deployment is now a named thing in ~/.pagevault/deployments.json, and commands resolve one by
+# name, by where you are standing, or by the default. What did NOT change is the line above: the
+# Cloudflare credential stays per-clone, so the registry never puts prod's deploy rights on a
+# laptop.
 #
 # Trigger is manual on purpose (workflow_dispatch). Tagging a release never ships prod — version is
 # decoupled from deployment (ADR-010). You click Run when you mean it.

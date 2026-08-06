@@ -7,6 +7,38 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.31.1] — 2026-08-06
+
+Deploying one deployment stopped moving another one's credential. Found by using 0.31.0, an hour
+after shipping it.
+
+### Fixed
+- **An installed `pagevault upgrade` overwrote the login config with the deployment it just
+  deployed.** Upgrading a test deployment repointed `~/.pagevault/config.json` at it, even though
+  the operator's default was production. Correct when one machine held one deployment; wrong the
+  moment 0.31.0 let it hold two — and where production's bearer lived only in that file, the
+  credential was destroyed rather than shadowed.
+
+  The rule that should have applied already existed in `login --as`: claim the default only when
+  nothing else has, and never take it from a login describing a different deployment. It is now
+  shared by both. When the registry already knows the deployment, its bearer is refreshed on **its**
+  entry and the global default is not touched at all; when the deployment is unknown and something
+  else holds the default, the deploy says so rather than moving it silently.
+
+  A single-deployment install is unchanged, including with no registry: you deploy the deployment
+  you are logged into, the URLs match, the default is claimed exactly as before.
+  ([#171](../../issues/171))
+
+- **`wrangler.generated.jsonc` could be committed.** In the repo it lands under `worker/` and is
+  ignored; an installed `upgrade` run from inside a checkout writes it to the state dir, which is
+  the checkout root, where that rule does not reach. It carries account and namespace ids. Now
+  ignored by bare name. ([#171](../../issues/171))
+
+### Changed
+- **CI can be triggered by hand.** The Actions incident of 2026-08-06 throttled webhooks to ~15%, so
+  a PR and its merge to main both landed with no run created and no way to ask for one. `ci.yml`
+  now takes `workflow_dispatch` with an optional ref, the way `deploy-prod.yml` always has.
+
 ## [0.31.0] — 2026-08-06
 
 One machine, several deployments — and a command can no longer act on one while telling you it
@@ -1311,7 +1343,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.31.1...HEAD
+[0.31.1]: https://github.com/danjamk/pagevault/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/danjamk/pagevault/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/danjamk/pagevault/compare/v0.29.1...v0.30.0
 [0.29.1]: https://github.com/danjamk/pagevault/compare/v0.29.0...v0.29.1

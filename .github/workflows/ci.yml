@@ -5,12 +5,27 @@ on:
     branches: [main]
   push:
     branches: [main]
+  # Manual, because event triggers are not guaranteed to arrive. During the Actions incident of
+  # 2026-08-06 webhooks were throttled to ~15%, so a PR and its merge to main both landed with no
+  # run created and no way to ask for one — main sat unverified with the only recourse being an
+  # empty commit. `deploy-prod.yml` already had this and stayed usable throughout.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or SHA to check (defaults to the branch you launch it from)
+        required: false
+        type: string
 
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Empty on push/pull_request, which is exactly the default behaviour. Only a manual
+          # run can name something else — e.g. verifying a main commit whose push webhook
+          # never arrived.
+          ref: ${{ inputs.ref || github.ref }}
 
       - uses: pnpm/action-setup@v5
 
@@ -78,6 +93,11 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v5
+        with:
+          # Empty on push/pull_request, which is exactly the default behaviour. Only a manual
+          # run can name something else — e.g. verifying a main commit whose push webhook
+          # never arrived.
+          ref: ${{ inputs.ref || github.ref }}
 
       - uses: pnpm/action-setup@v5
 
