@@ -8,6 +8,20 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 ## [Unreleased]
 
 ### Fixed
+- **PDF export renders what the viewer renders.** The renderer aborted every network request, so a
+  document using a remote image, a webfont, a CDN stylesheet or CDN JavaScript looked right in the
+  viewer and exported with holes — including the seed corpus's Chart.js document, which exists to
+  prove remote JavaScript runs (ADR-007) and exported an empty box. Reported as a missing image;
+  it was the PDF and the viewer disagreeing about the same document.
+
+  Interception is now an allowlist: `image`, `font`, `stylesheet` and `script` may load; `xhr`,
+  `fetch`, `websocket` and `eventsource` may not. **Rendering is permitted, conversation is not** —
+  a script can draw a chart, it cannot open a channel that carries a reply. https only, never the
+  deployment's own host, and a hard request cap. Anything refused or failed is named in a
+  `pdf_assets_blocked` log line and counted in an `X-PageVault-Assets-Blocked` header, because a
+  PDF with holes and no explanation was the actual complaint.
+  ([ADR-022](docs/adr/ADR-022-the-pdf-is-a-capture-of-the-viewer.md), [#147](../../issues/147))
+
 - **A link that does not resolve now serves a real page instead of the word "Not found".** A client
   following a link to an owner-only draft — or to a revoked document, a rotated `/p/` token, or a
   renamed URL past its forwarding year — got unstyled plain text. The 404 itself was correct and
