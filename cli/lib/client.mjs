@@ -101,18 +101,16 @@ export function isCrossDeployment(provisionedUrl, targetUrl) {
   return !sameDeployment(provisionedUrl, targetUrl);
 }
 
-/** Config that is actually usable, or a clear error telling you exactly how to set it. */
-export function requireConfig(env = process.env) {
-  const cfg = loadConfig(env);
-  if (!cfg.url || !cfg.token) {
-    throw new PvError(
-      "Not configured. Point the CLI at your deployment:\n" +
-        "  pagevault login --url https://share.example.com --token <PAGEVAULT_API_TOKEN>\n" +
-        "or set PAGEVAULT_URL and PAGEVAULT_API_TOKEN per command.",
-    );
-  }
-  return cfg;
-}
+// 🔴 `requireConfig()` used to live here, and it is deliberately gone (#159).
+//
+// It returned the login config's {url, token} directly, and sixteen commands called it — which is
+// precisely how `status` came to report one deployment while `publish` wrote to another. The pair
+// must come from `commandTarget()` in bin/pagevault.mjs, which resolves the deployment and its
+// bearer together and can never assemble them from two sources.
+//
+// Leaving a dead helper here that still looked like the obvious front door would have been an
+// invitation: the next command written reaches for it, and the bug returns quietly. `loadConfig`
+// stays because the resolver takes it as ONE input among several, which is the correct role for it.
 
 /**
  * One API call. Returns parsed JSON on 2xx; throws PvError carrying the server's {error, code}

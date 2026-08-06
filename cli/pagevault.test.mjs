@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -330,4 +330,167 @@ test("a client-only install is a state, not an error (#144)", () => {
   assert.equal(sj.deploymentSource, "config");
   assert.equal(sj.provisioned, false);
   assert.equal(sj.configured, false, "`configured` still means provisioned-from-here");
+});
+
+// --- the named deployment registry (ADR-021 phase 3, #159) -------------------------------------
+
+/** A throwaway home holding a registry with a protected `prod` and a plain `test`. */
+function registryHome() {
+  const home = mkdtempSync(join(tmpdir(), "pv-registry-"));
+  writeFileSync(
+    join(home, "deployments.json"),
+    JSON.stringify({
+      current: "prod",
+      deployments: {
+        prod: { url: "https://prod.invalid", token: "prod-bearer", protected: true },
+        test: { url: "https://test.invalid", token: "test-bearer", rung: 3, accountId: "acct" },
+      },
+    }),
+  );
+  return home;
+}
+
+test("with no registry, nothing about the CLI changes", () => {
+  // The additive property. An operator who never types `login --as` must see exactly what they saw
+  // before this feature existed — including no target line on every command.
+  const home = mkdtempSync(join(tmpdir(), "pv-noreg-"));
+  writeFileSync(join(home, "config.json"), JSON.stringify({ url: "https://prod.example.com", token: "tok" }));
+
+  // The login config is listed as the implicit deployment it has always been — leaving it out would
+  // show an operator a registry of none beside a `publish` that works, which they cannot account for.
+  const d = runIn(home, "deployments");
+  assert.equal(d.status, 0);
+  assert.match(d.text, /\(login config\)\s+https:\/\/prod\.example\.com/);
+  assert.match(d.text, /^\*/m, "and it is the default, because nothing else claims to be");
+
+  const u = runIn(home, "use", "prod");
+  assert.notEqual(u.status, 0);
+  assert.match(u.text, /None are registered/);
+
+  // No registry and the ordinary fallback: no target line, because there was never a second answer.
+  assert.doesNotMatch(runIn(home, "list").text, /→ https/);
+});
+
+test("a truly empty install says how to start, not how it failed", () => {
+  const empty = mkdtempSync(join(tmpdir(), "pv-empty-"));
+  const d = runIn(empty, "deployments");
+  assert.equal(d.status, 0);
+  assert.match(d.text, /No deployments/);
+  assert.match(d.text, /pagevault login --as/);
+});
+
+test("`deployments` lists what is reachable and which one is default", () => {
+  const r = runIn(registryHome(), "deployments");
+  assert.equal(r.status, 0);
+  assert.match(r.text, /\*\s+prod\s+https:\/\/prod\.invalid/, "* marks the default");
+  assert.match(r.text, /test\s+https:\/\/test\.invalid/);
+  // "Provisioned from this machine" is a fact about the deployment, not a fault (#144).
+  assert.match(r.text, /PROVISIONED/);
+});
+
+test("`use` selects the default and it survives into the next command", () => {
+  const home = registryHome();
+  const u = runIn(home, "use", "test");
+  assert.equal(u.status, 0);
+  assert.match(u.text, /test\s+https:\/\/test\.invalid/);
+  assert.equal(JSON.parse(readFileSync(join(home, "deployments.json"), "utf8")).current, "test");
+
+  // The next command targets it without being told.
+  assert.match(runIn(home, "list").text, /→ test {2}https:\/\/test\.invalid/);
+});
+
+test("🔴 a name that names nothing is refused, never quietly downgraded", () => {
+  // Falling through to the next rung means acting on a DIFFERENT deployment while the operator
+  // believes they named one — the failure this whole ADR is about.
+  const r = runIn(registryHome(), "list", "--deployment", "staging");
+  assert.notEqual(r.status, 0);
+  assert.match(r.text, /No deployment named "staging"/);
+  assert.match(r.text, /Known: prod, test/);
+  assert.doesNotMatch(r.text, /prod\.invalid/, "it must not have fallen through to the default");
+});
+
+test("every command says which deployment it chose, and why", () => {
+  const home = registryHome();
+  assert.match(runIn(home, "list").text, /→ prod {2}https:\/\/prod\.invalid {2}\(from the current deployment\)/);
+  assert.match(runIn(home, "list", "--deployment", "test").text, /→ test {2}https:\/\/test\.invalid {2}\(from --deployment\)/);
+});
+
+test("🔴 a protected deployment requires --yes to destroy, and only to destroy", () => {
+  // ADR-021 section 6. Set once on production, costs nothing on test, and does not train anyone to
+  // hit `y` without reading — which is why it is a refusal rather than a prompt, and why publishing
+  // is deliberately untouched.
+  const home = registryHome();
+
+  for (const cmd of [["rm", "abc123"], ["revoke", "abc123"], ["rotate", "abc123"]]) {
+    const r = runIn(home, ...cmd);
+    assert.notEqual(r.status, 0, `${cmd[0]} must refuse on a protected deployment`);
+    assert.match(r.text, /prod is a protected deployment/);
+    assert.match(r.text, /--yes/);
+  }
+
+  // Publishing, editing and sharing are unaffected: this one gets as far as the network.
+  const p = runIn(home, "portals");
+  assert.doesNotMatch(p.text, /protected deployment/, "a read must never be gated by `protected`");
+
+  // And an unprotected deployment is not gated at all — it reaches the network instead.
+  const t = runIn(home, "rm", "abc123", "--deployment", "test", "--yes");
+  assert.doesNotMatch(t.text, /protected deployment/);
+});
+
+test("🔴 a build record gets its bearer from the registry, by URL (#159)", () => {
+  // The bug: standing in a checkout, `status` reported the test deployment (from the marker) while
+  // `list` and `publish` hit production, because the only bearer on the machine was the login
+  // config's. The marker here stays a BUILD RECORD — no `deployment` key — which is what CI writes.
+  const home = mkdtempSync(join(tmpdir(), "pv-byurl-"));
+  writeFileSync(join(home, "config.json"), JSON.stringify({ url: "https://prod.invalid", token: "prod-bearer" }));
+  writeFileSync(join(home, ".pagevault.json"), JSON.stringify({ rung: 3, accountId: "acct", host: "test.invalid" }));
+  writeFileSync(
+    join(home, "deployments.json"),
+    JSON.stringify({ current: null, deployments: { test: { url: "https://test.invalid", token: "test-bearer" } } }),
+  );
+
+  const r = runIn(home, "list");
+  assert.match(r.text, /→ test {2}https:\/\/test\.invalid/, "the checkout's deployment, named");
+  assert.doesNotMatch(r.text, /No bearer/, "and its own bearer, so the command can actually run");
+  assert.doesNotMatch(r.text, /prod\.invalid/, "production must not be touched from here");
+});
+
+test("without a matching entry the #155 refusal still stands", () => {
+  // The registry adds a correct credential; it never loosens the rule about sending the wrong one.
+  const home = mkdtempSync(join(tmpdir(), "pv-nobearer-"));
+  writeFileSync(join(home, "config.json"), JSON.stringify({ url: "https://prod.invalid", token: "prod-bearer" }));
+  writeFileSync(join(home, ".pagevault.json"), JSON.stringify({ rung: 3, accountId: "acct", host: "test.invalid" }));
+
+  const r = runIn(home, "list");
+  assert.notEqual(r.status, 0);
+  assert.match(r.text, /No bearer for https:\/\/test\.invalid/);
+  assert.match(r.text, /pagevault login --as/, "it must say how to fix it, not just that it refused");
+});
+
+test("--protected is a flag, in both directions, without retyping credentials", () => {
+  // Hand-editing deployments.json was the only way to set this, which is a thin door for the
+  // guardrail. Re-running `login --as` on a registered deployment amends it, so flipping a flag
+  // does not mean re-supplying a bearer.
+  const home = registryHome();
+  const read = () => JSON.parse(readFileSync(join(home, "deployments.json"), "utf8")).deployments;
+
+  runIn(home, "login", "--as", "test", "--protected");
+  assert.equal(read().test.protected, true);
+  assert.equal(read().test.token, "test-bearer", "credentials survive an amend");
+  assert.equal(read().test.url, "https://test.invalid");
+  assert.match(runIn(home, "rm", "abc", "--deployment", "test").text, /protected deployment/);
+
+  runIn(home, "login", "--as", "test", "--no-protected");
+  assert.equal(read().test.protected, false);
+  assert.doesNotMatch(runIn(home, "rm", "abc", "--deployment", "test").text, /protected deployment/);
+});
+
+test("--protected without --as says where it belongs rather than dropping it", () => {
+  // Protection is a property of a registry entry. Writing a config.json and silently discarding the
+  // flag would leave an operator believing production was guarded.
+  const home = mkdtempSync(join(tmpdir(), "pv-protnoas-"));
+  const r = runIn(home, "login", "--url", "https://x.invalid", "--token", "t", "--protected");
+  assert.notEqual(r.status, 0);
+  assert.match(r.text, /--protected applies to a named deployment/);
+  assert.ok(!existsSync(join(home, "config.json")), "and it must not have written the login it refused");
 });

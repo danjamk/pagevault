@@ -10,8 +10,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
-import { api, apiText, requireConfig, saveLoginConfig, waitReadable, PvError } from "../lib/client.mjs";
-import { resolveTarget, describeTarget } from "../lib/target.mjs";
+import { api, apiText, loadConfig, sameDeployment, saveLoginConfig, waitReadable, PvError } from "../lib/client.mjs";
+import { resolveTarget, describeTarget, resolveBearer } from "../lib/target.mjs";
+import { emptyRegistry, findByName, findByUrl, listDeployments, loadRegistry, saveRegistry, upsert } from "../lib/registry.mjs";
 
 import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "../lib/format.mjs";
 import { helpText, usageError } from "../lib/help.mjs";
@@ -28,36 +29,133 @@ const out = (s) => stdout.write(`${s}\n`);
 const note = (s) => stderr.write(`${s}\n`);
 
 /**
- * Resolve the deployment a write command acts on, refuse a cross-deployment write, and say which
- * one was chosen (ADR-021).
+ * Which deployment is this command acting on, and with which bearer? (ADR-021)
  *
- * `sync-access` and `views --sync` are the only commands that read a build record and write through
- * a login, so they are the only two that can act across deployments. `views --sync` is the
- * dangerous one: it queries one deployment's Analytics Engine and POSTs the summary to another,
- * where no document id matches — storing a near-empty summary that makes every document report a
- * MEASURED zero over MCP. That is the exact lie `syncViews` refuses when it rejects `--portal`,
- * arriving through a door nobody guarded.
+ * The single door for every command that talks to `/api`. Before phase 3 the document commands
+ * bypassed the resolver entirely and read the login config directly, so standing in a checkout
+ * `status` reported the test deployment while `publish` wrote to production — the resolver was
+ * correct and had nowhere to find a second bearer. Now the deployment and its credential come from
+ * the same place, every time, and the pair is never assembled from two sources.
  *
- * The conflict now comes from the one resolver rather than being recomputed per command, which is
- * the point: four commands computing this independently is how they ended up with four answers.
+ * Throws rather than falling through on every "you named something we cannot honour" case. Falling
+ * through means acting on a DIFFERENT deployment while the operator believes they named one, which
+ * is the whole failure this ADR is about.
  */
-function resolveWriteTarget(flags, cfg, command) {
-  const target = resolveTarget({ flags, config: cfg });
-  if (target.conflicted) {
+function commandTarget(flags = {}) {
+  const config = loadConfig();
+  const registry = loadRegistry(); // null when there is none — the ordinary state, not a fault
+  const target = resolveTarget({ flags, config, registry });
+
+  if (target.unknownDeployment) {
+    const known = Object.keys(registry?.deployments ?? {});
     throw new PvError(
-      `${command} would write to a different deployment than this install provisioned.\n\n` +
-        `  provisioned (${target.markerPath})\n    ${target.markerUrl}\n` +
-        `  logged in   (login config)\n    ${target.configUrl}\n\n` +
-        `Refusing: a cross-deployment sync writes a summary whose ids match nothing there, which\n` +
-        `reports a measured zero views for every document. Name the one you mean:\n\n` +
-        `  PAGEVAULT_URL=${target.markerUrl} pagevault ${command}\n` +
-        `  pagevault login --url ${target.configUrl} …   (if the login is the one you want)`,
+      `No deployment named "${target.unknownDeployment}".\n` +
+        (known.length ? `Known: ${known.join(", ")}\n` : "No deployments are registered yet.\n") +
+        "  pagevault deployments                       list them\n" +
+        "  pagevault login --as <name> --url … --token …   add one",
     );
   }
-  // Say what we are about to act on, every time. This whole class of bug was invisible because
-  // nothing ever named the deployment, or what chose it.
+  if (target.unresolvedPointer) {
+    throw new PvError(
+      `${target.markerPath} points at a deployment named "${target.unresolvedPointer}", which is not registered.\n` +
+        "  pagevault deployments                       list what is\n" +
+        `  pagevault login --as ${target.unresolvedPointer} --url … --token …   register it`,
+    );
+  }
+  if (!target.url) {
+    throw new PvError(
+      "Not configured. Point the CLI at your deployment:\n" +
+        "  pagevault login --url https://share.example.com --token <PAGEVAULT_API_TOKEN>\n" +
+        "or set PAGEVAULT_URL and PAGEVAULT_API_TOKEN per command.",
+    );
+  }
+
+  const token = resolveBearer(target, {
+    env: process.env.PAGEVAULT_API_TOKEN || "",
+    config: config.token,
+  });
+  if (!token) {
+    // Reached when the resolved deployment is not the one the login describes (#155). The login's
+    // token is deliberately NOT sent — that is how a production bearer once arrived at the test
+    // deployment. The fix is to give this deployment a name, so its own bearer is on file.
+    throw new PvError(
+      `No bearer for ${target.url}.\n\n` +
+        `  resolved   ${describeTarget(target)}\n` +
+        `  logged in  ${target.configUrl || "(nothing)"}\n\n` +
+        "The saved login describes a different deployment, so its token is not sent here.\n" +
+        "Register this one and its bearer travels with it:\n\n" +
+        `  pagevault login --as <name> --url ${target.url} --token <PAGEVAULT_API_TOKEN>\n\n` +
+        `or name it for one command: PAGEVAULT_API_TOKEN=… pagevault …`,
+    );
+  }
+
+  announceTarget(target, registry);
+  return { url: target.url, token, target };
+}
+
+/**
+ * Say what we are about to act on. ADR-021 section 4 asks every command to do this, and the "why"
+ * half is not decoration: this class of bug was invisible precisely because nothing ever named the
+ * deployment or what chose it.
+ *
+ * Narrowed from "every command, always" to "whenever more than one answer was possible". On a
+ * single-deployment install — no registry, resolved from the login config — there is no ambiguity
+ * to surface and the line is pure noise on every `list`. The moment names exist, or you are
+ * standing somewhere that decides, every command says which one. Always stderr, never stdout, so
+ * `pagevault publish report.html | pbcopy` still carries only the URL.
+ */
+function announceTarget(target, registry) {
+  if (!registry && target.source === "config") return;
   note(`→ ${describeTarget(target)}`);
-  return { url: target.url, token: cfg.token };
+}
+
+/**
+ * The two commands that read a build record and write through a bearer, and so are the only ones
+ * that can act ACROSS deployments. `views --sync` is the dangerous one: it queries one deployment's
+ * Analytics Engine and POSTs the summary to another, where no document id matches — storing a
+ * near-empty summary that makes every document report a MEASURED zero over MCP. That is the exact
+ * lie `syncViews` refuses when it rejects `--portal`, arriving through a door nobody guarded.
+ *
+ * The guard asks the precise question rather than the approximate one it used to: is the deployment
+ * whose account we are about to read the same one we are about to write to? Phase 2 compared the
+ * marker against the login config, which was a proxy for that and now reports a conflict in cases
+ * the registry has already settled correctly.
+ */
+/**
+ * A deployment may be marked `"protected": true` in the registry. On one, the commands that DESTROY
+ * — `rm`, `revoke`, `rotate` — require an explicit `--yes`. Publishing, editing and sharing are
+ * untouched (ADR-021 section 6).
+ *
+ * This is the narrow, declarative version of the guardrail: set once on production, costs nothing
+ * on test, and does not train anyone to hit `y` without reading. A confirmation prompt on every
+ * write was rejected for exactly that reason — publishing to production is the NORMAL case, so a
+ * per-write prompt gets answered reflexively within a day and breaks CI, scripts and MCP besides.
+ *
+ * A refusal, not a prompt: `protected` must mean the same thing in a terminal and in a script.
+ */
+function requireYesOnProtected(cfg, flags, what) {
+  if (!cfg.target?.protected || flags.yes === true) return;
+  throw new PvError(
+    `${cfg.target.name} is a protected deployment — ${what} needs an explicit --yes.\n\n` +
+      `  ${cfg.target.name}  ${cfg.url}\n\n` +
+      "Publishing, editing and sharing are unaffected; only the destructive commands ask.\n" +
+      `Unset it by removing "protected" from that deployment in ~/.pagevault/deployments.json.`,
+  );
+}
+
+function resolveWriteTarget(flags, command) {
+  const { url, token, target } = commandTarget(flags);
+  if (target.markerUrl && !sameDeployment(url, target.markerUrl)) {
+    throw new PvError(
+      `${command} would read one deployment's account and write to another.\n\n` +
+        `  provisioned here (${target.markerPath})\n    ${target.markerUrl}\n` +
+        `  writing to       (${target.source})\n    ${url}\n\n` +
+        "Refusing: a cross-deployment sync writes a summary whose ids match nothing there, which\n" +
+        "reports a measured zero views for every document. Name the one you mean:\n\n" +
+        `  pagevault ${command} --url ${target.markerUrl}`,
+    );
+  }
+  return { url, token };
 }
 
 async function main() {
@@ -126,6 +224,10 @@ async function main() {
       return restore(positional, flags);
     case "login":
       return login(flags);
+    case "deployments":
+      return deployments(flags);
+    case "use":
+      return use(positional);
     default:
       throw new PvError(`Unknown command: ${cmd}\nRun \`pagevault help\`.`);
   }
@@ -151,7 +253,7 @@ async function publish(pos, flags) {
   if (!file) throw new PvError(usageError("publish"));
   if (!existsSync(file)) throw new PvError(`No such file: ${file}`);
 
-  const cfg = requireConfig();
+  const cfg = commandTarget(flags);
   const html = readFileSync(file, "utf8");
   // Identity is the filename (ADR-017): the file's basename, or --name to override it.
   const filename = typeof flags.name === "string" ? flags.name : basename(file);
@@ -218,7 +320,7 @@ async function publish(pos, flags) {
 }
 
 async function list(flags) {
-  const cfg = requireConfig();
+  const cfg = commandTarget(flags);
   const qs = new URLSearchParams();
   if (typeof flags.portal === "string") qs.set("portal", flags.portal);
   if (typeof flags.tag === "string") qs.set("tag", flags.tag);
@@ -245,7 +347,7 @@ async function list(flags) {
 async function read(pos, flags) {
   const id = pos[0];
   if (!id) throw new PvError(usageError("read"));
-  const cfg = requireConfig();
+  const cfg = commandTarget(flags);
   const enc = encodeURIComponent(id);
 
   // --source: the stored body (the original .md or the HTML) → stdout, byte-for-byte, so
@@ -296,7 +398,7 @@ async function edit(pos, flags) {
   if (typeof flags.tags === "string") body.tags = splitList(flags.tags) ?? [];
   if (Object.keys(body).length === 0) throw new PvError(usageError("edit"));
 
-  const cfg = requireConfig();
+  const cfg = commandTarget(flags);
 
   let res;
   try {
@@ -326,10 +428,10 @@ async function edit(pos, flags) {
   out(res.publicUrl || res.url);
 }
 
-async function link(pos) {
+async function link(pos, flags) {
   const id = pos[0];
   if (!id) throw new PvError(usageError("link"));
-  const cfg = requireConfig();
+  const cfg = commandTarget(flags);
   const meta = await api(cfg, "GET", `/docs/${encodeURIComponent(id)}`);
   // One URL → stdout, nothing else, so `pagevault link <id> | pbcopy` just works. A public doc
   // hands back its /p/ capability link; otherwise the portal viewer URL (login required).
@@ -349,7 +451,7 @@ async function search(pos, flags) {
     throw new PvError(usageError("search"));
   }
 
-  const cfg = requireConfig();
+  const cfg = commandTarget(flags);
   const qs = new URLSearchParams({ portal, q: query });
   if (typeof flags.limit === "string") qs.set("limit", flags.limit);
 
@@ -370,30 +472,32 @@ async function search(pos, flags) {
 // The public-link lifecycle. A public link is a capability URL: whoever holds it can open the
 // document with no login (ADR-002). Minting and rotating are WIDENING — say so.
 
-async function mint(pos) {
+async function mint(pos, flags) {
   const id = pos[0];
   if (!id) throw new PvError(usageError("mint"));
-  const cfg = requireConfig();
+  const cfg = commandTarget(flags);
 
   const res = await api(cfg, "PATCH", `/docs/${encodeURIComponent(id)}`, { makePublic: true });
   note("⚠ Public link: anyone who has it can open this document, no login. It burns no Access seat.");
   out(res.publicUrl || `${cfg.url}/p/${res.publicToken}`);
 }
 
-async function revoke(pos) {
+async function revoke(pos, flags) {
   const id = pos[0];
   if (!id) throw new PvError(usageError("revoke"));
-  const cfg = requireConfig();
+  const cfg = commandTarget(flags);
+  requireYesOnProtected(cfg, flags, "revoking a public link");
 
   // Kill the /p/ link, keep the document. This is NOT delete — that's `pagevault rm`.
   await api(cfg, "PATCH", `/docs/${encodeURIComponent(id)}`, { makePublic: false });
   note(`Public link revoked for ${id}. Any /p/ URL for it is now dead. (The document itself is untouched — use \`rm\` to delete it.)`);
 }
 
-async function rotate(pos) {
+async function rotate(pos, flags) {
   const id = pos[0];
   if (!id) throw new PvError(usageError("rotate"));
-  const cfg = requireConfig();
+  const cfg = commandTarget(flags);
+  requireYesOnProtected(cfg, flags, "rotating a public link");
 
   // One atomic call: the old token is dropped and a fresh one minted server-side. Two calls
   // (revoke then mint) would race KV's eventual consistency — hence the dedicated field.
@@ -419,8 +523,7 @@ async function syncAccess(flags) {
     if (ans !== "y") return note("Cancelled.");
   }
 
-  const cfg = requireConfig();
-  const target = resolveWriteTarget(flags, cfg, "sync-access");
+  const target = resolveWriteTarget(flags, "sync-access");
   const res = await api(target, "POST", `/access/sync${reap ? "?reap=true" : ""}`);
 
   if (flags.json) return out(JSON.stringify(res, null, 2));
@@ -440,7 +543,7 @@ async function syncAccess(flags) {
 // and those have their own 1000/day quota (CLAUDE.md). Use `pagevault list --portal <slug>` for that.
 
 async function portals(flags) {
-  const cfg = requireConfig();
+  const cfg = commandTarget(flags);
   const { portals: all = [] } = await api(cfg, "GET", "/portals");
 
   if (flags.json) return out(JSON.stringify(all, null, 2));
@@ -456,7 +559,7 @@ async function portalCreate(pos, flags) {
     throw new PvError(usageError("portal-create"));
   }
 
-  const cfg = requireConfig();
+  const cfg = commandTarget(flags);
   const kind = typeof flags.kind === "string" ? flags.kind : undefined;
   const portal = await api(cfg, "POST", "/portals", {
     slug,
@@ -483,7 +586,7 @@ async function share(pos, flags) {
     throw new PvError(usageError("share"));
   }
 
-  const cfg = requireConfig();
+  const cfg = commandTarget(flags);
   const body = {};
   if (add.length) body.addMembers = add;
   if (remove.length) body.removeMembers = remove;
@@ -517,7 +620,10 @@ async function remove(pos, flags) {
   const id = pos[0];
   if (!id) throw new PvError(usageError("rm"));
 
-  const cfg = requireConfig();
+  const cfg = commandTarget(flags);
+  // On a protected deployment the prompt below is not enough — `--yes` must be typed, in a terminal
+  // or a script alike.
+  requireYesOnProtected(cfg, flags, "deleting a document");
 
   // Destructive. Confirm interactively unless --yes; a non-TTY (a script) must pass --yes.
   if (flags.yes !== true) {
@@ -533,7 +639,7 @@ async function remove(pos, flags) {
 }
 
 async function exportTree(pos, flags) {
-  const cfg = requireConfig();
+  const cfg = commandTarget(flags);
   const outDir = pos[0] || `./pagevault-export-${new Date().toISOString().slice(0, 10)}`;
 
   const summary = await buildExport(
@@ -551,14 +657,138 @@ async function exportTree(pos, flags) {
   out(summary.zipPath || summary.outDir);
 }
 
+/**
+ * Everything this machine can reach, and which one is selected (ADR-021 phase 3).
+ *
+ * The login config is listed too, as the implicit `default` it has always been. Leaving it out
+ * would show an operator a registry of one and a working `publish` they cannot account for.
+ */
+function deployments(flags) {
+  const registry = loadRegistry();
+  const rows = listDeployments(registry);
+  const config = loadConfig();
+
+  // Only when nothing in the registry already describes it — otherwise it is the same deployment
+  // listed twice under two identities, which is exactly the confusion this ADR removes.
+  const configCovered = !config.url || Boolean(findByUrl(registry, config.url));
+  const all = [
+    ...rows,
+    ...(configCovered ? [] : [{ name: "(login config)", url: config.url, current: !registry?.current, protected: false, provisioned: false, hasToken: Boolean(config.token) }]),
+  ];
+
+  if (flags.json) return out(JSON.stringify(all, null, 2));
+  if (!all.length) {
+    return note(
+      "No deployments. Add one:\n" +
+        "  pagevault login --as prod --url https://share.example.com --token <PAGEVAULT_API_TOKEN>",
+    );
+  }
+
+  note(
+    table(
+      ["", "NAME", "URL", "PROVISIONED", "PROTECTED"],
+      all.map((d) => [
+        d.current ? "*" : "",
+        d.name,
+        d.url,
+        // "Provisioned from this machine" — a fact about the deployment, not a fault (#144).
+        d.provisioned ? "yes" : "no",
+        d.protected ? "yes" : "",
+      ]),
+    ),
+  );
+  note("\n* is the default. Standing in a checkout still wins over it.");
+}
+
+/**
+ * Select the default deployment — the `current` rung of the resolution order, below the project
+ * marker. Writes the registry and nothing else; a marker in a working tree is never touched.
+ */
+function use(pos) {
+  const name = pos[0];
+  if (!name) throw new PvError(usageError("use"));
+
+  const registry = loadRegistry();
+  const entry = findByName(registry, name);
+  if (!entry) {
+    const known = Object.keys(registry?.deployments ?? {});
+    throw new PvError(
+      `No deployment named "${name}".\n` +
+        (known.length ? `Known: ${known.join(", ")}` : "None are registered — add one with `pagevault login --as <name> …`."),
+    );
+  }
+
+  saveRegistry({ ...registry, current: name }, process.env);
+  note(`→ ${name}  ${entry.url}`);
+  note("Standing in a checkout still selects that checkout's deployment.");
+}
+
 async function login(flags) {
   // Flags win, but fall back to the same env vars every other command already honors — so
   // `PAGEVAULT_URL=… PAGEVAULT_API_TOKEN=… pagevault login` persists your current environment to
   // config.json without re-typing it. Error only when neither a flag nor the env supplies a value.
-  const url = (typeof flags.url === "string" ? flags.url : process.env.PAGEVAULT_URL || "").replace(/\/+$/, "");
-  const token = typeof flags.token === "string" ? flags.token : process.env.PAGEVAULT_API_TOKEN || "";
+  // `--as <name>` is the door into the registry (ADR-021 phase 3), and the only one — nothing else
+  // writes a deployment entry, so an operator who never types it keeps the single-deployment
+  // config.json they have always had. Without it, `login` behaves exactly as before.
+  const name = typeof flags.as === "string" ? flags.as.trim() : "";
+  const before = name ? (loadRegistry() ?? emptyRegistry()) : emptyRegistry();
+  const existing = name ? findByName(before, name) : null;
+
+  // Protection is a property of a registry entry, so there is nowhere to put it without a name.
+  // Saying that beats writing a config.json and silently dropping the flag.
+  const wantsProtection = flags.protected === true || flags["no-protected"] === true;
+  if (wantsProtection && !name) {
+    throw new PvError(
+      "--protected applies to a named deployment. Add --as <name>:\n" +
+        "  pagevault login --as prod --url … --token … --protected\n" +
+        "  pagevault deployments        see which are registered",
+    );
+  }
+
+  // An already-registered deployment can be amended without re-typing its credentials, which is what
+  // makes `pagevault login --as prod --protected` a toggle rather than a re-registration.
+  const url = (typeof flags.url === "string" ? flags.url : process.env.PAGEVAULT_URL || existing?.url || "").replace(/\/+$/, "");
+  const token = typeof flags.token === "string" ? flags.token : process.env.PAGEVAULT_API_TOKEN || existing?.token || "";
   if (!url || !token) {
     throw new PvError(usageError("login"));
+  }
+
+  if (name) {
+    const patch = { url, token };
+    // Written as an explicit `false` rather than dropped, so the file states the decision. Every
+    // reader tests `=== true`, so absence and false mean the same thing to the code and different
+    // things to a person reading it.
+    if (flags.protected === true) patch.protected = true;
+    if (flags["no-protected"] === true) patch.protected = false;
+    let next = upsert(before, name, patch);
+
+    // Adopt `current` only when nothing has claimed it AND we are not stealing the default from a
+    // login that describes a DIFFERENT deployment. Registering prod-under-a-name should inherit the
+    // selection; registering a second, unrelated deployment should not silently repoint everything
+    // that runs outside a checkout. When we decline, `use` is one word away and we say so.
+    const configUrl = loadConfig().url;
+    const adopt = !before.current && (!configUrl || sameDeployment(configUrl, url));
+    if (adopt) next = { ...next, current: name };
+
+    const registryFile = saveRegistry(next, process.env);
+    note(`Registered ${name} → ${url} in ${registryFile} (mode 600).`);
+    if (next.deployments[name].protected === true) {
+      note(`${name} is protected — rm, revoke and rotate will require --yes.`);
+    } else if (flags["no-protected"] === true) {
+      note(`${name} is no longer protected.`);
+    }
+    // Nothing to say when it was already selected — re-running this to flip a flag should not read
+    // as advice to do something already done.
+    if (adopt) note(`${name} is now the default deployment.`);
+    else if (next.current !== name) note(`Make it the default: pagevault use ${name}`);
+
+    try {
+      await api({ url, token }, "GET", "/docs");
+      note("✓ Reached the deployment and authenticated.");
+    } catch (err) {
+      note(`⚠ Registered, but a test call failed: ${err.message}`);
+    }
+    return;
   }
 
   // The same writer `pagevault init` uses, so an install and an explicit login leave identical
@@ -668,7 +898,16 @@ Set up & deploy:
   pagevault init [--yes] [--cf-token <t>]   stand PageVault up on your own Cloudflare account (no repo)
                                 --cf-token is the CLOUDFLARE token (login --token is the PageVault one)
   pagevault upgrade [--yes]           redeploy the bundled Worker (after 'npm update -g pagevault')
-  pagevault login [--url <url>] [--token <token>]   point at a deployment (falls back to env; init does this)
+  pagevault login [--url <url>] [--token <token>] [--as <name>] [--protected]
+                                point at a deployment (falls back to env; init does this)
+                                --as registers it by name so several can coexist
+                                --protected makes rm/revoke/rotate require --yes there
+
+Several deployments on one machine:
+  pagevault deployments [--json]      everything this machine can reach; * is the default
+  pagevault use <name>                make one the default
+                                any command: --deployment <name>, or PAGEVAULT_DEPLOYMENT
+                                standing in a checkout always selects that checkout's deployment
 
 Publish & manage documents:
   pagevault publish <file.html|.md> [--portal s] [--name f] [--title t] [--summary s]
@@ -682,8 +921,9 @@ Publish & manage documents:
   pagevault link <id>                 print the shareable URL to stdout (| pbcopy)
   pagevault search <portal> <query …> [--limit N] [--json]
   pagevault mint <id>                 mint a public /p/ link for an existing document
-  pagevault revoke <id>               kill a document's public link (keeps the document)
-  pagevault rotate <id>               replace the public link with a fresh one
+  pagevault revoke <id> [--yes]       kill a document's public link (keeps the document)
+  pagevault rotate <id> [--yes]       replace the public link with a fresh one
+                                --yes is required only on a deployment marked protected
   pagevault rm <id> [--yes]           delete the document (there is no undo)
   pagevault export [dir] [--portal s] [--include-drafts] [--zip]
 
@@ -706,7 +946,8 @@ Operate your deployment:
   pagevault destroy [--keep-data]     tear the deployment down (asks; irreversible)
 
 Any command: pagevault <command> --help   for its flags and what they do.
-Config: PAGEVAULT_URL / PAGEVAULT_API_TOKEN, or ~/.pagevault/config.json (written by init/login).
+Config: PAGEVAULT_URL / PAGEVAULT_API_TOKEN, or ~/.pagevault/config.json (written by init/login),
+or ~/.pagevault/deployments.json for named deployments (written by login --as / use).
 On success, publish/mint/rotate print only the URL to stdout:  pagevault mint <id> | pbcopy
 read --source prints the stored body to stdout:  pagevault read <id> --source > report.md
 Export writes a browsable folder (index.html + one folder per portal); its path is printed to stdout.`;
@@ -762,10 +1003,9 @@ async function syncViews(flags) {
 
   const { loadContext, loadCloudToken } = await import("../lib/provision/context.mjs");
   const ctx = loadContext();
-  const cfg = requireConfig();
   // Before spending a Cloudflare query: the account we are about to read and the deployment we are
   // about to write to must be the same deployment.
-  const target = resolveWriteTarget(flags, cfg, "views --sync");
+  const target = resolveWriteTarget(flags, "views --sync");
 
   // 90 days, not the table's 30. "Have they ever opened it" is a lifetime question, and Analytics
   // Engine retains about three months — so a sync takes the whole window it can still see.

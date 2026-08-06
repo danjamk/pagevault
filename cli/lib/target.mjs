@@ -12,6 +12,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, parse } from "node:path";
+// `findByUrl` only — a pure comparison over an already-loaded registry. Loading the registry is the
+// caller's job, which keeps this module free of I/O it did not ask for.
+import { findByUrl } from "./registry.mjs";
 
 /** The file a checkout is recognized by. Also the file CI reconstructs — see `classifyMarker`. */
 export const MARKER = ".pagevault.json";
@@ -110,18 +113,26 @@ export function recordUrl(record) {
  *
  * Order — identical for every command, which is the whole point:
  *
- *   1. `--deployment <name>` / `--url <url>`   explicit, wins always
- *   2. PAGEVAULT_DEPLOYMENT / PAGEVAULT_URL    environment (direnv, CI, a one-off export)
- *   3. the nearest marker walking up from CWD  where you are standing
- *   4. the login config                        the global default
+ *   1. `--deployment <name>`                   explicit, by name
+ *   2. `--url <url>`                           explicit, by address
+ *   3. PAGEVAULT_DEPLOYMENT                    environment, by name (direnv, CI, a one-off export)
+ *   4. PAGEVAULT_URL                           environment, by address
+ *   5. the nearest marker walking up from CWD  where you are standing
+ *   6. the registry's `current`                the global default, set by `pagevault use`
+ *   7. the login config                        the implicit `default` deployment
  *
- * Step 4 is what makes a client-only install work (#144): an install that talks to a deployment it
+ * Step 7 is what makes a client-only install work (#144): an install that talks to a deployment it
  * did not provision is a legitimate configuration, and having a login but no build record is a fact
- * about that deployment rather than an error.
+ * about that deployment rather than an error. It stays as the final fallback permanently, so an
+ * operator who never creates a registry keeps working exactly as before.
  *
- * `registry` is the phase-3 named store (ADR-021 rollout). Until it exists, a pointer marker is
- * recognized and reported but cannot be resolved — no file writes one yet, so this is unreachable
- * in practice and is here so the discriminator above is honest rather than aspirational.
+ * `registry` is the phase-3 named store. Two ways a deployment gets attached to this result:
+ *
+ *   - a **pointer** marker (`{ deployment: "test" }`) or a name from (1)/(3)/(6), looked up directly
+ *   - a **build record** marker, matched into the registry BY URL — decision (b)
+ *
+ * The second is what lets a checkout keep its untouched `.pagevault.json` and still get a bearer.
+ * See `findByUrl` in registry.mjs for why rewriting that file was not an option.
  */
 export function resolveTarget({
   flags = {},
@@ -135,25 +146,53 @@ export function resolveTarget({
 } = {}) {
   const trim = (u) => String(u ?? "").replace(/\/+$/, "");
   const configUrl = trim(config.url);
+  const byName = (name) => (name ? (registry?.deployments?.[name] ?? null) : null);
 
   const markerPath = locate({ env, cwd, home });
   const marker = markerPath ? read(markerPath) : { kind: "empty" };
-  const named = marker.kind === "pointer" ? registry?.deployments?.[marker.name] ?? null : null;
-  const markerUrl = marker.kind === "record" ? recordUrl(marker.record) : trim(named?.url);
+  const pointed = marker.kind === "pointer" ? byName(marker.name) : null;
+  const markerUrl = marker.kind === "record" ? recordUrl(marker.record) : trim(pointed?.url);
 
-  // Explicit beats everything; environment beats where you happen to be standing.
+  // A name that names nothing must not silently fall through to whatever is next in the chain —
+  // that is how you act on the wrong deployment while believing you named the right one. Surfaced
+  // here, thrown by the caller, so this function stays pure.
+  const flagName = typeof flags.deployment === "string" ? flags.deployment.trim() : "";
+  const envName = String(env.PAGEVAULT_DEPLOYMENT ?? "").trim();
+  const askedName = flagName || envName;
+  const unknownDeployment = askedName && !byName(askedName) ? askedName : null;
+
+  const currentName = registry?.current ?? null;
+
+  // Explicit beats environment beats where you happen to be standing beats the global default.
   const candidates = [
+    ["flag-name", trim(byName(flagName)?.url)],
     ["flag", trim(flags.url)],
+    ["env-name", trim(byName(envName)?.url)],
     ["env", trim(env.PAGEVAULT_URL)],
     ["marker", markerUrl],
+    ["current", trim(byName(currentName)?.url)],
     ["config", configUrl],
   ];
   const [source, url] = candidates.find(([, value]) => value) ?? ["none", ""];
 
-  const record = marker.kind === "record" ? marker.record : named ?? null;
+  // Which registry entry is this? By name when we got here by name, otherwise by URL — so a build
+  // record, a `--url`, and the login config all pick up the matching entry's bearer and `protected`
+  // flag without anyone having to name it.
+  const namedBy = { "flag-name": flagName, "env-name": envName, current: currentName }[source] ?? null;
+  const direct = marker.kind === "pointer" && source === "marker" ? marker.name : namedBy;
+  const matched = direct
+    ? { name: direct, entry: byName(direct) }
+    : (url ? findByUrl(registry, url) : null);
+
+  const record = marker.kind === "record" ? marker.record : (pointed ?? matched?.entry ?? null);
   return {
     url,
     source,
+    // The deployment's name, when it has one. Null on an install with no registry — the URL is the
+    // identity there, which is unambiguous if wordy.
+    name: matched?.name ?? null,
+    entry: matched?.entry ?? null,
+    protected: matched?.entry?.protected === true,
     markerPath: markerPath ?? null,
     markerKind: marker.kind,
     // The build record backing this target, when there is one. `null` on a client-only install —
@@ -161,12 +200,16 @@ export function resolveTarget({
     record,
     provisioned: Boolean(record && (record.rung !== undefined || record.accountId)),
     // Both sources named a deployment and they disagree. Reads survive this; writes must not (#145).
+    // A matched registry entry carries the RIGHT bearer, so it settles the disagreement rather than
+    // being blocked by it — see resolveBearer.
     conflicted: Boolean(markerUrl && configUrl && markerUrl !== configUrl),
     markerUrl,
     configUrl,
-    // A pointer we cannot follow yet — phase 3. Surfaced so a caller can say so rather than
-    // silently falling through to the login config.
-    unresolvedPointer: marker.kind === "pointer" && !named ? marker.name : null,
+    // A pointer naming a deployment the registry does not hold. Surfaced so a caller can say so
+    // rather than silently falling through to the login config.
+    unresolvedPointer: marker.kind === "pointer" && !pointed ? marker.name : null,
+    // `--deployment` / PAGEVAULT_DEPLOYMENT named something unknown. Caller's job to refuse.
+    unknownDeployment,
   };
 }
 
@@ -183,9 +226,12 @@ export function resolveTarget({
 export function targetOrigin(t) {
   return (
     {
+      "flag-name": "--deployment",
       flag: "--url",
+      "env-name": "PAGEVAULT_DEPLOYMENT",
       env: "PAGEVAULT_URL",
       marker: t.markerPath ?? "project marker",
+      current: "the current deployment",
       config: "login config",
       none: "nowhere",
     }[t.source] ?? "unknown"
@@ -194,7 +240,9 @@ export function targetOrigin(t) {
 
 export function describeTarget(t) {
   if (!t.url) return "no deployment configured";
-  return `${t.url}  (from ${targetOrigin(t)})`;
+  // The name leads when there is one — it is what the operator typed and what `use` selected. An
+  // install with no registry keeps the URL-only line it has always printed.
+  return t.name ? `${t.name}  ${t.url}  (from ${targetOrigin(t)})` : `${t.url}  (from ${targetOrigin(t)})`;
 }
 
 /**
@@ -210,9 +258,15 @@ export function describeTarget(t) {
  * the other one and must not be sent. Returning "" makes the caller say "no bearer available",
  * which is true and actionable, rather than raising an authentication error about a deployment the
  * operator never meant to touch.
+ *
+ * The registry entry's token sits second, and it is what ends the standoff. It is not a guess: it
+ * was stored against this exact deployment, matched to it by name or by URL. When one is present
+ * the disagreement above is no longer a reason to refuse — we are holding the right credential, so
+ * `conflicted` gates only the login config's token, which is the one that could be the wrong one.
  */
 export function resolveBearer(target, { env = "", state = "", config = "" } = {}) {
   if (env) return env;
+  if (target?.entry?.token) return target.entry.token;
   if (state) return state;
   if (config && !target.conflicted) return config;
   return "";

@@ -21,6 +21,7 @@
 import { c, banner, loadContext, VERSION, SCHEMA_VERSION, RUNNING_FROM_REPO } from "../provision/context.mjs";
 import { resolveTarget, targetOrigin } from "../target.mjs";
 import { loadConfig } from "../client.mjs";
+import { loadRegistry } from "../registry.mjs";
 
 // The "not set up yet" nudge names the right door: `make setup` from the repo, `pagevault init`
 // from an install. Same reasoning everywhere a hint points at the setup step.
@@ -35,7 +36,7 @@ const CHECK_CMD = RUNNING_FROM_REPO ? "make health" : "pagevault health";
 export async function statusCmd({ json = false, flags = {}, out = (s) => process.stdout.write(`${s}\n`) } = {}) {
   const ctx = loadContext();
   // What this install would ACT on, which is not the same question as what it provisioned (#144).
-  const target = resolveTarget({ flags, config: loadConfig() });
+  const target = resolveTarget({ flags, config: loadConfig(), registry: loadRegistry() });
 
   if (json) {
     out(
@@ -49,6 +50,8 @@ export async function statusCmd({ json = false, flags = {}, out = (s) => process
           // below still means "provisioned from here"; these say whether there is anything to talk
           // to at all, which is the distinction a client-only install turns on (#144).
           deployment: target.url || null,
+          // Null on an install with no registry — there the URL is the identity (ADR-021).
+          deploymentName: target.name,
           deploymentSource: target.source,
           provisioned: target.provisioned,
           version: VERSION,
@@ -87,7 +90,8 @@ export async function statusCmd({ json = false, flags = {}, out = (s) => process
     // deployed by CI has a login and no build record, and `init` would deploy from their laptop.
     // Having a login but nothing provisioned here is a SHAPE, not a failure.
     if (target.url) {
-      row("Deployment", c.bold(target.url));
+      // The name leads when there is one — it is what `use` selected and what `--deployment` takes.
+      row("Deployment", target.name ? `${c.bold(target.name)}  ${c.dim(target.url)}` : c.bold(target.url));
       row("Resolved by", c.dim(targetOrigin(target)));
       console.log();
       console.log(`  ${c.dim("Connected, but not provisioned from this machine — so there is no tier, account or")}`);

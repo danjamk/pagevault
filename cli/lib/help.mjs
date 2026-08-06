@@ -56,7 +56,7 @@ bearer.`,
   ),
 
   login: H(
-    "Usage: pagevault login [--url https://share.example.com] [--token <PAGEVAULT_API_TOKEN>]",
+    "Usage: pagevault login [--url https://share.example.com] [--token <PAGEVAULT_API_TOKEN>] [--as <name>] [--protected]",
     `
 Point the CLI at a deployment: writes ~/.pagevault/config.json (mode 600 — it holds a bearer)
 and proves the connection works now rather than at your first publish.
@@ -65,7 +65,60 @@ Both flags are optional — they fall back to PAGEVAULT_URL and PAGEVAULT_API_TO
 \`pagevault login\` alone persists the environment you already have exported.
 
 \`init\` already does this for the deployment it stood up. Reach for \`login\` only for a second
-machine, or for someone else's deployment.`,
+machine, or for someone else's deployment.
+
+  --as <name>           register it by NAME in ~/.pagevault/deployments.json instead, so this
+                        machine can hold several deployments at once — a production instance
+                        deployed by CI and a test one you deploy from a checkout.
+  --protected           on this deployment, rm/revoke/rotate require an explicit --yes.
+                        --no-protected clears it. Needs --as; there is nowhere else to put it.
+
+Without --as nothing changes: one deployment, one config.json, exactly as before. With it, the
+bearer travels with the deployment, so a command can never pair one deployment's URL with
+another's credential.
+
+Re-running it on a deployment already registered amends that entry, so the credentials need not be
+retyped to change a flag:
+
+  pagevault login --as prod --protected
+
+\`--as\` does not steal the default from a login that describes a different deployment. When it
+declines, it says so, and \`pagevault use <name>\` is one word away.`,
+  ),
+
+  deployments: H(
+    "Usage: pagevault deployments [--json]",
+    `
+Everything this machine can reach, with \`*\` marking the default. The login config is listed
+too, as the implicit deployment it has always been.
+
+PROVISIONED means the build record is on THIS machine, so \`upgrade\`, \`destroy\` and \`backup\`
+can run. Its absence is a fact about the deployment — the normal state for one deployed by CI —
+not a fault.
+
+Which one a command acts on, in order:
+
+  --deployment <name>       explicit
+  PAGEVAULT_DEPLOYMENT      environment (direnv, CI, a one-off export)
+  the checkout you are in   .pagevault.json, found by walking up from where you stand
+  the default               \`*\` above, set by \`pagevault use\`
+  the login config          ~/.pagevault/config.json
+
+Standing somewhere is the guardrail: inside a checkout you get that checkout's deployment
+whether or not you remember to say so.`,
+  ),
+
+  use: H(
+    "Usage: pagevault use <name>",
+    `
+Make a registered deployment the default — the rung below the project marker, so it decides
+everywhere except inside a checkout that names its own.
+
+Writes ~/.pagevault/deployments.json and nothing else. No file in a working tree is touched, and
+no bearer is ever written into a repository — a gitignore is one \`git add -f\` from being wrong.
+
+  pagevault deployments     see what is registered
+  pagevault login --as <name> --url … --token …    register one`,
   ),
 
   // --- Publish & manage documents ----------------------------------------------------------
