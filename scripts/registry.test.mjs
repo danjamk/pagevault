@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   REGISTRY_FILE, emptyRegistry, findByName, findByUrl, isValidName, listDeployments,
-  loadRegistry, registryPath, remove, saveRegistry, upsert,
+  loadRegistry, registryPath, remove, saveRegistry, shouldAdoptCurrent, upsert,
 } from "../cli/lib/registry.mjs";
 
 /** A scratch PAGEVAULT_HOME, torn down after `fn`. */
@@ -165,4 +165,28 @@ test("the listing reports provisioned-from-here as a fact, not a fault (#144)", 
   assert.equal(test_.provisioned, true, "a build record on this machine means provisioning can run");
   assert.equal(test_.current, false);
   assert.deepEqual(listDeployments(null), []);
+});
+// --- claiming the default (#171) ---------------------------------------------------------------
+
+test("🔴 a deploy never takes the default from a login describing another deployment (#171)", () => {
+  // `pagevault upgrade` on the test deployment overwrote a config.json describing production. Where
+  // production's bearer lived only in that file — which it did, until minutes before this was found
+  // — the credential was destroyed rather than shadowed.
+  assert.equal(shouldAdoptCurrent(null, "https://test.invalid", "https://prod.invalid"), false);
+  assert.equal(shouldAdoptCurrent(REG, "https://test.example.com", ""), false, "`current` already claimed");
+});
+
+test("the ordinary single-deployment install still claims it, exactly as before", () => {
+  // Deploying the deployment you are already logged into, and the first-ever deploy with no login at
+  // all. Both must keep working or this fix breaks the ADR-014 install path it is protecting.
+  assert.equal(shouldAdoptCurrent(null, "https://prod.invalid", "https://prod.invalid"), true);
+  assert.equal(shouldAdoptCurrent(null, "https://prod.invalid", ""), true);
+  // Trailing slashes and host casing must not be what decides this, same as everywhere else.
+  assert.equal(shouldAdoptCurrent(null, "https://prod.invalid", "https://PROD.invalid/"), true);
+});
+
+test("an unclaimed registry still lets a matching deployment take the default", () => {
+  const unclaimed = { current: null, deployments: REG.deployments };
+  assert.equal(shouldAdoptCurrent(unclaimed, "https://prod.example.com", "https://prod.example.com"), true);
+  assert.equal(shouldAdoptCurrent(unclaimed, "https://other.example.com", "https://prod.example.com"), false);
 });

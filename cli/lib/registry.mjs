@@ -116,6 +116,28 @@ export function findByUrl(registry, url) {
 }
 
 /**
+ * 🔴 May this deployment claim the global default?
+ *
+ * One rule, two callers: `login --as` and the installed deploy/upgrade path. It existed only in the
+ * first, which is why `pagevault upgrade` on the test deployment overwrote a login describing
+ * production (#171) — and, before production was registered, would have destroyed the only copy of
+ * its bearer rather than merely shadowing it.
+ *
+ * Yes when nothing has claimed `current` AND we are not taking the default away from a login that
+ * describes a DIFFERENT deployment. Registering or deploying the deployment you are already pointed
+ * at should inherit the selection; doing it to a second, unrelated one must not silently repoint
+ * everything that runs outside a checkout.
+ *
+ * Note this is deliberately correct with no registry at all (`null`): a single-deployment install
+ * deploys the deployment it is logged into, so `sameDeployment` holds and the default is claimed
+ * exactly as it always was. The only behaviour that changes is the one that was wrong.
+ */
+export function shouldAdoptCurrent(registry, url, configUrl) {
+  if (registry?.current) return false;
+  return !configUrl || sameDeployment(configUrl, url);
+}
+
+/**
  * Add or update one deployment, returning a NEW registry — callers save it explicitly.
  *
  * Merges rather than replaces, so `use` and a later `login --as` do not each drop the fields the
