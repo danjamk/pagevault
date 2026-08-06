@@ -10,6 +10,7 @@
 // a global login, and CI, and neither is convenient to reproduce by hand.
 //
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, parse } from "node:path";
 
 /** The file a checkout is recognized by. Also the file CI reconstructs — see `classifyMarker`. */
@@ -37,6 +38,30 @@ export function findMarker(start, { exists = existsSync } = {}) {
     if (parent === dir) return null; // defensive: a path that will not shrink
     dir = parent;
   }
+}
+
+/**
+ * Where is this invocation's marker? Three places, in strict order.
+ *
+ * 1. **`PAGEVAULT_HOME`, exclusively.** Its documented job is to "isolate EVERYTHING for a given
+ *    deployment", and it is what every test suite uses: `HOME` and `PAGEVAULT_HOME` point at a temp
+ *    dir *while the suite runs from the repo root*. If ascent could win here, the e2e suite would
+ *    walk up, find the real `.pagevault.json`, and drive commands against a live deployment instead
+ *    of local wrangler. So when it is set, we look there and nowhere else — no ascent, no fallback.
+ * 2. **Ascent from CWD**, so standing anywhere in a checkout selects that checkout's deployment.
+ * 3. **`~/.pagevault/`**, the installed default. Ascent cannot reach it (the marker sits *inside*
+ *    `.pagevault/`, not in `$HOME`), so it is checked explicitly or an installed operator standing
+ *    in an unrelated directory would resolve nothing.
+ */
+export function locateMarker({ env = process.env, cwd = process.cwd(), home = homedir(), exists = existsSync } = {}) {
+  if (env.PAGEVAULT_HOME) {
+    const pinned = join(env.PAGEVAULT_HOME, MARKER);
+    return exists(pinned) ? pinned : null;
+  }
+  const found = findMarker(cwd, { exists });
+  if (found) return found;
+  const installed = join(home, ".pagevault", MARKER);
+  return exists(installed) ? installed : null;
 }
 
 /**
@@ -102,15 +127,16 @@ export function resolveTarget({
   flags = {},
   env = process.env,
   cwd = process.cwd(),
+  home = homedir(),
   config = { url: "", token: "" },
   registry = null,
-  find = findMarker,
+  locate = locateMarker,
   read = readMarker,
 } = {}) {
   const trim = (u) => String(u ?? "").replace(/\/+$/, "");
   const configUrl = trim(config.url);
 
-  const markerPath = find(cwd);
+  const markerPath = locate({ env, cwd, home });
   const marker = markerPath ? read(markerPath) : { kind: "empty" };
   const named = marker.kind === "pointer" ? registry?.deployments?.[marker.name] ?? null : null;
   const markerUrl = marker.kind === "record" ? recordUrl(marker.record) : trim(named?.url);
@@ -142,4 +168,31 @@ export function resolveTarget({
     // silently falling through to the login config.
     unresolvedPointer: marker.kind === "pointer" && !named ? marker.name : null,
   };
+}
+
+/**
+ * One line naming what a command is about to act on, and why that one.
+ *
+ * Every operator command prints this before acting. The "why" half is not decoration: the whole
+ * class of bug this replaces was invisible precisely because nothing ever said which deployment had
+ * been chosen or which file chose it.
+ *
+ * Names arrive with the registry (ADR-021 phase 3); until then the URL is the identity, which is
+ * unambiguous if wordy.
+ */
+export function targetOrigin(t) {
+  return (
+    {
+      flag: "--url",
+      env: "PAGEVAULT_URL",
+      marker: t.markerPath ?? "project marker",
+      config: "login config",
+      none: "nowhere",
+    }[t.source] ?? "unknown"
+  );
+}
+
+export function describeTarget(t) {
+  if (!t.url) return "no deployment configured";
+  return `${t.url}  (from ${targetOrigin(t)})`;
 }

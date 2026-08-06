@@ -21,6 +21,7 @@ import { c, ok, die, loadContext, fromEnv, banner, mcpCall, runHint, EXPECTED_MC
 // One source of truth for the sample's title: `restore` keys its "this is disposable" check on it.
 import { SAMPLE_TITLE } from "./restore-plan.mjs";
 import { loadConfig } from "../client.mjs";
+import { resolveTarget, describeTarget } from "../target.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -163,14 +164,22 @@ export async function verifyCmd({ json = false } = {}) {
   };
 
   const ctx = loadContext();
-  const base = (ctx.deployedUrl ?? (ctx.host ? `https://${ctx.host}` : "")).replace(/\/$/, "");
+  // Resolve like every other operator command (ADR-021): a login for a deployment this machine did
+  // not provision is a legitimate configuration, and verify refusing to run there was #144.
+  const target = resolveTarget({ config: loadConfig() });
+  const base = target.url;
   if (!base) {
     record("deployed", false);
     if (json) return finish(false, { reason: "not_deployed" });
-    die("No deployed URL in .pagevault.json.", "Run `pagevault init` first (or `make deploy` from the repo).");
+    die("No deployment to verify.", [
+      "Nothing named one — no PAGEVAULT_URL, no project marker, no login config.",
+      `  ${c.bold(runHint("deploy", "init"))}  to stand one up`,
+      `  ${c.bold("pagevault login --url … --token …")}  to point at one you already have`,
+    ]);
   }
 
   say(banner("verify", base));
+  say(`  ${c.dim("→")} ${describeTarget(target)}\n`);
 
   const get = async (path, init) => {
     try {
@@ -229,15 +238,28 @@ export async function verifyCmd({ json = false } = {}) {
     // conclusive — and telling someone to wait for a certificate on a Worker that does not exist is
     // the same wrong-cause failure as the DNS one above. We only got here via the `ctx.host`
     // fallback, since an empty base is caught earlier.
-    if (dns === "nowhere" && !ctx.deployedUrl) {
+    // Only claim "never built" when this machine is the one that WOULD have built it. On a
+    // client-only install the absence of a build record says nothing about whether a deployment
+    // exists — someone else deployed it — so the honest report is that the name does not resolve.
+    if (dns === "nowhere" && !ctx.deployedUrl && target.provisioned) {
       say(`\n  ${c.yellow("!")} ${c.bold("Nothing is deployed at this hostname.")}`);
       say(`  ${c.dim(`${base} resolves nowhere, and this checkout has no record of a deploy —`)}`);
       say(`  ${c.dim("so this is a deployment that has not been built yet, or one that was torn down.")}`);
       say(`\n     ${c.bold(runHint("deploy", "init"))}\n`);
       return finish(false, { reason: "not_deployed" });
     }
+    if (dns === "nowhere" && !target.provisioned) {
+      say(`\n  ${c.red("✗")} ${c.bold(`${base} does not resolve.`)}`);
+      say(`  ${c.dim("Nothing was provisioned from this machine, so this cannot say whether the")}`);
+      say(`  ${c.dim("deployment was torn down or the hostname is simply wrong. Check the URL you")}`);
+      say(`  ${c.dim("are logged in to, and with whoever deploys it.")}\n`);
+      return finish(false, { reason: "dns_nowhere" });
+    }
 
-    if ((ctx.rung ?? 1) >= 2) {
+    // A custom domain waits on a certificate; workers.dev waits on route propagation. With no build
+    // record the URL itself distinguishes them, which is more reliable than a defaulted rung.
+    const customDomain = ctx.rung !== undefined ? ctx.rung >= 2 : !new URL(base).hostname.endsWith(".workers.dev");
+    if (customDomain) {
       // Rung 2/3 is a CUSTOM domain: the delay is edge-certificate provisioning, not workers.dev
       // propagation. Different cause, different wait — say so, or it reads as a broken deploy.
       say(`\n  ${c.dim("A custom domain provisions its own TLS certificate, which can take a few minutes on a")}`);
@@ -257,8 +279,22 @@ export async function verifyCmd({ json = false } = {}) {
   {
     const { status, res } = await get("/");
     const loc = res?.headers.get("location") ?? "";
-    const rung = ctx.rung ?? 1;
-    if (rung >= 3) {
+
+    // On a client-only install there is no build record, so we do not know which tier to expect —
+    // and `ctx.rung ?? 1` would assert Public against a Secured deployment, reporting a FALSE
+    // failure for a root that is behaving perfectly. Derive the tier from the deployment instead of
+    // from local intent: 302 → /admin is Secured, 200 is Public, and anything else is wrong under
+    // either. Deriving beats guessing here even when a record exists — but where one does, the
+    // recorded tier is a real expectation and drift from it is exactly what verify is for.
+    const rung = ctx.rung;
+    if (rung === undefined) {
+      const secured = status === 302 && loc.endsWith("/admin");
+      const isPublic = status === 200;
+      record("root", secured || isPublic, `${status}${loc ? ` → ${loc}` : ""}`);
+      if (secured) say(`  ${c.green("✓")} Root redirects to /admin ${c.dim("(Secured — inferred, nothing provisioned here)")}`);
+      else if (isPublic) say(`  ${c.green("✓")} Root serves the landing page ${c.dim("(Public — inferred, nothing provisioned here)")}`);
+      else say(`  ${c.red("✗")} Root returned ${status}${loc ? ` → ${loc}` : ""} (expected 200, or 302 → /admin when Secured)`);
+    } else if (rung >= 3) {
       const rootOk = status === 302 && loc.endsWith("/admin");
       record("root", rootOk, `${status}${loc ? ` → ${loc}` : ""}`);
       // `✗`, not `!` — this is a counted check, so its glyph must match the verdict it produces.

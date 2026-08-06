@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -160,11 +160,11 @@ test("operator commands are dispatched and fail closed with no deployment config
   // to read, so the provenance has to be a field it can branch on.
   assert.equal(parsed.source, "local");
 
-  // verify/health need a deployed URL; with none they die BEFORE any network call.
+  // verify/health need a deployment to talk to; with none they die BEFORE any network call.
   for (const cmd of ["verify", "health"]) {
     const r = runIn(home, cmd);
     assert.equal(r.status, 1, `${cmd} should exit 1`);
-    assert.match(r.text, /No deployed URL/);
+    assert.match(r.text, /No deployment|No deployed URL/);
     assert.doesNotMatch(r.text, /Unknown command/);
   }
 
@@ -308,4 +308,26 @@ test("PAGEVAULT_HOME isolates the login config from HOME", () => {
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, join(pvHome, "config.json")); // under PAGEVAULT_HOME, not HOME
   assert.ok(statSync(join(pvHome, "config.json")).isFile());
+});
+test("a client-only install is a state, not an error (#144)", () => {
+  // The shape an operator has when production is deployed by CI: a login, and no build record
+  // because nothing was ever provisioned from this machine. `status` used to call that "not
+  // configured" and point at `init` — which, on that machine, would deploy production from a
+  // laptop. Having a login and no build record is a shape, not a failure.
+  const home = mkdtempSync(join(tmpdir(), "pv-clientonly-"));
+  writeFileSync(join(home, "config.json"), JSON.stringify({ url: "https://prod.example.com", token: "tok" }));
+
+  const st = runIn(home, "status");
+  assert.equal(st.status, 0);
+  assert.match(st.text, /prod\.example\.com/, "it must name the deployment it would act on");
+  assert.match(st.text, /not provisioned from this machine/i);
+  assert.doesNotMatch(st.text, /Not configured yet/, "a working install must not be called unconfigured");
+  assert.doesNotMatch(st.text, /pagevault init|make setup/, "must never point a client-only install at init");
+
+  // The same distinction has to survive into --json, where there is no tone to read.
+  const sj = JSON.parse(runIn(home, "status", "--json").stdout);
+  assert.equal(sj.deployment, "https://prod.example.com");
+  assert.equal(sj.deploymentSource, "config");
+  assert.equal(sj.provisioned, false);
+  assert.equal(sj.configured, false, "`configured` still means provisioned-from-here");
 });

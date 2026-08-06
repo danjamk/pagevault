@@ -8,25 +8,39 @@
 // instead of going green on a rollout that silently didn't take. `--json` emits the verdict as an
 // object (drivable, #33) while keeping the same exit codes.
 //
-import { c, ok, warn, die, loadContext, releaseTag, banner, fromEnv, mcpCall } from "../provision/context.mjs";
+import { c, ok, warn, die, releaseTag, banner, fromEnv, mcpCall, runHint } from "../provision/context.mjs";
+import { resolveTarget, describeTarget } from "../target.mjs";
+import { loadConfig } from "../client.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const emit = (obj) => process.stdout.write(`${JSON.stringify(obj, null, 2)}\n`);
 
-/** @param {{ json?: boolean }} [opts] */
-export async function healthCmd({ json = false } = {}) {
-  const ctx = loadContext();
-  const base = (ctx.deployedUrl ?? (ctx.host ? `https://${ctx.host}` : "")).replace(/\/$/, "");
+/** @param {{ json?: boolean, flags?: object }} [opts] */
+export async function healthCmd({ json = false, flags = {} } = {}) {
+  const target = resolveTarget({ flags, config: loadConfig() });
+  const base = target.url;
   if (!base) {
     if (json) {
-      emit({ ok: false, reason: "not_deployed" });
+      emit({ ok: false, reason: "not_configured" });
       process.exit(1);
     }
-    die("No deployed URL in .pagevault.json.", "Deploy first — the deploy step records where it landed.");
+    die("No deployment to check.", [
+      "Nothing named one — no --url, no PAGEVAULT_URL, no project marker, no login config.",
+      `  ${c.bold(runHint("deploy", "init"))}  to stand one up`,
+      `  ${c.bold("pagevault login --url … --token …")}  to point at one you already have`,
+    ]);
   }
 
+  // Asserting the deployed build matches THIS install only means something when this install is
+  // what deploys it. On a client-only install — a login for a deployment CI deploys (#144) — a
+  // difference is expected rather than a fault: this laptop can hold 0.28.0 while CI shipped
+  // 0.29.0, and failing on that would make `health` unusable on the deployment it matters most for.
+  const pinned = target.provisioned;
   const expected = releaseTag();
-  if (!json) console.log(banner("health-check", `${base} · expecting ${c.bold(expected)}`));
+  if (!json) {
+    console.log(banner("health-check", pinned ? `expecting ${c.bold(expected)}` : "reporting what it runs"));
+    console.log(`  ${c.dim("→")} ${describeTarget(target)}\n`);
+  }
 
   const matches = (h) => h.ok && h.version === expected;
   async function probe() {
@@ -41,9 +55,10 @@ export async function healthCmd({ json = false } = {}) {
   }
 
   // A just-deployed Worker can take a beat to serve the new build everywhere. Poll before failing —
-  // same shape as verify: a transient miss is propagation, not a bad deploy.
+  // same shape as verify: a transient miss is propagation, not a bad deploy. Only when we are
+  // asserting a match: with no version to wait for, polling would be a minute spent on nothing.
   let last = await probe();
-  if (!matches(last)) {
+  if (pinned && !matches(last)) {
     if (!json) process.stdout.write(`  ${c.dim("Waiting for /health to report the new build")}`);
     for (let i = 0; i < 11 && !matches(last); i++) {
       await sleep(5000);
@@ -53,7 +68,7 @@ export async function healthCmd({ json = false } = {}) {
     if (!json) process.stdout.write("\n");
   }
 
-  if (matches(last)) {
+  if (pinned ? matches(last) : last.ok) {
     // The build string matches. But a version-correct deploy with a dead /mcp is still a broken
     // deploy (#75) — assert the MCP surface answers when we have a bearer; skip (don't fail) when
     // we don't, e.g. a CI context without the token.
@@ -78,10 +93,14 @@ export async function healthCmd({ json = false } = {}) {
       mcp = "up";
     }
     if (json) {
-      emit({ ok: true, version: last.version, expected, mcp });
+      emit({ ok: true, version: last.version, expected, mcp, pinned, source: target.source });
       return;
     }
-    ok(`/health reports ${c.bold(last.version)} — matches the shipped build.`);
+    ok(
+      pinned
+        ? `/health reports ${c.bold(last.version)} — matches the shipped build.`
+        : `/health reports ${c.bold(last.version)}. This install did not deploy it, so there is no build to match it against.`,
+    );
     mcp === "up" ? ok("/mcp answers — the MCP surface is up.") : warn("No PAGEVAULT_API_TOKEN — skipped the /mcp reachability check.");
     process.exit(0);
   }

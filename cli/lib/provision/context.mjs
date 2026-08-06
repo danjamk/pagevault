@@ -179,10 +179,18 @@ export function die(message, hint) {
 /** The PageVault product version (semver). Shown in command headers, baked into the deploy. */
 export const VERSION = (() => {
   try {
-    // Repo: the root package.json (cwd is the repo root when make/CLI run from source). Installed:
-    // there is no root package.json at cwd, so read the version stamped into the shipped bundle dir
-    // by build-bundle.mjs at pack time — the product version, not the npm package's own (#87).
-    if (RUNNING_FROM_REPO) return JSON.parse(readFileSync("package.json", "utf8")).version ?? "0.0.0";
+    // Repo: the root package.json, resolved from THIS MODULE rather than from cwd. It used to be a
+    // bare `readFileSync("package.json")`, which assumed cwd was the repo root — true when every
+    // invocation came from `make` at the top level, false the moment you run from `worker/` or
+    // `cli/`, where it silently fell through to "0.0.0". `health` then asserts `0.0.0+<sha>`
+    // against the deployment and fails for a reason that has nothing to do with the deployment.
+    // ADR-021 makes running from a subdirectory normal, so this cannot stay cwd-relative.
+    //
+    // Installed: there is no root package.json, so read the version stamped into the shipped bundle
+    // dir by build-bundle.mjs at pack time — the product version, not the npm package's own (#87).
+    if (RUNNING_FROM_REPO) {
+      return JSON.parse(readFileSync(fileURLToPath(new URL("../../../package.json", import.meta.url)), "utf8")).version ?? "0.0.0";
+    }
     return readFileSync(fileURLToPath(new URL("../../dist/version.txt", import.meta.url)), "utf8").trim() || "0.0.0";
   } catch {
     return "0.0.0";
