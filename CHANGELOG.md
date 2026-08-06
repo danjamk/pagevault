@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.30.0] — 2026-08-06
+
+The first five minutes of a Windows install, fixed. Found by running one.
+
 ### Fixed
 - **The "save your Cloudflare token" instruction named a file the CLI does not read.** It said
   ``echo 'CLOUDFLARE_API_TOKEN=<paste>' > .env.local`` — a path relative to wherever the operator
@@ -1248,7 +1252,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.29.1...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/danjamk/pagevault/compare/v0.29.1...v0.30.0
 [0.29.1]: https://github.com/danjamk/pagevault/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/danjamk/pagevault/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/danjamk/pagevault/compare/v0.27.0...v0.28.0
