@@ -665,7 +665,8 @@ function usageText() {
   return `pagevault ${VERSION} — publish HTML or Markdown to your PageVault deployment
 
 Set up & deploy:
-  pagevault init [--yes]              stand PageVault up on your own Cloudflare account (no repo)
+  pagevault init [--yes] [--cf-token <t>]   stand PageVault up on your own Cloudflare account (no repo)
+                                --cf-token is the CLOUDFLARE token (login --token is the PageVault one)
   pagevault upgrade [--yes]           redeploy the bundled Worker (after 'npm update -g pagevault')
   pagevault login [--url <url>] [--token <token>]   point at a deployment (falls back to env; init does this)
 

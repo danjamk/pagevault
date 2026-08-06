@@ -20,7 +20,7 @@ const H = (usage, detail = "") => ({ usage, detail });
 export const HELP = {
   // --- Set up & deploy ---------------------------------------------------------------------
   init: H(
-    "Usage: pagevault init [--tier public|secured] [--host h] [--email you@example.com] [--yes]",
+    "Usage: pagevault init [--tier public|secured] [--host h] [--email you@example.com] [--cf-token t] [--yes]",
     `
 Stand PageVault up on your own Cloudflare account — no repo clone. Walks you through the
 Cloudflare API token, the tier, the owner email and the account, writes state to ~/.pagevault/,
@@ -33,7 +33,11 @@ documents carry across keeping their ids and filenames.
   --host pagevault.you.com  the hostname. Required for Secured, optional for Public
   --email you@example.com   the owner — the identity that can always see everything
   --rung 1|2|3            the escape hatch: 1 = workers.dev, 2 = your domain, 3 = Secured
+  --cf-token <token>      your CLOUDFLARE API token, instead of saving it to .env.local first
   --yes                   never prompt; flags and the environment supply every answer
+
+⚠ --cf-token is the CLOUDFLARE credential — the one that provisions. \`login --token\` is the
+  PageVault bearer. Two different secrets; the flags are named apart on purpose.
 
 ⚠ --yes on a FIRST deployment also needs a bearer. Non-interactively there is nobody to show a
   freshly minted PAGEVAULT_API_TOKEN to, so init refuses rather than deploying a Worker you

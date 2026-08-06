@@ -7,6 +7,37 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **The "save your Cloudflare token" instruction named a file the CLI does not read.** It said
+  ``echo 'CLOUDFLARE_API_TOKEN=<paste>' > .env.local`` — a path relative to wherever the operator
+  was standing — while the loader read `stateDir()/.env.local`, which on an install is
+  `~/.pagevault/.env.local`. Those match only by luck. Follow the instruction from any other
+  directory and the token is written somewhere nothing reads, `init` reports no token, and the
+  message repeats the instruction that just failed. Nothing named a directory, so there was no
+  thread to pull.
+
+  It now prints the resolved path. From a repo checkout that is still the bare `.env.local` it has
+  always been, because there the state dir *is* the cwd. ([#157](../../issues/157))
+
+- **On Windows the same line wrote a file that could not be read back.** `>` in Windows PowerShell
+  5.1 — the default shell on a stock Windows box — redirects as UTF-16LE, which the env parser
+  cannot parse. The token was saved, looked perfect in Notepad, and produced "no token". Windows now
+  gets `Set-Content … -Encoding ascii`, which is correct on both 5.1 and 7. Found standing up 0.29.1
+  on a clean Windows 11 machine. ([#157](../../issues/157))
+
+### Added
+- **`pagevault init --cf-token <token>`** — hand the Cloudflare credential straight to `init`, for
+  a machine where pasting into the terminal is awkward or there is no TTY at all. It is persisted
+  like a pasted one, so the commands after `init` do not each need it repeated.
+
+  Named `--cf-token`, not `--token`: `login --token` already means the PageVault *bearer*, and one
+  flag name for two different credentials on adjacent commands is how a broad provisioning token
+  ends up saved in a login config. ([#157](../../issues/157))
+
+- **`init` reports which credential it is using** — `--cf-token`, the environment, or the path to
+  the `.env.local` it read. An exported `CLOUDFLARE_API_TOKEN` silently beats a `.env.local`, and
+  the two can name different accounts; the loser used to be invisible. ([#157](../../issues/157))
+
 ## [0.29.1] — 2026-08-06
 
 A credential could reach a deployment it did not belong to. It cannot now.

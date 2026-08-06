@@ -15,7 +15,7 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, versions } from "node:process";
 import { pathToFileURL } from "node:url";
-import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cfApi, cfAccounts, acct, tokenSetupFlow, banner, runHint, argValue, fromEnv } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cloudTokenSource, writeEnvLocalVar, cfApi, cfAccounts, acct, tokenSetupFlow, banner, runHint, argValue, fromEnv } from "./context.mjs";
 
 /**
  * The active zones (domains) the pinned account owns — so the rung-2 hostname prompt can suggest
@@ -257,6 +257,16 @@ export async function setup(opts = {}) {
     token = loadCloudToken(); // pick up what we just wrote to .env.local
     console.log();
   }
+
+  // A token handed in on the command line is persisted, so the commands AFTER init — deploy,
+  // verify, destroy — do not each need it repeated. Same file the paste prompt writes, so both
+  // routes leave the install in one state.
+  if (argValue("--cf-token")) writeEnvLocalVar("CLOUDFLARE_API_TOKEN", token);
+
+  // Say which credential is in play. `.env.local` and an exported CLOUDFLARE_API_TOKEN can hold
+  // different tokens for different accounts, and the loser is silent — the operator finds out by
+  // reading the account name below and, if it looks right, never finds out at all.
+  info(`Token from ${c.bold(cloudTokenSource())}.`);
 
   const accounts = await cfAccounts();
   if (accounts.length === 0) {
