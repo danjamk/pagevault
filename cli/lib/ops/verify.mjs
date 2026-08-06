@@ -21,6 +21,7 @@ import { c, ok, die, loadContext, fromEnv, banner, mcpCall, runHint, EXPECTED_MC
 // One source of truth for the sample's title: `restore` keys its "this is disposable" check on it.
 import { SAMPLE_TITLE } from "./restore-plan.mjs";
 import { loadConfig } from "../client.mjs";
+import { loadRegistry } from "../registry.mjs";
 import { resolveTarget, describeTarget, resolveBearer } from "../target.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -166,7 +167,7 @@ export async function verifyCmd({ json = false } = {}) {
   const ctx = loadContext();
   // Resolve like every other operator command (ADR-021): a login for a deployment this machine did
   // not provision is a legitimate configuration, and verify refusing to run there was #144.
-  const target = resolveTarget({ config: loadConfig() });
+  const target = resolveTarget({ config: loadConfig(), registry: loadRegistry() });
   const base = target.url;
   if (!base) {
     record("deployed", false);

@@ -7,6 +7,41 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **Named deployments — one machine can hold several, and each carries its own bearer.**
+  `~/.pagevault/deployments.json` (mode 600) records a url + bearer per name.
+  `pagevault login --as <name>` registers one, `pagevault deployments` lists everything this
+  machine can reach, and `pagevault use <name>` picks the default. Any command takes
+  `--deployment <name>`, and `PAGEVAULT_DEPLOYMENT` works for direnv and CI.
+
+  Standing in a checkout still selects that checkout's deployment, the way `git` and `npm` find
+  theirs — so the guardrail costs no discipline. Every command prints which one it chose and why,
+  on stderr, so `pagevault publish report.html | pbcopy` still carries only the URL.
+
+  `CLOUDFLARE_API_TOKEN` is deliberately **not** in the registry: it stays in per-clone
+  `.env.local`, because that placement is what keeps the credential that can destroy
+  infrastructure off the laptop entirely. ([#159](../../issues/159), ADR-021 phase 3)
+
+- **A deployment can be marked `"protected": true`.** On one, `rm`, `revoke` and `rotate` require
+  an explicit `--yes`. Publishing, editing and sharing are untouched — a confirmation on the
+  operation you perform most gets answered reflexively within a day. A refusal rather than a
+  prompt, so it means the same thing in a terminal and in a script. ([#159](../../issues/159))
+
+### Fixed
+- **Document commands acted on a different deployment than `status` reported.** Standing in a
+  checkout, `status` named the deployment that checkout provisioned while `list`, `publish` and
+  `rm` went to whatever `pagevault login` last saved — production, on the machine this was found
+  on. Same directory, same invocation, two deployments.
+
+  The resolver added in 0.29.x was correct; the document commands never consulted it, because
+  `config.json` holds exactly one url + token pair and a second deployment's bearer had nowhere to
+  live. They now resolve the deployment and its credential together, from one place.
+
+  A checkout's `.pagevault.json` is matched into the registry **by URL**, so nothing in a working
+  tree is rewritten and the `.pagevault.json` CI restores from a secret keeps working untouched.
+  Where no entry matches, the refusal from 0.29.1 stands — the registry supplies a correct
+  credential, it never loosens the rule against sending the wrong one. ([#159](../../issues/159))
+
 ## [0.30.0] — 2026-08-06
 
 The first five minutes of a Windows install, fixed. Found by running one.

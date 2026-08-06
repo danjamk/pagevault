@@ -9,10 +9,10 @@
 > never lives on my laptop. `.github/workflows/deploy-prod.yml` is that machinery. Delete it in a
 > fork and nothing breaks. Read on if you want a pattern for the same split; otherwise skip it.
 
-## The model: environment is whichever token is active
+## The model: two credentials, and one of them never lands on your laptop
 
-PageVault has no "environment" concept baked into the product. There's one Worker, one hostname,
-one KV namespace. "Dev" and "prod" are just **which Cloudflare account the active token targets**:
+There's one Worker, one hostname, one KV namespace per deployment. What separates dev from prod is
+**which Cloudflare account the active token targets**:
 
 | | Credential lives in | Who can deploy |
 |---|---|---|
@@ -22,6 +22,26 @@ one KV namespace. "Dev" and "prod" are just **which Cloudflare account the activ
 The point is the split: the prod credential is **never on your laptop**. A wrong-clone `make
 deploy` can't touch prod because the machine simply doesn't hold the prod token. One account per
 environment — never two PageVault deployments in one account.
+
+### What this covers, and what it does not
+
+This protects every command that needs a **Cloudflare** token — `deploy`, `destroy`, `backup`,
+`restore`. It says nothing about the **bearer**, which is what `publish`, `rm`, `revoke`,
+`sync-access` and `views --sync` use. The moment a laptop holds a production bearer — which is the
+correct setup for operating a CI-deployed deployment, and what `pagevault login` exists to create —
+this split stops covering the surface you touch every day.
+
+That gap is what [ADR-021](../adr/ADR-021-a-deployment-is-a-named-thing.md) closes, so the product
+now *does* have a deployment concept: `~/.pagevault/deployments.json` holds a **named** deployment
+per url + bearer, and every command resolves exactly one of them — by `--deployment`, by
+`PAGEVAULT_DEPLOYMENT`, by the checkout you are standing in, or by the default `pagevault use` set.
+See [the CLI reference](../setup/cli-reference.md#several-deployments-on-one-machine).
+
+**The Cloudflare credential does not move.** `CLOUDFLARE_API_TOKEN` and `CF_RUNTIME_TOKEN` stay in
+per-clone `.env.local`, deliberately, because that placement *is* the guarantee above. A global
+registry holding production's Cloudflare token would put it back on the laptop and undo the one
+thing that has been working. The registry holds url, bearer and build metadata — never the
+credential that can create or destroy infrastructure.
 
 ## One-time: bootstrap prod, then hand the keys to CI
 

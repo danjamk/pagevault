@@ -11,13 +11,14 @@
 import { c, ok, warn, die, releaseTag, banner, fromEnv, mcpCall, runHint } from "../provision/context.mjs";
 import { resolveTarget, describeTarget, resolveBearer } from "../target.mjs";
 import { loadConfig } from "../client.mjs";
+import { loadRegistry } from "../registry.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const emit = (obj) => process.stdout.write(`${JSON.stringify(obj, null, 2)}\n`);
 
 /** @param {{ json?: boolean, flags?: object }} [opts] */
 export async function healthCmd({ json = false, flags = {} } = {}) {
-  const target = resolveTarget({ flags, config: loadConfig() });
+  const target = resolveTarget({ flags, config: loadConfig(), registry: loadRegistry() });
   const base = target.url;
   if (!base) {
     if (json) {
