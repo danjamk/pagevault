@@ -257,3 +257,128 @@ test("an explicit token still wins over a conflict — the operator named it", (
   const conflicted = resolveIn("/repo");
   assert.equal(resolveBearer(conflicted, { env: "explicit", config: "prod-bearer" }), "explicit");
 });
+
+// --- the named registry (ADR-021 phase 3) ------------------------------------------------------
+
+const REGISTRY = {
+  current: "prod",
+  deployments: {
+    prod: { url: "https://prod.example.com", token: "prod-bearer", protected: true },
+    test: { url: "https://test.example.com", token: "test-bearer", rung: 3, accountId: "acct" },
+  },
+};
+
+/** As resolveIn, but with the registry loaded — the phase-3 world. */
+const resolveReg = (cwd, extra = {}) => resolveIn(cwd, { registry: REGISTRY, ...extra });
+
+test("🔴 a build record finds its bearer in the registry, by URL (#159)", () => {
+  // THE bug this phase exists to close. Standing in the checkout, `status` reported the test
+  // deployment (from the marker) while `list` and `publish` hit PROD, because the only bearer on
+  // the machine was the login config's and there was nowhere to keep test's. Same directory, same
+  // invocation, two deployments.
+  //
+  // The marker is untouched — still a build record, no `deployment` key, exactly what CI writes.
+  const t = resolveReg("/repo/worker/src");
+  assert.equal(t.url, "https://test.example.com", "still resolved by where you are standing");
+  assert.equal(t.source, "marker");
+  assert.equal(t.markerKind, "record", "no working-tree file was rewritten to make this work");
+  assert.equal(t.name, "test", "matched into the registry by URL — decision (b)");
+  assert.equal(resolveBearer(t, { config: "prod-bearer" }), "test-bearer", "the deployment's own bearer");
+});
+
+test("without a matching entry the refusal stands — the registry adds, it never loosens", () => {
+  // Same conflicted target, registry that does not know this deployment. resolveBearer must still
+  // refuse rather than fall back to the login config's token (#155).
+  const t = resolveReg("/repo", { registry: { current: null, deployments: { prod: REGISTRY.deployments.prod } } });
+  assert.equal(t.name, null);
+  assert.equal(t.conflicted, true);
+  assert.equal(resolveBearer(t, { config: "prod-bearer" }), "", "must refuse, not misdeliver");
+});
+
+test("--deployment resolves by name and outranks everything", () => {
+  const t = resolveReg("/repo", { flags: { deployment: "prod" } });
+  assert.equal(t.url, "https://prod.example.com");
+  assert.equal(t.source, "flag-name");
+  assert.equal(t.name, "prod");
+  assert.equal(t.protected, true, "protected travels with the deployment, not the command");
+
+  // Even against an explicit --url, which is the next rung down.
+  const both = resolveReg("/repo", { flags: { deployment: "prod", url: "https://flag.example.com" } });
+  assert.equal(both.url, "https://prod.example.com");
+});
+
+test("PAGEVAULT_DEPLOYMENT works for direnv and CI, and loses to a flag", () => {
+  const t = resolveReg("/repo", { env: { PAGEVAULT_DEPLOYMENT: "prod" } });
+  assert.equal(t.source, "env-name");
+  assert.equal(t.name, "prod");
+
+  const flagWins = resolveReg("/repo", { env: { PAGEVAULT_DEPLOYMENT: "prod" }, flags: { url: "https://flag.example.com" } });
+  assert.equal(flagWins.source, "flag");
+});
+
+test("🔴 a name that names nothing is refused, never quietly downgraded", () => {
+  // Falling through to the next rung here means acting on a DIFFERENT deployment while the operator
+  // believes they named one. The resolver stays pure and reports it; the caller throws.
+  const t = resolveReg("/repo", { flags: { deployment: "staging" } });
+  assert.equal(t.unknownDeployment, "staging");
+  assert.equal(resolveReg("/repo").unknownDeployment, null);
+});
+
+test("`current` is the global default: below where you stand, above the login config", () => {
+  // Outside any checkout, `pagevault use prod` decides. Inside one, the checkout still wins — that
+  // is the property that makes standing somewhere a guardrail rather than a suggestion.
+  const outside = resolveTarget({
+    cwd: "/elsewhere",
+    env: {},
+    config: { url: "https://old-login.example.com", token: "stale" },
+    locate: () => null,
+    registry: { current: "test", deployments: REGISTRY.deployments },
+  });
+  assert.equal(outside.url, "https://test.example.com");
+  assert.equal(outside.source, "current");
+  assert.equal(outside.name, "test");
+
+  assert.equal(resolveReg("/repo/worker").source, "marker", "the checkout still beats `current`");
+});
+
+test("the login config keeps working as the implicit default when no registry exists", () => {
+  // The permanent fallback. An operator who never runs `use` sees exactly the behaviour they had.
+  const t = resolveTarget({ cwd: "/elsewhere", env: {}, config: { url: "https://prod.example.com", token: "b" }, locate: () => null });
+  assert.equal(t.source, "config");
+  assert.equal(t.name, null);
+  assert.equal(resolveBearer(t, { config: "b" }), "b");
+});
+
+test("a URL reached any other way still picks up its entry's bearer and protection", () => {
+  // --url, PAGEVAULT_URL and the login config all match by URL, so naming a deployment is a
+  // convenience rather than a requirement for getting the right credential.
+  const t = resolveReg("/elsewhere", { flags: { url: "https://prod.example.com" }, locate: () => null });
+  assert.equal(t.name, "prod");
+  assert.equal(t.protected, true);
+  assert.equal(resolveBearer(t, {}), "prod-bearer");
+});
+
+test("the target line leads with the name once there is one to lead with", () => {
+  assert.match(describeTarget(resolveReg("/repo")), /^test {2}https:\/\/test\.example\.com {2}\(from .*\.pagevault\.json\)$/);
+  assert.equal(
+    describeTarget(resolveReg("/repo", { flags: { deployment: "prod" } })),
+    "prod  https://prod.example.com  (from --deployment)",
+  );
+  // No registry, no name — the URL-only line the ADR-021 phase-2 tests already pin.
+  assert.equal(describeTarget(resolveIn("/repo", { env: { PAGEVAULT_URL: "https://env.example.com" } })), "https://env.example.com  (from PAGEVAULT_URL)");
+});
+
+test("a pointer marker resolves and carries its bearer, for anyone who opts into one", () => {
+  const t = resolveTarget({
+    cwd: "/repo",
+    env: {},
+    config: { url: "https://prod.example.com", token: "prod-bearer" },
+    locate: (o) => locateMarker({ ...o, exists: inRepo.exists }),
+    read: () => ({ kind: "pointer", name: "test" }),
+    registry: REGISTRY,
+  });
+  assert.equal(t.url, "https://test.example.com");
+  assert.equal(t.name, "test");
+  assert.equal(t.unresolvedPointer, null);
+  assert.equal(resolveBearer(t, { config: "prod-bearer" }), "test-bearer");
+});
