@@ -7,6 +7,36 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **The state directory follows the deployment, so a credential can no longer be sent to the wrong
+  one.** ADR-021 phase 2 gave every operator command one rule for *which URL* it targets and left
+  `stateDir()` reading `~/.pagevault` regardless of where the operator stood — so half the answer
+  moved and half did not. `verify` took the URL from a checkout's `.pagevault.json` and the bearer
+  from `~/.pagevault/config.json`, and **sent production's token to the test deployment**. The 401 it
+  came back with was luck: had the two shared a bearer it would have authenticated against the wrong
+  deployment and run a write round-trip there.
+
+  `stateDir()` now resolves from the same marker that resolves the URL, so `.env.local`,
+  `.pagevault.json` and the bearer all describe one deployment. A login's token is refused outright
+  when the login describes a different deployment than the one resolved — no bearer is a better
+  answer than the wrong bearer. `PAGEVAULT_HOME` still wins outright; it is what isolates the test
+  suites. ([#155](../../issues/155))
+
+- **`status` and `health` no longer disagree about the same deployment.** From one directory,
+  `health` said "expecting <build> — matches the shipped build" while `status` said "not provisioned
+  from this machine": health branched on the resolver, status on `loadContext()`. Both now branch on
+  the resolver. ([#155](../../issues/155))
+
+- **`health` finds a bearer it already has.** It read only `.env.local` and reported "No
+  PAGEVAULT_API_TOKEN — skipped the /mcp reachability check" while a usable bearer sat in the login
+  config — the one `verify` picked up seconds later against the same deployment.
+  ([#155](../../issues/155))
+
+- **`upgrade` and `deploy` stop telling a client-only install to run `init`.** On a machine whose
+  production is deployed by CI, that is the one command that would deploy production from a laptop.
+  It now says the install holds a login rather than a build record, and points at the checkout that
+  owns the deployment. ([#144](../../issues/144), [#155](../../issues/155))
+
 ## [0.29.0] — 2026-08-06
 
 The deployment you are acting on, said out loud — and a PDF that matches the page.

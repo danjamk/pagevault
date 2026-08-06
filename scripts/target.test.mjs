@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { classifyMarker, describeTarget, findMarker, locateMarker, readMarker, recordUrl, resolveTarget } from "../cli/lib/target.mjs";
+import { classifyMarker, describeTarget, findMarker, locateMarker, readMarker, recordUrl, resolveBearer, resolveTarget } from "../cli/lib/target.mjs";
 
 // --- classification: content, never an assumed shape -------------------------------------------
 
@@ -225,4 +225,35 @@ test("the target line names the deployment AND why it was chosen", () => {
 test("nothing configured says so plainly rather than printing an empty URL", () => {
   const none = resolveTarget({ cwd: "/x", env: {}, config: {}, locate: () => null });
   assert.equal(describeTarget(none), "no deployment configured");
+});
+
+// --- pairing the bearer with the deployment ----------------------------------------------------
+
+test("🔴 a login token is never sent to a deployment the login does not describe (#155)", () => {
+  // The bug this exists to stop: `verify` took the URL from a checkout's marker and the token from
+  // ~/.pagevault/config.json, and sent PRODUCTION's bearer to the test deployment. The 401 was
+  // luck — had the two shared a bearer it would have authenticated against the wrong one and run a
+  // write round-trip there.
+  const conflicted = resolveIn("/repo"); // marker → test, login → prod
+  assert.equal(conflicted.conflicted, true);
+  assert.equal(resolveBearer(conflicted, { config: "prod-bearer" }), "", "must refuse, not misdeliver");
+
+  // Agreement is the ordinary case, and there the login's token is exactly right.
+  const agreed = resolveIn("/repo", { config: { url: "https://test.example.com", token: "t" } });
+  assert.equal(agreed.conflicted, false);
+  assert.equal(resolveBearer(agreed, { config: "test-bearer" }), "test-bearer");
+});
+
+test("bearer precedence: environment, then state dir, then login", () => {
+  const t = resolveIn("/repo", { config: { url: "https://test.example.com" } });
+  assert.equal(resolveBearer(t, { env: "E", state: "S", config: "C" }), "E");
+  assert.equal(resolveBearer(t, { state: "S", config: "C" }), "S");
+  assert.equal(resolveBearer(t, { config: "C" }), "C");
+  assert.equal(resolveBearer(t, {}), "");
+});
+
+test("an explicit token still wins over a conflict — the operator named it", () => {
+  // `PAGEVAULT_API_TOKEN=… pagevault verify` is how you deliberately act on the other deployment.
+  const conflicted = resolveIn("/repo");
+  assert.equal(resolveBearer(conflicted, { env: "explicit", config: "prod-bearer" }), "explicit");
 });

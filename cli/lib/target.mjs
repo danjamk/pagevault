@@ -196,3 +196,24 @@ export function describeTarget(t) {
   if (!t.url) return "no deployment configured";
   return `${t.url}  (from ${targetOrigin(t)})`;
 }
+
+/**
+ * The bearer that belongs to the resolved deployment — or nothing (#155).
+ *
+ * 🔴 A credential is not interchangeable with a URL. `verify` used to take the URL from a
+ * checkout's marker and the token from `~/.pagevault/config.json`, and sent PRODUCTION's bearer to
+ * the test deployment. It came back 401, which was luck: had the two shared a bearer it would have
+ * authenticated against the wrong one and run a write round-trip there.
+ *
+ * So the login config's token is usable only when the login config describes the deployment we
+ * resolved. When the marker and the login disagree — `target.conflicted` — that token belongs to
+ * the other one and must not be sent. Returning "" makes the caller say "no bearer available",
+ * which is true and actionable, rather than raising an authentication error about a deployment the
+ * operator never meant to touch.
+ */
+export function resolveBearer(target, { env = "", state = "", config = "" } = {}) {
+  if (env) return env;
+  if (state) return state;
+  if (config && !target.conflicted) return config;
+  return "";
+}

@@ -11,10 +11,11 @@
 import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { fileURLToPath } from "node:url";
+import { locateMarker } from "../target.mjs";
 
 export const CONTEXT_FILE = ".pagevault.json";
 
@@ -37,9 +38,27 @@ export const RUNNING_FROM_REPO = !fileURLToPath(import.meta.url).includes(`${sep
  */
 export const runHint = (makeCmd, cliCmd) => (RUNNING_FROM_REPO ? `make ${makeCmd}` : `pagevault ${cliCmd}`);
 
-/** The directory holding operator state. See the note above. */
+/**
+ * The directory holding operator state. See the note above.
+ *
+ * 🔴 It follows the marker (#155). ADR-021 phase 2 gave every operator command one rule for which
+ * URL it targets and left this reading `~/.pagevault` regardless of where the operator stood — so
+ * half the answer moved and half did not. `verify` took the URL from a checkout's `.pagevault.json`
+ * and the bearer from `~/.pagevault/config.json`, and sent PRODUCTION's token to the test
+ * deployment. A 401 was the lucky outcome.
+ *
+ * Resolving the state dir from the same marker that resolved the URL means `.env.local`,
+ * `.pagevault.json` and the bearer all describe one deployment.
+ *
+ * `PAGEVAULT_HOME` still wins outright: it is what isolates the test suites, which run from the
+ * repo root while pointing HOME and PAGEVAULT_HOME at a temp dir. If ascent could beat it, the e2e
+ * suite would find the real checkout's state and drive a live deployment.
+ */
 export function stateDir() {
   if (process.env.PAGEVAULT_HOME) return process.env.PAGEVAULT_HOME;
+  const marker = locateMarker();
+  if (marker) return dirname(marker);
+  // Nothing provisioned yet — where `init` will write. Unchanged.
   return RUNNING_FROM_REPO ? process.cwd() : join(homedir(), ".pagevault");
 }
 

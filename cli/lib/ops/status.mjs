@@ -76,7 +76,12 @@ export async function statusCmd({ json = false, flags = {}, out = (s) => process
   row("State schema", `v${ctx.schemaVersion ?? SCHEMA_VERSION}`);
   console.log();
 
-  if (ctx.rung === undefined) {
+  // `target.provisioned`, not `ctx.rung` (#155). They disagreed: from a checkout, `health` said
+  // "expecting <build> — matches" while `status` said "not provisioned from this machine", because
+  // status read `loadContext()` and health read the resolver. Now that `stateDir()` follows the
+  // marker they agree at the source, but branching on the resolver's answer is what keeps them
+  // agreeing — it is the one that knows which deployment was chosen.
+  if (!target.provisioned) {
     // Two very different situations used to print the same "not configured — run init" line, and
     // for one of them that advice is actively dangerous (#144): an operator whose production is
     // deployed by CI has a login and no build record, and `init` would deploy from their laptop.
