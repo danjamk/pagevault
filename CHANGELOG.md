@@ -22,10 +22,18 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
   `.env.local`, because that placement is what keeps the credential that can destroy
   infrastructure off the laptop entirely. ([#159](../../issues/159), ADR-021 phase 3)
 
-- **A deployment can be marked `"protected": true`.** On one, `rm`, `revoke` and `rotate` require
-  an explicit `--yes`. Publishing, editing and sharing are untouched — a confirmation on the
-  operation you perform most gets answered reflexively within a day. A refusal rather than a
-  prompt, so it means the same thing in a terminal and in a script. ([#159](../../issues/159))
+- **A deployment can be marked protected**, with `pagevault login --as prod --protected`
+  (`--no-protected` clears it). On one, `rm`, `revoke` and `rotate` require an explicit `--yes`.
+  Publishing, editing and sharing are untouched — a confirmation on the operation you perform most
+  gets answered reflexively within a day. A refusal rather than a prompt, so it means the same
+  thing in a terminal and in a script. Re-running `login --as` on a deployment already registered
+  amends that entry, so a flag can be flipped without retyping a bearer.
+  ([#159](../../issues/159))
+
+- **ADR-023 — the summary is the history.** Design work for the view-tracking model: the stored
+  summary accumulates rather than being replaced from a rolling 90-day query, so a document's count
+  can no longer go *down* between syncs while its timestamp looks fresher. Proposed; no code yet.
+  ([#150](../../issues/150))
 
 ### Fixed
 - **Document commands acted on a different deployment than `status` reported.** Standing in a
@@ -41,6 +49,17 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
   tree is rewritten and the `.pagevault.json` CI restores from a secret keeps working untouched.
   Where no entry matches, the refusal from 0.29.1 stands — the registry supplies a correct
   credential, it never loosens the rule against sending the wrong one. ([#159](../../issues/159))
+
+- **`deploy` no longer claims the CLI points somewhere else when it doesn't.** After a deploy from
+  a checkout it warned that "document commands still point at a different deployment", comparing
+  against `config.json` alone. They resolve the nearest marker first, so they point at what was
+  just built — the claim was false. What is actually missing is the bearer, and that is now what it
+  says, with `login --as` as the fix. ([#159](../../issues/159))
+
+- **`deploy` recognizes a machine whose logins live only in the registry.** It told such a machine
+  to run `init` — which would provision production from a laptop, the hazard
+  [#144](../../issues/144) was filed for. It now looks for any reachable deployment, named or not.
+  ([#159](../../issues/159))
 
 ## [0.30.0] — 2026-08-06
 

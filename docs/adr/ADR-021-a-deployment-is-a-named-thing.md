@@ -279,4 +279,6 @@ tempting, but a bearer in a working tree is one `git add -f` from a public repos
 - ADR-014 — installed, not cloned: the installed package is the product, so its ergonomics are
   the product's ergonomics
 - `cli/lib/provision/context.mjs` — `stateDir()`, `RUNNING_FROM_REPO`, the schema migrations
-- `cli/lib/client.mjs` — `CONFIG_PATH`, `loadConfig`, `requireConfig`
+- `cli/lib/client.mjs` — `CONFIG_PATH`, `loadConfig` (`requireConfig` was removed in phase 3; the
+  deployment and its bearer now resolve together in `commandTarget`)
+- `cli/lib/registry.mjs` — the phase-3 named store

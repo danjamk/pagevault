@@ -105,8 +105,19 @@ Rung 3 is the guardrail: inside a checkout you get that checkout's deployment wh
 remember to say so, the same way `git` and `npm` find theirs. Every command prints which one it chose
 and why — on stderr, so `pagevault publish report.html | pbcopy` still carries only the URL.
 
-A deployment may be marked `"protected": true` in the registry. On a protected deployment the
-destructive document commands — `rm`, `revoke`, `rotate` — require an explicit `--yes`.
+### Protecting one
+
+```bash
+pagevault login --as prod --protected     # amends an entry already registered
+```
+
+On a protected deployment the destructive document commands — `rm`, `revoke`, `rotate` — require an
+explicit `--yes`. Publishing, editing and sharing are unaffected: a confirmation on the operation you
+perform most gets answered reflexively within a day. It is a refusal rather than a prompt, so it
+means the same thing in a terminal and in a script. `--no-protected` clears it.
+
+Re-running `login --as <name>` on a deployment already registered amends that entry, so credentials
+need not be retyped to change a flag.
 
 ---
 

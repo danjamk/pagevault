@@ -56,7 +56,7 @@ bearer.`,
   ),
 
   login: H(
-    "Usage: pagevault login [--url https://share.example.com] [--token <PAGEVAULT_API_TOKEN>] [--as <name>]",
+    "Usage: pagevault login [--url https://share.example.com] [--token <PAGEVAULT_API_TOKEN>] [--as <name>] [--protected]",
     `
 Point the CLI at a deployment: writes ~/.pagevault/config.json (mode 600 — it holds a bearer)
 and proves the connection works now rather than at your first publish.
@@ -70,10 +70,17 @@ machine, or for someone else's deployment.
   --as <name>           register it by NAME in ~/.pagevault/deployments.json instead, so this
                         machine can hold several deployments at once — a production instance
                         deployed by CI and a test one you deploy from a checkout.
+  --protected           on this deployment, rm/revoke/rotate require an explicit --yes.
+                        --no-protected clears it. Needs --as; there is nowhere else to put it.
 
 Without --as nothing changes: one deployment, one config.json, exactly as before. With it, the
 bearer travels with the deployment, so a command can never pair one deployment's URL with
 another's credential.
+
+Re-running it on a deployment already registered amends that entry, so the credentials need not be
+retyped to change a flag:
+
+  pagevault login --as prod --protected
 
 \`--as\` does not steal the default from a login that describes a different deployment. When it
 declines, it says so, and \`pagevault use <name>\` is one word away.`,

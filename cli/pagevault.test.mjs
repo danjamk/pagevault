@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -465,4 +465,32 @@ test("without a matching entry the #155 refusal still stands", () => {
   assert.notEqual(r.status, 0);
   assert.match(r.text, /No bearer for https:\/\/test\.invalid/);
   assert.match(r.text, /pagevault login --as/, "it must say how to fix it, not just that it refused");
+});
+
+test("--protected is a flag, in both directions, without retyping credentials", () => {
+  // Hand-editing deployments.json was the only way to set this, which is a thin door for the
+  // guardrail. Re-running `login --as` on a registered deployment amends it, so flipping a flag
+  // does not mean re-supplying a bearer.
+  const home = registryHome();
+  const read = () => JSON.parse(readFileSync(join(home, "deployments.json"), "utf8")).deployments;
+
+  runIn(home, "login", "--as", "test", "--protected");
+  assert.equal(read().test.protected, true);
+  assert.equal(read().test.token, "test-bearer", "credentials survive an amend");
+  assert.equal(read().test.url, "https://test.invalid");
+  assert.match(runIn(home, "rm", "abc", "--deployment", "test").text, /protected deployment/);
+
+  runIn(home, "login", "--as", "test", "--no-protected");
+  assert.equal(read().test.protected, false);
+  assert.doesNotMatch(runIn(home, "rm", "abc", "--deployment", "test").text, /protected deployment/);
+});
+
+test("--protected without --as says where it belongs rather than dropping it", () => {
+  // Protection is a property of a registry entry. Writing a config.json and silently discarding the
+  // flag would leave an operator believing production was guarded.
+  const home = mkdtempSync(join(tmpdir(), "pv-protnoas-"));
+  const r = runIn(home, "login", "--url", "https://x.invalid", "--token", "t", "--protected");
+  assert.notEqual(r.status, 0);
+  assert.match(r.text, /--protected applies to a named deployment/);
+  assert.ok(!existsSync(join(home, "config.json")), "and it must not have written the login it refused");
 });

@@ -727,19 +727,40 @@ async function login(flags) {
   // Flags win, but fall back to the same env vars every other command already honors — so
   // `PAGEVAULT_URL=… PAGEVAULT_API_TOKEN=… pagevault login` persists your current environment to
   // config.json without re-typing it. Error only when neither a flag nor the env supplies a value.
-  const url = (typeof flags.url === "string" ? flags.url : process.env.PAGEVAULT_URL || "").replace(/\/+$/, "");
-  const token = typeof flags.token === "string" ? flags.token : process.env.PAGEVAULT_API_TOKEN || "";
-  if (!url || !token) {
-    throw new PvError(usageError("login"));
-  }
-
   // `--as <name>` is the door into the registry (ADR-021 phase 3), and the only one — nothing else
   // writes a deployment entry, so an operator who never types it keeps the single-deployment
   // config.json they have always had. Without it, `login` behaves exactly as before.
   const name = typeof flags.as === "string" ? flags.as.trim() : "";
+  const before = name ? (loadRegistry() ?? emptyRegistry()) : emptyRegistry();
+  const existing = name ? findByName(before, name) : null;
+
+  // Protection is a property of a registry entry, so there is nowhere to put it without a name.
+  // Saying that beats writing a config.json and silently dropping the flag.
+  const wantsProtection = flags.protected === true || flags["no-protected"] === true;
+  if (wantsProtection && !name) {
+    throw new PvError(
+      "--protected applies to a named deployment. Add --as <name>:\n" +
+        "  pagevault login --as prod --url … --token … --protected\n" +
+        "  pagevault deployments        see which are registered",
+    );
+  }
+
+  // An already-registered deployment can be amended without re-typing its credentials, which is what
+  // makes `pagevault login --as prod --protected` a toggle rather than a re-registration.
+  const url = (typeof flags.url === "string" ? flags.url : process.env.PAGEVAULT_URL || existing?.url || "").replace(/\/+$/, "");
+  const token = typeof flags.token === "string" ? flags.token : process.env.PAGEVAULT_API_TOKEN || existing?.token || "";
+  if (!url || !token) {
+    throw new PvError(usageError("login"));
+  }
+
   if (name) {
-    const before = loadRegistry() ?? emptyRegistry();
-    let next = upsert(before, name, { url, token });
+    const patch = { url, token };
+    // Written as an explicit `false` rather than dropped, so the file states the decision. Every
+    // reader tests `=== true`, so absence and false mean the same thing to the code and different
+    // things to a person reading it.
+    if (flags.protected === true) patch.protected = true;
+    if (flags["no-protected"] === true) patch.protected = false;
+    let next = upsert(before, name, patch);
 
     // Adopt `current` only when nothing has claimed it AND we are not stealing the default from a
     // login that describes a DIFFERENT deployment. Registering prod-under-a-name should inherit the
@@ -751,7 +772,15 @@ async function login(flags) {
 
     const registryFile = saveRegistry(next, process.env);
     note(`Registered ${name} → ${url} in ${registryFile} (mode 600).`);
-    note(adopt ? `${name} is now the default deployment.` : `Make it the default: pagevault use ${name}`);
+    if (next.deployments[name].protected === true) {
+      note(`${name} is protected — rm, revoke and rotate will require --yes.`);
+    } else if (flags["no-protected"] === true) {
+      note(`${name} is no longer protected.`);
+    }
+    // Nothing to say when it was already selected — re-running this to flip a flag should not read
+    // as advice to do something already done.
+    if (adopt) note(`${name} is now the default deployment.`);
+    else if (next.current !== name) note(`Make it the default: pagevault use ${name}`);
 
     try {
       await api({ url, token }, "GET", "/docs");
@@ -869,9 +898,10 @@ Set up & deploy:
   pagevault init [--yes] [--cf-token <t>]   stand PageVault up on your own Cloudflare account (no repo)
                                 --cf-token is the CLOUDFLARE token (login --token is the PageVault one)
   pagevault upgrade [--yes]           redeploy the bundled Worker (after 'npm update -g pagevault')
-  pagevault login [--url <url>] [--token <token>] [--as <name>]
+  pagevault login [--url <url>] [--token <token>] [--as <name>] [--protected]
                                 point at a deployment (falls back to env; init does this)
                                 --as registers it by name so several can coexist
+                                --protected makes rm/revoke/rotate require --yes there
 
 Several deployments on one machine:
   pagevault deployments [--json]      everything this machine can reach; * is the default

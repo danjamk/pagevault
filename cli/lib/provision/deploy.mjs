@@ -17,7 +17,8 @@ import {
 } from "./context.mjs";
 import { provisionAccess } from "./provision.mjs";
 import { writeTier0Config } from "./tier0.mjs";
-import { saveLoginConfig, loadConfig, CONFIG_PATH } from "../client.mjs";
+import { saveLoginConfig, loadConfig, sameDeployment, CONFIG_PATH } from "../client.mjs";
+import { findByUrl, loadRegistry } from "../registry.mjs";
 
 const CONFIG_OUT = generatedConfigPath();
 
@@ -42,8 +43,15 @@ export async function deploy(opts = {}) {
     // "Run `init` first" is the right hint for a machine that has never provisioned anything, and
     // the WRONG one for a machine holding a login to a deployment someone else deploys — there,
     // `init` would provision production from a laptop (#144, #155). Distinguish the two by whether
-    // a login exists at all.
-    const { url } = loadConfig({});
+    // this machine can reach ANY deployment.
+    //
+    // "Any" now includes a named one: since ADR-021 phase 3 a machine can hold its logins entirely
+    // in the registry and never write config.json, and reading only config.json there would send an
+    // operator who is plainly not new straight at `init` (#159). The registry's default is the
+    // deployment to name, falling back to whichever is registered when none is selected.
+    const registry = loadRegistry();
+    const named = registry?.deployments?.[registry?.current] ?? Object.values(registry?.deployments ?? {})[0];
+    const url = loadConfig({}).url || named?.url || "";
     if (url) {
       die(`Nothing to deploy from here — this install did not provision ${url}.`, [
         "It has a login, not a build record, which is what an operator has when the deployment is",
@@ -271,20 +279,28 @@ export async function deploy(opts = {}) {
     const path = saveLoginConfig({ url, token: bearerValue });
     ok(`Saved ${path} — ${c.bold("pagevault publish")} is ready, no ${c.bold("login")} step needed.`);
   } else if (RUNNING_FROM_REPO && url) {
-    // We deliberately do NOT repoint a repo run's login config (see above) — but a config left by
-    // an earlier install silently WINS over the deployment we just built, so `pagevault publish`
-    // from this checkout would write somewhere else entirely. That is a wrong-deployment write, and
-    // it is worth a loud line rather than a confusing "Could not reach <host you never mentioned>"
-    // at first publish. See #120.
+    // We deliberately do NOT repoint a repo run's login config (see above).
+    //
+    // This warning used to say the document commands "still point at a different deployment",
+    // comparing against config.json alone. That was true when they read config.json directly; since
+    // ADR-021 phase 3 they resolve the nearest marker first, and after this deploy the marker names
+    // exactly what we just built. So they point HERE — the claim would now be false (#159).
+    //
+    // What is still missing is the BEARER. A login describing another deployment is deliberately not
+    // sent here (#155), so the next `pagevault list` from this checkout fails for want of a
+    // credential rather than writing somewhere it should not. Better to say so now than to let a
+    // first publish discover it.
     const configured = loadConfig({}).url; // file only — env is per-command and not ours to judge
-    if (configured && configured !== url) {
+    const registered = Boolean(findByUrl(loadRegistry(), url));
+    const loginCovers = configured && sameDeployment(configured, url);
+    if (!registered && !loginCovers && !process.env.PAGEVAULT_API_TOKEN) {
       console.log();
-      warn(`${c.bold("pagevault")}'s document commands still point at a different deployment.`);
+      warn(`${c.bold("pagevault")}'s document commands will resolve this deployment but have no bearer for it.`);
       console.log(`  ${c.dim("just deployed")}  ${c.bold(url)}`);
-      console.log(`  ${c.dim("config.json  ")}  ${configured} ${c.dim(`(${CONFIG_PATH})`)}`);
-      console.log(`\n  ${c.dim("From a repo, deploy leaves that file alone on purpose. To point the CLI here:")}`);
-      console.log(`     ${c.bold(`pagevault login --url ${url} --token $PAGEVAULT_API_TOKEN`)}`);
-      console.log(`  ${c.dim("or set PAGEVAULT_URL / PAGEVAULT_API_TOKEN per command.")}`);
+      console.log(`  ${c.dim("config.json  ")}  ${configured || c.dim("—")} ${c.dim(`(${CONFIG_PATH})`)}`);
+      console.log(`\n  ${c.dim("Standing in this checkout already selects it. Give it a name and its bearer travels with it:")}`);
+      console.log(`     ${c.bold(`pagevault login --as <name> --url ${url} --token $PAGEVAULT_API_TOKEN`)}`);
+      console.log(`  ${c.dim("or set PAGEVAULT_API_TOKEN per command.")}`);
     }
   }
 
