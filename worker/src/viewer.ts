@@ -121,7 +121,21 @@ export async function handleRender(request: Request, env: Env, id: string): Prom
     }
     try {
       const meta = await getMeta(env, id);
-      const pdf = await renderPdf(env.BROWSER, source);
+      const { pdf, blocked } = await renderPdf(env.BROWSER, source, new URL(request.url).hostname);
+
+      // A PDF with holes and no explanation was the original bug report (#147). Name what did not
+      // load: in a header a client can read, and in the log, where the operator will actually see
+      // it. Logged at `warn` because a document silently exporting differently from how it appears
+      // is a content problem the operator wants to know about, not an error in the deployment.
+      if (blocked.length) {
+        log("warn", "pdf_assets_blocked", {
+          request,
+          doc: id,
+          count: blocked.length,
+          assets: blocked.slice(0, 10).map((b) => `${b.reason}: ${b.url}`),
+        });
+      }
+
       return new Response(pdf, {
         headers: {
           "Content-Type": "application/pdf",
@@ -130,6 +144,7 @@ export async function handleRender(request: Request, env: Env, id: string): Prom
           "Referrer-Policy": "no-referrer",
           "X-Robots-Tag": "noindex, nofollow",
           "Cache-Control": "private, no-store",
+          ...(blocked.length ? { "X-PageVault-Assets-Blocked": String(blocked.length) } : {}),
         },
       });
     } catch (err) {
