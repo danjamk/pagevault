@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.29.0] — 2026-08-06
+
+The deployment you are acting on, said out loud — and a PDF that matches the page.
+
 ### Fixed
 - **PDF export renders what the viewer renders.** The renderer aborted every network request, so a
   document using a remote image, a webfont, a CDN stylesheet or CDN JavaScript looked right in the
@@ -1179,7 +1183,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/danjamk/pagevault/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/danjamk/pagevault/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/danjamk/pagevault/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/danjamk/pagevault/compare/v0.25.0...v0.26.0
