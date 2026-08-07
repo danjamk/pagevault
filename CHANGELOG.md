@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.32.2] — 2026-08-07
+
+The end of a recovery names a command you can actually type.
+
 ### Fixed
 - **`upgrade` no longer ends a recovery by naming a command an installed operator cannot run.** With
   a backup file in the directory, it printed `Next: make restore FILE=…` — but an `npm install -g`
@@ -1405,7 +1409,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.32.1...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.32.2...HEAD
+[0.32.2]: https://github.com/danjamk/pagevault/compare/v0.32.1...v0.32.2
 [0.32.1]: https://github.com/danjamk/pagevault/compare/v0.32.0...v0.32.1
 [0.32.0]: https://github.com/danjamk/pagevault/compare/v0.31.2...v0.32.0
 [0.31.2]: https://github.com/danjamk/pagevault/compare/v0.31.1...v0.31.2
