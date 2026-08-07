@@ -7,6 +7,14 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **`status` names the deployment on both of its branches.** It branches on whether this machine
+  holds the build record, and only the not-provisioned half ever said which deployment it was
+  looking at — so the deployment we know *most* about, the one whose `.pagevault.json` is sitting
+  right there, was the one that never named itself. Both halves now lead with the deployment and how
+  it resolved, and `protected` is stated there too rather than only at the moment it refuses a
+  command. A single-deployment install is unchanged. ([#170](../../issues/170))
+
 ## [0.31.1] — 2026-08-06
 
 Deploying one deployment stopped moving another one's credential. Found by using 0.31.0, an hour
