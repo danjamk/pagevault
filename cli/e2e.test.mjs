@@ -571,10 +571,13 @@ describe("CLI against a live Worker — Public (no Access)", { timeout: 180_000 
       method: "POST",
       headers: { Authorization: `Bearer ${BEARER}`, "Content-Type": "application/json" },
       // Dated ahead of the document published a moment ago, so it falls inside the window.
+      // v2 (#161): sparse day buckets, and a coverage window the Worker clears and restates by.
       body: JSON.stringify({
+        v: 2,
         syncedAt: "2099-01-01T00:00:00.000Z",
-        windowDays: 90,
-        docs: { [id]: { views: 5, lastViewedAt: "2026-07-28T09:00:00Z", surfaces: { link: 5, public: 0, portal: 0 } } },
+        coverage: { from: "2026-07-01", to: "2026-07-28" },
+        docs: { [id]: { "2026-07-28": { link: 5, t: "09:00:00" } } },
+        portals: {},
       }),
     });
     assert.equal(res.status, 200);

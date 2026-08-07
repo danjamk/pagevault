@@ -7,10 +7,23 @@
 **Extends:** ADR-015 decisions 1, 4, 7 (what a view record contains) · ADR-019 decision 3 (one key, one write)
 **Closes:** #150
 
-> **Built so far:** decisions 5, 6 and 8 — the referrer host, the portal index event, and the
-> append-only blob contract (#160). Decisions 1–4, 7 and 9 are the durable summary and its
-> staleness warning; they are agreed here and implemented in #161 and #165. Until those land, the
-> stored summary is still the rolling 90-day window this ADR describes as the defect.
+> **Built so far:** decisions 1–8. The referrer host, the portal index event and the append-only
+> blob contract landed in #160; the durable summary, day buckets, the Worker-side merge, history
+> outliving the document and the owner split landed in #161. **Decision 9** — surfacing a sync that
+> has not run, before the loss rather than after — is #165 and is the one still outstanding.
+>
+> Two things were decided during implementation and are recorded here rather than left in a PR:
+>
+> - **A document's published state is derived, not stored.** Decision 4 says an entry is "marked as
+>   no longer published". Storing that flag would put a copy of `/docs` inside the summary, where it
+>   goes stale the moment a document is revoked between syncs — the same denormalisation that made
+>   #170 a bug. Readers already join history against `/docs`, so they derive it. The substance of
+>   decision 4 stands: a sync never deletes an entry it merely did not hear about.
+> - **The sync's query is bounded by a DATE, not by `NOW() - INTERVAL n DAY`.** A timestamp boundary
+>   lands mid-day, so the oldest day returns partially counted — and because the merge clears and
+>   restates whole days, that partial count would be written as though it were the whole day and no
+>   later sync would ever correct it. Aligning the query to midnight makes the window queried and
+>   the window claimed the same statement.
 
 ## Context
 

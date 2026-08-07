@@ -350,6 +350,15 @@ and documents no way to delete a dataset.
            which door readers came through — as of the sync, never live. Counts and surfaces
            only: viewer emails stay here, on your machine (ADR-019).
 
+           The stored summary ACCUMULATES: each sync adds the window it could see and never
+           removes what an earlier one contributed, so history outlives Analytics Engine's
+           90-day retention. Sync at least once every 90 days or lose the tail that ages out
+           uncovered.
+
+  --reset  throw the stored history away and rebuild from this window alone. The one
+           destructive option here: anything older than 90 days is not in Analytics Engine
+           any more and does not come back. Asks first unless --yes.
+
            Whole-deployment by design, so --portal and --doc are refused: a partial summary would
            report a MEASURED zero for every document it left out. Defaults to a 90-day window
            (the table defaults to 30) because "have they ever opened it" is a lifetime question.

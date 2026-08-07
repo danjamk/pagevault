@@ -60,6 +60,27 @@ const SELECT = [
  */
 const REFERRER_SELECT = ["index1 AS portal", "blob6 AS referrer", "sum(_sample_interval) AS views"].join(", ");
 
+/**
+ * The sync's query: the same rows, split by DAY (#161).
+ *
+ * `toDate(timestamp)` yields exactly the `YYYY-MM-DD` the summary uses as a bucket key, so there is
+ * no reformatting step between the query and the stored shape — and therefore no place for the two
+ * to disagree about what a day is.
+ *
+ * Row count is documents × surfaces × viewers × days rather than documents × surfaces × viewers,
+ * which is why the sync's `--limit` is four figures and the table's is three.
+ */
+const BUCKET_SELECT = [
+  "index1 AS portal",
+  "blob1 AS doc",
+  "blob3 AS surface",
+  "blob4 AS viewer",
+  "blob5 AS kind",
+  "toDate(timestamp) AS day",
+  "sum(_sample_interval) AS views",
+  "max(timestamp) AS last_view",
+].join(", ");
+
 /** Query recent views — one row per document, surface, viewer and kind. */
 export async function queryViews(creds, opts = {}) {
   requireCreds(creds);
@@ -158,6 +179,68 @@ export async function queryReferrers(creds, opts = {}) {
 }
 
 /**
+ * Query day buckets for the sync (#161). Returns the rows AND the window they cover.
+ *
+ * 🔴 The boundary is a DATE, not `NOW() - INTERVAL n DAY`, and that is the difference between a
+ * correct history and one with a permanently wrong oldest day.
+ *
+ * A timestamp boundary lands mid-day, so the oldest day comes back partially counted. The Worker
+ * clears and restates whole days by coverage, so that partial count would be written as if it were
+ * the whole day — and no later sync ever fixes it, because the day only gets older and further from
+ * the window. Aligning the query to midnight makes "what was queried" and "what the coverage claims"
+ * the same statement rather than two nearly-equal ones.
+ *
+ * The newest day is partial too, and that is fine: it is today, and tomorrow's sync restates it in
+ * full. Self-correcting in the direction that matters.
+ */
+export async function queryBuckets(creds, opts = {}) {
+  requireCreds(creds);
+
+  const days = windowDays(opts.days ?? 90);
+  const limit = Number(opts.limit ?? 10000);
+  // `now` is injectable so the whole thing is testable without a clock.
+  const now = opts.now ? new Date(opts.now) : new Date();
+  if (!Number.isFinite(now.getTime())) throw new ViewsError(`Invalid sync timestamp: ${opts.now}`);
+
+  const to = isoDay(now);
+  // Inclusive on both ends: `days` days of history means today plus the previous days - 1.
+  const from = isoDay(new Date(now.getTime() - (days - 1) * 86_400_000));
+
+  const parsed = await runQuery(
+    creds,
+    [
+      `SELECT ${BUCKET_SELECT}`,
+      `FROM ${DATASET}`,
+      `WHERE timestamp >= toDateTime(${sqlString(`${from} 00:00:00`)})`,
+      // No `title`: the summary stores counts against a document id, and carrying the title into
+      // the GROUP BY would split a renamed document into two sets of buckets (ADR-017 — the id
+      // survives a retitle, so the history should too).
+      "GROUP BY portal, doc, surface, viewer, kind, day",
+      "ORDER BY day DESC",
+      `LIMIT ${Math.floor(limit)}`,
+      "FORMAT JSON",
+    ].join("\n"),
+  );
+
+  const rows = (parsed.data ?? []).map((r) => ({
+    portal: r.portal ?? "",
+    doc: r.doc ?? "",
+    surface: r.surface ?? "",
+    viewer: r.viewer || null,
+    // See queryViews: empty predates the field, and every such row was a document view.
+    kind: r.kind || "document",
+    day: String(r.day ?? "").slice(0, 10),
+    views: Number(r.views ?? 0),
+    lastView: r.last_view ?? null,
+  }));
+
+  return { coverage: { from, to }, days, rows, truncated: rows.length >= Math.floor(limit) };
+}
+
+/** `YYYY-MM-DD` in UTC, which is the timezone every stored date is in. */
+const isoDay = (d) => d.toISOString().slice(0, 10);
+
+/**
  * `days` is capped by reality, not by us: Analytics Engine retains three months, so anything
  * past ~90 returns nothing rather than erroring. The callers say so in their help text.
  */
@@ -213,23 +296,24 @@ async function runQuery({ accountId, token }, sql) {
 }
 
 /**
- * Aggregate query rows into the summary the Worker stores, so MCP can answer "did the client
- * actually open it?" without the Worker ever holding an analytics token (#127, ADR-019).
+ * Aggregate day-bucketed rows into the summary the Worker stores (#127, ADR-019, ADR-023).
  *
- * Pure: the caller supplies `syncedAt` and the set of ids that still exist, so the whole thing is
- * testable with no network and no clock.
+ * Pure: the caller supplies `syncedAt`, the coverage window, the set of ids that still exist and
+ * the owner's address, so the whole thing is testable with no network and no clock.
  *
- * 🔴 Counts and surfaces, never identities (ADR-019 decision 4). `viewer` is on every row and is
- * dropped here on purpose. "Opened four times through the public link, never by a signed-in
- * member" is useful and identifies nobody; putting an email within reach of an LLM is a separate
- * decision to be made on its own merits. The CLI table keeps identities — an operator reading
- * their own dashboard is a different act from an agent summarizing it.
+ * 🔴 Counts and surfaces, never identities (ADR-019 decision 4). `viewer` is on every portal row
+ * and is dropped here on purpose — it is read to decide owner-or-not and then discarded, so the
+ * address never reaches the Worker. "Opened four times through the public link, never by a
+ * signed-in member" is useful and identifies nobody; putting an email within reach of an LLM is a
+ * separate decision to be made on its own merits. The CLI table keeps identities — an operator
+ * reading their own dashboard is a different act from an agent summarizing it.
  */
-export function summarizeViews({ days, rows }, { syncedAt, knownIds = null } = {}) {
+export function summarizeViews({ coverage, rows }, { syncedAt, knownIds = null, ownerEmail = "" } = {}) {
   // Null-prototype: keys are document ids that arrived from Cloudflare, and `__proto__` on a
   // normal object literal would set the prototype rather than store a count.
   const docs = Object.create(null);
   const skipped = new Set();
+  const owner = String(ownerEmail ?? "").trim().toLowerCase();
 
   for (const r of rows) {
     // 🔴 Portal landings are traffic, not readership, and this summary is what MCP serves as a
@@ -238,27 +322,74 @@ export function summarizeViews({ days, rows }, { syncedAt, knownIds = null } = {
     // who opened nothing. Skipped on kind rather than on the empty id, so a future index event
     // that does carry an id cannot slip in through the back.
     if (r.kind === "index") continue;
-    if (!r.doc) continue;
+    if (!r.doc || !r.day) continue;
 
     // The dataset is account-level and outlives the deployment that wrote it (#129), so rows can
-    // name documents that were revoked or torn down. Dropping them keeps the one KV key bounded
-    // and stops MCP reporting metrics for something `list_documents` will never return.
+    // name documents this deployment never created. Ids it has never seen stay skipped — but a
+    // document it HAS seen and since revoked keeps its history, because the Worker merges by
+    // window and never deletes an entry it simply did not hear about (ADR-023 decision 4).
     if (knownIds && !knownIds.has(r.doc)) {
       skipped.add(r.doc);
       continue;
     }
 
-    const entry = (docs[r.doc] ??= { views: 0, lastViewedAt: null, surfaces: { link: 0, public: 0, portal: 0 } });
-    entry.views += r.views;
-    // hasOwn, not `in` — `in` also matches inherited members, so an unexpected surface value
-    // would land on Object.prototype's namespace and produce NaN.
-    if (Object.hasOwn(entry.surfaces, r.surface)) entry.surfaces[r.surface] += r.views;
+    const history = (docs[r.doc] ??= Object.create(null));
+    const bucket = (history[r.day] ??= {});
 
+    // `pub`, not `public`: the stored key. Kept as a lookup rather than a string concat so an
+    // unrecognised surface lands nowhere instead of inventing a key on the bucket.
+    const key = BUCKET_SURFACE[r.surface];
+    if (key) bucket[key] = (bucket[key] ?? 0) + r.views;
+
+    // 🔴 The owner split, computed where the identity already is and never sent (ADR-023 §7).
+    //
+    // Only on `portal` — the other two surfaces have no Access application, so a view through
+    // them is neither owner nor client but unattributed, and claiming otherwise would be the
+    // wrong guess this decision exists to avoid. Where the owner's address is unknown the field
+    // is left absent, which the Worker reads as "not measured" rather than as zero.
+    if (r.surface === "portal" && owner) {
+      const mine = String(r.viewer ?? "").trim().toLowerCase() === owner ? r.views : 0;
+      bucket.owner = (bucket.owner ?? 0) + mine;
+    }
+
+    // Time of day only — the date is the bucket key, so storing it twice would be storing it twice.
     const seen = toIso(r.lastView);
-    if (seen && (!entry.lastViewedAt || seen > entry.lastViewedAt)) entry.lastViewedAt = seen;
+    const time = seen ? seen.slice(11, 19) : "";
+    if (time && (!bucket.t || time > bucket.t)) bucket.t = time;
   }
 
-  return { summary: { syncedAt, windowDays: days, docs }, skipped: [...skipped] };
+  // A bucket that recorded no surface is a day with nothing in it. Drop it here rather than
+  // shipping it for the Worker to drop: sparse has to be built, not merely validated.
+  for (const [id, history] of Object.entries(docs)) {
+    for (const [day, bucket] of Object.entries(history)) {
+      if (!bucket.link && !bucket.pub && !bucket.portal) delete history[day];
+    }
+    if (Object.keys(history).length === 0) delete docs[id];
+  }
+
+  return { summary: { v: 2, syncedAt, coverage, docs, portals: {} }, skipped: [...skipped] };
+}
+
+/** Query surface name → stored bucket key. `public` is `pub` in the wire shape. */
+const BUCKET_SURFACE = { link: "link", public: "pub", portal: "portal" };
+
+/**
+ * Fold referrer rows into the summary's per-portal rollup (ADR-023 §5).
+ *
+ * Portal granularity, never per document per day — host cardinality multiplied by document
+ * multiplied by day is how one KV value stops fitting in one KV value.
+ */
+export function summarizeReferrers({ sources = [] } = {}) {
+  const portals = Object.create(null);
+  for (const s of sources) {
+    if (!s.portal || !s.views) continue;
+    const hosts = (portals[s.portal] ??= Object.create(null));
+    // "" is direct, and it is a measurement rather than a gap — queryReferrers only returns rows
+    // written after the referrer field existed.
+    const host = s.referrer ?? "";
+    hosts[host] = (hosts[host] ?? 0) + s.views;
+  }
+  return portals;
 }
 
 /**
