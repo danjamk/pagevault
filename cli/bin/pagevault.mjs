@@ -11,7 +11,7 @@ import { basename } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { api, apiText, loadConfig, sameDeployment, saveLoginConfig, waitReadable, PvError } from "../lib/client.mjs";
-import { resolveTarget, describeTarget, resolveBearer } from "../lib/target.mjs";
+import { resolveTarget, describeTarget, resolveBearer, provisionedFrom, locateMarker, readMarker, recordUrl } from "../lib/target.mjs";
 import { emptyRegistry, findByName, findByUrl, listDeployments, loadRegistry, saveRegistry, shouldAdoptCurrent, upsert } from "../lib/registry.mjs";
 
 import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "../lib/format.mjs";
@@ -665,7 +665,9 @@ async function exportTree(pos, flags) {
  */
 function deployments(flags) {
   const registry = loadRegistry();
-  const rows = listDeployments(registry);
+  // Follows each entry's recorded marker path, so the answer is the same from `~` and from a
+  // checkout. See provisionedFrom for why the nearest marker is the wrong question here (#170).
+  const rows = listDeployments(registry, { provisioned: provisionedFrom });
   const config = loadConfig();
 
   // Only when nothing in the registry already describes it — otherwise it is the same deployment
@@ -698,6 +700,38 @@ function deployments(flags) {
     ),
   );
   note("\n* is the default. Standing in a checkout still wins over it.");
+
+  // A `no` that should be `yes` is the confusing case, and it has exactly one cause: the build
+  // record is right here but the entry never recorded where. Say how to fix it rather than leaving
+  // the operator to reconcile two commands that disagree.
+  //
+  // The NEAREST marker is fair game for a hint — it is a statement about where you are standing,
+  // not about the deployment. Only the column itself has to be location-independent.
+  const here = unrecordedMarkerFor(all);
+  if (here) {
+    note(
+      `\n${here.name} is provisioned from this directory but does not say so.\n` +
+        `  pagevault login --as ${here.name}    records it — no need to retype the URL or token.`,
+    );
+  }
+}
+
+/**
+ * The marker path for `url`, but only if the marker this invocation can see actually describes that
+ * deployment. Returns null otherwise — including for a pointer marker, which means the registry is
+ * already authoritative for this directory and there is no build record to point back at (#170).
+ */
+function markerPathFor(url) {
+  const path = locateMarker();
+  if (!path) return null;
+  const marker = readMarker(path);
+  if (marker.kind !== "record") return null;
+  return sameDeployment(recordUrl(marker.record), url) ? path : null;
+}
+
+/** A listed deployment that IS provisioned from where we are standing, but has no `markerPath`. */
+function unrecordedMarkerFor(rows) {
+  return rows.find((d) => !d.provisioned && d.url && markerPathFor(d.url)) ?? null;
 }
 
 /**
@@ -755,6 +789,11 @@ async function login(flags) {
 
   if (name) {
     const patch = { url, token };
+    // Where this machine's build record for that deployment lives, when we can see one describing
+    // it. A path, never a copy of its contents — see `provisionedFrom` (#170). Absent stays absent:
+    // registering a CI-deployed production from a laptop records no path, because there is none.
+    const markerPath = markerPathFor(url);
+    if (markerPath) patch.markerPath = markerPath;
     // Written as an explicit `false` rather than dropped, so the file states the decision. Every
     // reader tests `=== true`, so absence and false mean the same thing to the code and different
     // things to a person reading it.

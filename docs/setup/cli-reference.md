@@ -87,6 +87,16 @@ the implicit deployment it has always been.
 run. Its absence is the normal state for a CI-deployed instance — a fact about the deployment, not a
 fault.
 
+The answer comes from a path the entry recorded, so it is the same wherever you run it from — a
+listing that said `no` in your home directory and `yes` in a checkout would be describing your
+`cd` history rather than your deployments. It is read fresh each time rather than cached, so a
+checkout you delete, move, or re-provision against something else goes back to `no`, which is then
+the true answer.
+
+If a build record is sitting in the directory you are standing in and no deployment has recorded it,
+the listing says so and names the command that fixes it — `pagevault login --as <name>`, which
+amends the entry without asking you to retype the URL or token.
+
 ### `pagevault use <name>`
 Make a registered deployment the default. Writes the registry and nothing else; no file in a working
 tree is touched, and no bearer is ever written into a repository.

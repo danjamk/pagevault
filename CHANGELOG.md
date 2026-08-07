@@ -7,6 +7,19 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **`pagevault deployments` reports `PROVISIONED` correctly, and reports it the same from every
+  directory.** It read `no` for a deployment whose build record was sitting in a checkout on this
+  machine — while `status`, from that same checkout, correctly reported the tier, account and host.
+  Two commands disagreeing about one deployment is the split ADR-021 exists to remove. The registry
+  entry now records **where** its build record is and the check follows that path, reading `rung`
+  and `accountId` fresh rather than copying them. Delete or move the checkout, or point it at a
+  different deployment, and the answer returns to `no` — which is by then the true one.
+  ([#170](../../issues/170))
+- **A build record in the current directory that no deployment has recorded now says so**, and names
+  the command that records it. That was the confusing half of the bug: provisioning commands worked
+  from a directory the listing said they could not.
+
 ## [0.32.0] — 2026-08-07
 
 Views can now answer where the traffic came from, and portal landings stop being invisible.

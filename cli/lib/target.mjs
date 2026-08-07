@@ -15,6 +15,7 @@ import { dirname, join, parse } from "node:path";
 // `findByUrl` only — a pure comparison over an already-loaded registry. Loading the registry is the
 // caller's job, which keeps this module free of I/O it did not ask for.
 import { findByUrl } from "./registry.mjs";
+import { sameDeployment } from "./client.mjs";
 
 /** The file a checkout is recognized by. Also the file CI reconstructs — see `classifyMarker`. */
 export const MARKER = ".pagevault.json";
@@ -99,6 +100,41 @@ export function readMarker(path, { read = readFileSync } = {}) {
   } catch {
     return { kind: "empty" };
   }
+}
+
+/**
+ * Is this registry entry's deployment provisioned from **this machine** — anywhere on it? (#170)
+ *
+ * 🔴 Deliberately NOT `locateMarker()`. That answers "which marker is nearest my cwd", which is the
+ * right question for *which deployment am I acting on* and the wrong one here. A listing is global:
+ * asked from `~` the nearest-marker answer is "no" and asked from the checkout it is "yes", for the
+ * same deployment, two seconds apart. An answer that changes with your working directory is a worse
+ * lie than the flat "no" this replaces.
+ *
+ * So the entry records **where** its build record is, and this follows that pointer. A pointer, not
+ * a copy: `rung`, `accountId` and `host` are read fresh every time, so the registry can never hold a
+ * stale `accountId` — which is the failure that rules out absorbing those fields on write.
+ *
+ * Every way this can go wrong degrades to `false`, which is the honest answer:
+ *   - the checkout was deleted or moved  → the path does not exist, and it IS no longer provisioned
+ *   - the file became unreadable or invalid JSON → we do not know, so we do not claim
+ *   - that checkout was re-provisioned against a DIFFERENT deployment → the URLs disagree, and the
+ *     entry must not claim a deployment it no longer owns
+ *
+ * An entry with no `markerPath` — a production deployed by CI — returns false without touching the
+ * disk. That is a fact about the deployment, not a fault (#144).
+ */
+export function provisionedFrom(entry, { exists = existsSync, read = readFileSync } = {}) {
+  const path = entry?.markerPath;
+  if (typeof path !== "string" || !path || !exists(path)) return false;
+
+  const marker = readMarker(path, { read });
+  // A pointer marker means the registry is already authoritative for that directory — there is no
+  // build record there, so nothing was provisioned from it. Only a record answers yes.
+  if (marker.kind !== "record") return false;
+
+  const url = recordUrl(marker.record);
+  return Boolean(url) && sameDeployment(url, entry.url ?? "");
 }
 
 /** The URL a build record names. `deployedUrl` is written by a successful deploy; `host` is the

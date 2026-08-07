@@ -86,7 +86,7 @@ const REG = {
   current: "prod",
   deployments: {
     prod: { url: "https://prod.example.com", token: "prod-bearer", protected: true },
-    test: { url: "https://test.example.com", token: "test-bearer", rung: 3, accountId: "acct" },
+    test: { url: "https://test.example.com", token: "test-bearer", markerPath: "/checkout/.pagevault.json" },
   },
 };
 
@@ -132,7 +132,9 @@ test("lookup by name is exact and missing names are null, not a throw", () => {
 test("upsert merges, so a later login does not drop build metadata", () => {
   const next = upsert(REG, "test", { token: "rotated" });
   assert.equal(next.deployments.test.token, "rotated");
-  assert.equal(next.deployments.test.accountId, "acct", "merged, not replaced");
+  // Rotating a bearer must not cost the entry its markerPath — that would silently flip the
+  // deployment to "not provisioned here" and take `upgrade`'s guardrails with it.
+  assert.equal(next.deployments.test.markerPath, "/checkout/.pagevault.json", "merged, not replaced");
   assert.equal(REG.deployments.test.token, "test-bearer", "the input registry is not mutated");
 });
 
@@ -153,7 +155,10 @@ test("removing the current deployment clears current rather than dangling", () =
 // --- display -----------------------------------------------------------------------------------
 
 test("the listing reports provisioned-from-here as a fact, not a fault (#144)", () => {
-  const rows = listDeployments(REG);
+  // The predicate is injected: deciding it means reading a marker off disk, and this module is a
+  // pure store. `target.mjs` owns the real one; here it is a stand-in that answers from the path.
+  const provisioned = (entry) => entry.markerPath === "/checkout/.pagevault.json";
+  const rows = listDeployments(REG, { provisioned });
   const prod = rows.find((r) => r.name === "prod");
   const test_ = rows.find((r) => r.name === "test");
 
@@ -162,9 +167,26 @@ test("the listing reports provisioned-from-here as a fact, not a fault (#144)", 
   assert.equal(prod.provisioned, false, "a CI-deployed instance is client-only here, and that is normal");
   assert.equal(prod.hasToken, true);
 
-  assert.equal(test_.provisioned, true, "a build record on this machine means provisioning can run");
+  assert.equal(test_.provisioned, true, "a recorded build record means provisioning can run");
   assert.equal(test_.current, false);
-  assert.deepEqual(listDeployments(null), []);
+  assert.deepEqual(listDeployments(null, { provisioned }), []);
+});
+
+test("with no way to check, every row reads not-provisioned rather than guessing", () => {
+  // A caller who did not supply a predicate has not established that anything is provisioned, and
+  // the honest answer to a question nobody can answer is "no" — the same answer #144 says is
+  // correct for a CI-deployed production.
+  assert.deepEqual(
+    listDeployments(REG).map((r) => r.provisioned),
+    [false, false],
+  );
+});
+
+test("a predicate that returns something other than true does not count as yes", () => {
+  // Defensive: `provisioned` is compared with === true, so a truthy path string or a stray object
+  // from a future implementation cannot become a claim that infrastructure commands will work.
+  const rows = listDeployments(REG, { provisioned: (e) => e.markerPath ?? "" });
+  assert.deepEqual(rows.map((r) => r.provisioned), [false, false]);
 });
 // --- claiming the default (#171) ---------------------------------------------------------------
 

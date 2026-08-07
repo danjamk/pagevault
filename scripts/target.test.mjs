@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { classifyMarker, describeTarget, findMarker, locateMarker, readMarker, recordUrl, resolveBearer, resolveTarget } from "../cli/lib/target.mjs";
+import { classifyMarker, describeTarget, findMarker, locateMarker, provisionedFrom, readMarker, recordUrl, resolveBearer, resolveTarget } from "../cli/lib/target.mjs";
 
 // --- classification: content, never an assumed shape -------------------------------------------
 
@@ -381,4 +381,71 @@ test("a pointer marker resolves and carries its bearer, for anyone who opts into
   assert.equal(t.name, "test");
   assert.equal(t.unresolvedPointer, null);
   assert.equal(resolveBearer(t, { config: "prod-bearer" }), "test-bearer");
+});
+
+// --- provisionedFrom — is it provisioned from this machine, anywhere on it? (#170) --------------
+
+const MARKER_PATH = "/checkout/.pagevault.json";
+const entry = (over = {}) => ({ url: "https://test.example.com", token: "t", markerPath: MARKER_PATH, ...over });
+
+/** A disk holding one build record at MARKER_PATH. `read` ignores the path, `exists` does not. */
+const disk = (record, { at = MARKER_PATH } = {}) => ({
+  exists: (p) => p === at,
+  read: () => JSON.stringify(record),
+});
+
+test("🔴 the answer does not change with the working directory", () => {
+  // The whole reason this does not use locateMarker(). A listing is global: asked from ~ the
+  // nearest-marker answer is "no" and asked from the checkout it is "yes", for the same deployment
+  // seconds apart. provisionedFrom takes no cwd at all, which is how that is guaranteed rather
+  // than tested for — this asserts the signature stays that way.
+  assert.equal(provisionedFrom.length <= 2, true, "takes an entry and options; never a cwd");
+  const io = disk({ deployedUrl: "https://test.example.com", rung: 3 });
+  assert.equal(provisionedFrom(entry(), io), true);
+  assert.equal(provisionedFrom(entry(), io), true);
+});
+
+test("a recorded build record that still names this deployment reads as provisioned", () => {
+  assert.equal(provisionedFrom(entry(), disk({ deployedUrl: "https://test.example.com" })), true);
+  // `host` is the intent recorded before a successful deploy, and counts the same.
+  assert.equal(provisionedFrom(entry(), disk({ host: "test.example.com" })), true);
+});
+
+test("no markerPath is not provisioned, and never touches the disk (#144)", () => {
+  // A CI-deployed production. The absence is a fact about the deployment, not a fault.
+  const io = { exists: () => assert.fail("must not stat"), read: () => assert.fail("must not read") };
+  assert.equal(provisionedFrom(entry({ markerPath: undefined }), io), false);
+  assert.equal(provisionedFrom(entry({ markerPath: "" }), io), false);
+  assert.equal(provisionedFrom({ url: "https://x.example.com" }, io), false);
+  assert.equal(provisionedFrom(null, io), false);
+});
+
+test("🔴 a moved or deleted checkout degrades to no, which is true", () => {
+  // The stale-pointer case, and the reason this is a path rather than a copy of the fields: a
+  // pointer that goes stale becomes the honest answer, where a stale accountId becomes a wrong one.
+  assert.equal(provisionedFrom(entry(), { exists: () => false, read: () => assert.fail("gone") }), false);
+});
+
+test("🔴 a checkout re-provisioned against a different deployment stops claiming this one", () => {
+  // Same path, different deployment. Without the URL re-check the entry would keep asserting it can
+  // run infrastructure commands against a deployment that checkout no longer describes.
+  assert.equal(provisionedFrom(entry(), disk({ deployedUrl: "https://other.example.com" })), false);
+});
+
+test("an unreadable or invalid record is not a claim", () => {
+  assert.equal(provisionedFrom(entry(), { exists: () => true, read: () => "{not json" }), false);
+  assert.equal(provisionedFrom(entry(), { exists: () => true, read: () => { throw new Error("EACCES"); } }), false);
+  // A record naming no deployment at all cannot match one.
+  assert.equal(provisionedFrom(entry(), disk({})), false);
+});
+
+test("🔴 a pointer marker is never a build record", () => {
+  // { deployment: "test" } means the registry is already authoritative for that directory, so
+  // there is nothing provisioned there to point back at. Recording one would create two sources
+  // for a single relationship, which is how they come to disagree.
+  assert.equal(provisionedFrom(entry(), disk({ deployment: "test" })), false);
+});
+
+test("matches the way every other comparison does — trailing slash and host casing", () => {
+  assert.equal(provisionedFrom(entry({ url: "https://TEST.example.com/" }), disk({ deployedUrl: "https://test.example.com" })), true);
 });
