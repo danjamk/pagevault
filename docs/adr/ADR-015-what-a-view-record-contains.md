@@ -2,6 +2,10 @@
 
 **Status:** Accepted
 **Date:** 2026-07-21
+**Amended:** decision 5 is superseded and decisions 1, 4 and 7 are extended by
+[ADR-023](ADR-023-the-summary-is-the-history.md) (2026-08-07). View data is no longer a rolling
+window; the referrer host is now recorded, and a portal-index event records no identity even on
+`/v/`, where this ADR would permit one.
 
 ## Context
 

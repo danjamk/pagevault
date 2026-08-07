@@ -595,10 +595,26 @@ could not be served is not a view. Deliberately not `/render`, which fires per i
 and would count a refresh, a PDF export and a raw download as three more views of the same
 document.
 
+Portal landings are recorded too, from `portalIndex` and after the authorization gate, so
+traffic to a collection page is measurable without inferring it from document opens.
+
 - **Optional.** No binding, no recording, nothing else changes. `make provision ANALYTICS=on|off`.
 - **Identity only where Access established it.** `/v/` records the verified email. `/pub/` and
   `/p/` record none — not an IP, not a User-Agent. They have no Access application in front of
   them, so there was never an identity to withhold.
+- **A portal landing records nobody, on any surface** — including `/v/`, where Access *has*
+  established an identity. Narrower than the rule above permits, deliberately: the question a
+  landing answers is *how much traffic*, and "who opened the collection page and read nothing"
+  is not worth a permanent record of a person ([ADR-023](adr/ADR-023-the-summary-is-the-history.md),
+  decision 6).
+- **The referrer host, never the referrer URL.** `linkedin.com`, `mail.google.com`, or empty for
+  direct. Path, query and fragment are discarded in `recordView` before anything is written — a
+  linking page's path is someone else's private context, and a query string carrying a token is
+  free at the point of collection and permanent at the point of regret (decision 5).
+- **Blob positions are append-only.** There is no schema registry, so the positions in
+  `recordView` and the CLI's `SELECT` are a contract held together by a comment in both files.
+  New fields take new positions; nothing is reused, reordered or repurposed, and every reader
+  treats an empty blob as "not recorded then" rather than as a value (decision 8).
 - **Retention is three months.** This is a rolling window, not a history. A nine-month
   engagement outlives its own view data, and nothing in the UI should imply otherwise.
 - **The dataset is account-level and outlives the deployment.** Nothing in a view record names

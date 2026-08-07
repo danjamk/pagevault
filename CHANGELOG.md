@@ -7,6 +7,27 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **`views` answers where the traffic came from, not just who opened what.** A view now records the
+  **host** that linked to it — `linkedin.com`, `mail.google.com`, or `direct` — and `pagevault views`
+  reports them under the table. Only the host is ever written: the path, query and fragment are
+  discarded before the record exists, because a linking page's path is someone else's private
+  context and a query string carrying a token is free to collect and permanent to regret.
+  ([#160](../../issues/160), [ADR-023](docs/adr/ADR-023-the-summary-is-the-history.md) §5)
+- **Portal landings are counted.** Someone opening a collection page and reading nothing used to be
+  invisible — `/pub/{slug}` and `/v/{slug}` were the one route that recorded nothing at all. They
+  now appear as `(portal index)` rows, totalled separately from document views so they cannot
+  inflate "did the client open the report". They record **no viewer on any surface**, including
+  `/v/` where Access has established one. (§6)
+- **Automated previews are counted, and the CLI says so.** A LinkedIn preview, a Slack unfurl and a
+  mail-client preload all fetch the page. Public numbers read high as a result — named now rather
+  than discovered later as a bug report.
+
+### Changed
+- **[ADR-023](docs/adr/ADR-023-the-summary-is-the-history.md) is Accepted.** It supersedes ADR-015
+  §5: view data stops being a rolling window that a nine-month engagement outlives. This release
+  builds §5, §6 and §8; the durable summary itself lands in [#161](../../issues/161).
+
 ## [0.31.2] — 2026-08-07
 
 The command that tells you which deployment you are on now does so from both directions.
