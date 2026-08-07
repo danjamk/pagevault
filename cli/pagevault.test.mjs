@@ -494,3 +494,56 @@ test("--protected without --as says where it belongs rather than dropping it", (
   assert.match(r.text, /--protected applies to a named deployment/);
   assert.ok(!existsSync(join(home, "config.json")), "and it must not have written the login it refused");
 });
+
+test("🔴 status names the deployment on BOTH branches (#170)", () => {
+  // The name reached only the not-provisioned branch, so the deployment we know MOST about — the one
+  // whose build record is on this machine — was the one that never said which deployment it was.
+  // Standing in a checkout is exactly where the answer differs from your default, so it is where the
+  // answer matters most.
+  const home = mkdtempSync(join(tmpdir(), "pv-statusname-"));
+  writeFileSync(join(home, ".pagevault.json"), JSON.stringify({ rung: 3, accountId: "acct", host: "test.invalid" }));
+  writeFileSync(
+    join(home, "deployments.json"),
+    JSON.stringify({
+      current: "prod",
+      deployments: {
+        prod: { url: "https://prod.invalid", token: "p", protected: true },
+        test: { url: "https://test.invalid", token: "t" },
+      },
+    }),
+  );
+
+  // Provisioned here: the build record decides, and the name must still be stated.
+  const provisioned = runIn(home, "status");
+  assert.equal(provisioned.status, 0);
+  assert.match(provisioned.text, /Deployment\s+test\s+https:\/\/test\.invalid/);
+  assert.match(provisioned.text, /Resolved by/);
+  assert.match(provisioned.text, /Tier/, "and it is still the build-record branch, not the other one");
+
+  // The URL is not printed twice: `Deployed` only appears when it disagrees with what was resolved.
+  assert.doesNotMatch(provisioned.text, /Deployed/);
+
+  // --json carries the same answer, where there is no tone to read.
+  const j = JSON.parse(runIn(home, "status", "--json").stdout);
+  assert.equal(j.deploymentName, "test");
+  assert.equal(j.provisioned, true);
+});
+
+test("a protected deployment says so in status", () => {
+  const home = mkdtempSync(join(tmpdir(), "pv-statusprot-"));
+  writeFileSync(
+    join(home, "deployments.json"),
+    JSON.stringify({ current: "prod", deployments: { prod: { url: "https://prod.invalid", token: "p", protected: true } } }),
+  );
+  assert.match(runIn(home, "status").text, /Protected\s+rm, revoke and rotate require --yes/);
+});
+
+test("a single-deployment install sees no name row it cannot use", () => {
+  // No registry: there is no second answer to distinguish from, so the identity block shows the URL
+  // and nothing invented. Same rule the document commands' target line follows.
+  const home = mkdtempSync(join(tmpdir(), "pv-statusplain-"));
+  writeFileSync(join(home, "config.json"), JSON.stringify({ url: "https://only.invalid", token: "t" }));
+  const r = runIn(home, "status");
+  assert.match(r.text, /Deployment\s+https:\/\/only\.invalid/);
+  assert.doesNotMatch(r.text, /Protected/);
+});

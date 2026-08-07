@@ -79,6 +79,22 @@ export async function statusCmd({ json = false, flags = {}, out = (s) => process
   row("State schema", `v${ctx.schemaVersion ?? SCHEMA_VERSION}`);
   console.log();
 
+  // 🔴 Which deployment this is, on BOTH branches below (#170).
+  //
+  // This lived only inside the not-provisioned branch, so the deployment we know MOST about — the one
+  // whose build record is sitting right here — was the one that never said which deployment it was.
+  // Backwards, and backwards in the case that matters: standing in a checkout is exactly where the
+  // answer differs from your default, so it is where you most want it stated.
+  //
+  // Hoisted above the branch rather than copied into it, because two copies of "say which deployment"
+  // is how the two answers drift apart — which is the whole subject of ADR-021.
+  if (target.url) {
+    row("Deployment", target.name ? `${c.bold(target.name)}  ${c.dim(target.url)}` : c.bold(target.url));
+    row("Resolved by", c.dim(targetOrigin(target)));
+    if (target.protected) row("Protected", c.dim("rm, revoke and rotate require --yes"));
+    console.log();
+  }
+
   // `target.provisioned`, not `ctx.rung` (#155). They disagreed: from a checkout, `health` said
   // "expecting <build> — matches" while `status` said "not provisioned from this machine", because
   // status read `loadContext()` and health read the resolver. Now that `stateDir()` follows the
@@ -90,10 +106,8 @@ export async function statusCmd({ json = false, flags = {}, out = (s) => process
     // deployed by CI has a login and no build record, and `init` would deploy from their laptop.
     // Having a login but nothing provisioned here is a SHAPE, not a failure.
     if (target.url) {
-      // The name leads when there is one — it is what `use` selected and what `--deployment` takes.
-      row("Deployment", target.name ? `${c.bold(target.name)}  ${c.dim(target.url)}` : c.bold(target.url));
-      row("Resolved by", c.dim(targetOrigin(target)));
-      console.log();
+      // Identity is printed above, for both branches. What is left here is the explanation of why
+      // there is nothing else to show.
       console.log(`  ${c.dim("Connected, but not provisioned from this machine — so there is no tier, account or")}`);
       console.log(`  ${c.dim("namespace to report here. That is normal when the deployment is deployed elsewhere,")}`);
       console.log(`  ${c.dim("for instance by CI. The document commands work; the provisioning ones do not.")}\n`);
@@ -109,7 +123,10 @@ export async function statusCmd({ json = false, flags = {}, out = (s) => process
   row("Account", ctx.accountName ? `${ctx.accountName} ${c.dim(`(${String(ctx.accountId ?? "").slice(0, 8)})`)}` : ctx.accountId);
   if (ctx.host) row("Host", ctx.host);
   if (ctx.kvId) row("KV", c.dim(ctx.kvId));
-  if (ctx.deployedUrl) row("Deployed", c.bold(ctx.deployedUrl));
+  // Only when it DISAGREES with the deployment resolved above. Normally the two are the same string
+  // by construction — the resolver reads this very field — so printing it twice was just noise. When
+  // they differ, something overrode the target (a `--url`, an env var) and that is worth seeing.
+  if (ctx.deployedUrl && ctx.deployedUrl !== target.url) row("Deployed", c.bold(ctx.deployedUrl));
   console.log();
 
   // The footer, not a flag. `status --check` was considered and rejected: `health` already fetches
