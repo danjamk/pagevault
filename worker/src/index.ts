@@ -100,7 +100,7 @@ const router = {
     // not private, and the UI says so at publish time.
     const pub = /^\/p\/([^/]+)$/.exec(pathname);
     if (pub?.[1]) {
-      return handlePublicToken(env, pub[1]);
+      return handlePublicToken(request, env, pub[1]);
     }
 
     // 🔴 The public tier. NO Access application, deliberately — an anonymous reader must
@@ -108,7 +108,7 @@ const router = {
     // that is public by design. See portal.ts.
     const pubPortal = /^\/pub\/([^/]+)(?:\/([^/]+))?\/?$/.exec(pathname);
     if (pubPortal?.[1]) {
-      return handlePublicPortalRoute(env, pubPortal[1], pubPortal[2] ?? null, request.url);
+      return handlePublicPortalRoute(request, env, pubPortal[1], pubPortal[2] ?? null);
     }
 
     // Access app A. Portal index and documents, gated by canView.
@@ -174,7 +174,7 @@ export default {
  * The artifact still goes through the shell and the sandbox. **Public does not mean
  * unsandboxed** — a public artifact is more exposed, not less.
  */
-async function handlePublicToken(env: Env, token: string): Promise<Response> {
+async function handlePublicToken(request: Request, env: Env, token: string): Promise<Response> {
   // All four refusals below are the same 404 to the caller — deliberately, since
   // distinguishing them would tell a stranger which tokens once existed. But "the link you
   // sent me doesn't work" is a support question, and until now all four looked identical
@@ -222,6 +222,7 @@ async function handlePublicToken(env: Env, token: string): Promise<Response> {
     shareable: true,
     pdfEnabled: !!env.BROWSER,
     surface: "link",
+    referer: request.headers.get("referer"),
   });
 }
 

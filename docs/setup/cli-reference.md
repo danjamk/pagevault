@@ -252,9 +252,25 @@ Reconcile the Cloudflare Access viewer group with what KV authorizes. `--reap` a
 no longer authorizes (reclaiming seats) — it confirms first.
 
 ### `pagevault views [--days 30] [--portal s] [--doc id] [--json]`
-Which documents your clients actually opened. Reads Analytics Engine directly rather than going
-through `/api`, so it needs a Cloudflare token in the environment — as `backup` and `restore` do,
-and for the same reason: the Worker deliberately holds no credential that wide.
+Which documents your clients actually opened, and where the traffic came from. Reads Analytics
+Engine directly rather than going through `/api`, so it needs a Cloudflare token in the
+environment — as `backup` and `restore` do, and for the same reason: the Worker deliberately holds
+no credential that wide.
+
+Below the table, a **traffic sources** block: the hosts that linked to your documents, or `direct`
+where the browser sent no referrer. Only the linking host is ever recorded — never the page it
+linked from, which is someone else's private context
+([ADR-023](../adr/ADR-023-the-summary-is-the-history.md) §5). It is skipped under `--doc`, because
+sources are aggregated per portal and printing a portal's traffic under one document's filter
+would be a wrong answer rather than a narrower one.
+
+A `(portal index)` row is someone landing on a collection page without opening anything. Those are
+counted on their own line rather than folded into document views, and they record **no viewer on
+any surface** — including `/v/`, where Access knows exactly who it was (§6).
+
+⚠️ **Automated previews are counted.** A LinkedIn preview, a Slack unfurl and a mail-client preload
+all fetch the page. Public and capability-link numbers therefore read high, and that is the first
+thing to suspect when one looks implausible.
 
 ⚠️ **The dataset is account-level, and it outlives any single deployment.** A view record names the
 portal and document but not the deployment that wrote it, so after a teardown and rebuild — or on an

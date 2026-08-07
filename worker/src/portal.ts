@@ -1,6 +1,6 @@
 import { canView, canViewPortal, emailsMatch } from "./access.js";
 import { esc, linkUnavailable, page } from "./pages.js";
-import type { ViewSurface } from "./analytics.js";
+import { recordPortalView, type ViewSurface } from "./analytics.js";
 import { identify } from "./auth.js";
 import { documentPath, portalPath } from "./documents.js";
 import { accessEnabled, type Env } from "./env.js";
@@ -71,8 +71,8 @@ export async function handlePortalRoute(
   const members = await getMembers(env, slug);
 
   return id === null
-    ? portalIndex(env, portal, members, email)
-    : portalDocument(env, portal, members, email, id, "portal", request.url);
+    ? portalIndex(env, portal, members, email, "portal", request)
+    : portalDocument(env, portal, members, email, id, "portal", request);
 }
 
 /**
@@ -93,10 +93,10 @@ export async function handlePortalRoute(
  * a `kind` check inside a protected one.
  */
 export async function handlePublicPortalRoute(
+  request: Request,
   env: Env,
   slug: string,
   id: string | null,
-  requestUrl: string,
 ): Promise<Response> {
   const portal = await getPortal(env, slug);
 
@@ -113,8 +113,8 @@ export async function handlePublicPortalRoute(
   // No identify(), no members, no JWT. Nobody authenticates on this path, so nobody burns
   // a seat. That is an economic property of the route, not an afterthought.
   return id === null
-    ? portalIndex(env, portal, [], null)
-    : portalDocument(env, portal, [], null, id, "public", requestUrl);
+    ? portalIndex(env, portal, [], null, "public", request)
+    : portalDocument(env, portal, [], null, id, "public", request);
 }
 
 /**
@@ -157,11 +157,17 @@ async function portalIndex(
   portal: Portal,
   members: string[],
   email: string | null,
+  surface: ViewSurface,
+  request: Request,
 ): Promise<Response> {
   if (!canViewPortal(portal, members, email, env.OWNER_EMAIL)) {
     log("warn", "denied_portal_index", { portal: portal.slug, kind: portal.kind, email });
     return notFound();
   }
+
+  // After the gate, never before: a page that could not be served is not a view. `email` is
+  // deliberately not passed — `recordPortalView` does not accept one (ADR-023, decision 6).
+  recordPortalView(env, portal.slug, surface, request.headers.get("referer"));
 
   const isOwner = email !== null && email === env.OWNER_EMAIL.trim().toLowerCase();
 
@@ -181,7 +187,7 @@ async function portalDocument(
   email: string | null,
   id: string,
   surface: ViewSurface,
-  requestUrl: string,
+  request: Request,
 ): Promise<Response> {
   const meta = await getMeta(env, id);
   // 🔴 Meta FIRST, tombstone only on a miss (#140). A document's id hashes its filename, so a
@@ -189,7 +195,7 @@ async function portalDocument(
   // alive. Checking meta first is what makes that self-healing: publish a NEW document under a
   // reclaimed filename and it lands on this very id, shadowing the stale tombstone with no
   // cleanup write. Reversing this order would serve the redirect and hide the live document.
-  if (!meta) return await movedDocument(env, portal, members, email, id, requestUrl);
+  if (!meta) return await movedDocument(env, portal, members, email, id, request.url);
 
   // 🔴 The document must actually live in the portal named in the URL.
   //
@@ -240,6 +246,7 @@ async function portalDocument(
     shareable: portal.kind === "public",
     pdfEnabled: !!env.BROWSER,
     surface,
+    referer: request.headers.get("referer"),
   });
 }
 

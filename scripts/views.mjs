@@ -11,7 +11,7 @@
 // this; see ADR-015, decision 6.
 //
 import { c, die, loadContext, loadCloudToken, argValue, banner } from "../cli/lib/provision/context.mjs";
-import { formatViews, queryViews } from "../cli/lib/views.mjs";
+import { formatReferrers, formatViews, queryReferrers, queryViews } from "../cli/lib/views.mjs";
 
 const ctx = loadContext();
 if (!ctx.accountId) die("No account pinned in .pagevault.json.", "Run `make setup` first.");
@@ -24,12 +24,25 @@ if (ctx.analytics === false) {
 
 console.log(banner("views", ctx.host ?? ""));
 
+const creds = { accountId: ctx.accountId, token: loadCloudToken() };
+const doc = argValue("--doc");
+
 try {
-  const result = await queryViews(
-    { accountId: ctx.accountId, token: loadCloudToken() },
-    { days: argValue("--days"), portal: argValue("--portal"), doc: argValue("--doc"), limit: argValue("--limit") },
-  );
+  const result = await queryViews(creds, {
+    days: argValue("--days"),
+    portal: argValue("--portal"),
+    doc,
+    limit: argValue("--limit"),
+  });
   console.log(formatViews(result, c));
+
+  // Not under --doc: referrers are aggregated per portal, so a document filter would label a
+  // portal's traffic as that document's. See ADR-023, decision 5.
+  if (!doc) {
+    const sources = await queryReferrers(creds, { days: argValue("--days"), portal: argValue("--portal") });
+    const block = formatReferrers(sources, c);
+    if (block) console.log(`\n${block}`);
+  }
 } catch (err) {
   die(err.message);
 }

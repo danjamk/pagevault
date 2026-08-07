@@ -1,10 +1,16 @@
 # ADR-023 — The summary is the history; Analytics Engine is only the last 90 days
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-08-06
+**Accepted:** 2026-08-07
 **Supersedes:** ADR-015 decision 5 (analytics is a rolling window, not a history)
 **Extends:** ADR-015 decisions 1, 4, 7 (what a view record contains) · ADR-019 decision 3 (one key, one write)
 **Closes:** #150
+
+> **Built so far:** decisions 5, 6 and 8 — the referrer host, the portal index event, and the
+> append-only blob contract (#160). Decisions 1–4, 7 and 9 are the durable summary and its
+> staleness warning; they are agreed here and implemented in #161 and #165. Until those land, the
+> stored summary is still the rolling 90-day window this ADR describes as the defect.
 
 ## Context
 
