@@ -225,6 +225,11 @@ These auto-target *your* deployment from `~/.pagevault/` — no arguments, no lo
 ### `pagevault status [--json]`
 What this install is configured for — tier, account, host, versions. Local only, no network.
 
+It leads with the deployment it would act on and what chose it, whether or not this machine
+provisioned it, and says so when that deployment is `protected`. Below that, a deployment provisioned
+from here reports its build record; one deployed elsewhere says so instead of reporting fields it
+does not have.
+
 ⚠️ **It reports your saved answers, not the running deployment.** `.pagevault.json` records the
 intent you gave `init`; nothing in `status` asks the Worker whether that is still true. It will
 happily print `Tier Secured` for a deployment that was redeployed without Access, or name a host and
