@@ -10,6 +10,7 @@ import {
   mergeSummary,
   parseViewSummary,
   statsFor,
+  syncRisk,
 } from "../src/views.js";
 
 /**
@@ -494,5 +495,60 @@ describe("the API joins metrics onto documents", () => {
     await postSummary({ v: SUMMARY_VERSION, syncedAt: "2020-01-01T00:00:00.000Z", coverage: { from: "2019-10-01", to: "2020-01-01" }, docs: {}, portals: {} });
 
     expect((await getDoc(meta.id))["views"]).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("🔴 syncRisk — alarm on risk, not on age (ADR-023 §9)", () => {
+  const NOW = "2026-08-07T12:00:00.000Z";
+  const at = (to: string) =>
+    ({ v: SUMMARY_VERSION, syncedAt: NOW, coverage: { from: "2026-01-01", to }, docs: {}, portals: {} }) as ViewSummary;
+
+  it("says nothing has been captured, not that nothing is at risk", () => {
+    // "0 days at risk" reads as "you are up to date", which is the opposite of true: everything is
+    // uncaptured and none of it is safe.
+    expect(syncRisk(null, NOW)).toMatchObject({ state: "never", capturedThrough: null, daysUntilLoss: null });
+  });
+
+  it("is quiet when captured through today", () => {
+    expect(syncRisk(at("2026-08-07"), NOW)).toMatchObject({ state: "ok", uncapturedDays: 0, daysUntilLoss: null });
+  });
+
+  it("counts the uncaptured days and the runway on the oldest of them", () => {
+    // Captured through the 1st: the 2nd through the 7th are waiting — six days — and the 2nd is
+    // the one with the least runway.
+    expect(syncRisk(at("2026-08-01"), NOW)).toMatchObject({ state: "ok", uncapturedDays: 6, daysUntilLoss: 85, lostDays: 0 });
+  });
+
+  it("warns with a month of runway left, and escalates inside ten days", () => {
+    // 90/3 and 90/9 — fractions of the horizon rather than fixed counts, so the thresholds move
+    // with it instead of quietly meaning something different if retention ever changes.
+    expect(syncRisk(at("2026-05-28"), NOW)).toMatchObject({ state: "warn", daysUntilLoss: 20 });
+    expect(syncRisk(at("2026-05-13"), NOW)).toMatchObject({ state: "urgent", daysUntilLoss: 5 });
+  });
+
+  it("🔴 reports what is already gone, and that it is still going", () => {
+    // Captured through 2026-04-01, so 2026-04-02 is the oldest uncaptured day — 127 days before
+    // today, 37 days past the horizon. Those 37 days are not coming back.
+    const risk = syncRisk(at("2026-04-01"), NOW);
+    expect(risk.state).toBe("losing");
+    expect(risk.lostDays).toBe(37);
+    expect(risk.daysUntilLoss).toBe(-37);
+  });
+
+  it("treats the horizon itself as the last safe day, not the first lost one", () => {
+    // Exactly 90 days of runway remaining is still zero days lost.
+    const risk = syncRisk(at("2026-05-08"), NOW);
+    expect(risk.lostDays).toBe(0);
+    expect(risk.daysUntilLoss).toBe(0);
+    expect(risk.state).toBe("urgent");
+  });
+
+  it("rides along on the listing, so every reader gets the same answer", async () => {
+    // Computed in the Worker rather than by each reader: the CLI, the console panel and the MCP
+    // tool need one horizon calculation, not three that can disagree about when history goes.
+    const list = await listDocs();
+    expect((list as unknown as { viewsRisk: { state: string } }).viewsRisk.state).toBe("never");
   });
 });

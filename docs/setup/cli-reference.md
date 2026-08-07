@@ -257,6 +257,24 @@ agent.
 Assert the live `/health` reports the exact build you shipped (`<version>+<sha>`) and that `/mcp`
 answers. Non-zero exit on a mismatch or an unreachable deployment — this is what production CI runs.
 
+It also reports **how much view history is about to become unrecoverable**. Views reach Analytics
+Engine on their own, but only `pagevault views --sync` makes them durable, and Analytics Engine keeps
+about 90 days — so a window that ages out uncovered is gone, silently. This is the thing that says so
+before the loss instead of after:
+
+```
+! 71 days of view history become unrecoverable in 20 days.
+  Captured through 2026-05-28. Fix it with pagevault views --sync.
+```
+
+It reports **risk, not age** — "synced 40 days ago" leaves you to do the arithmetic. The warning is
+loud but **never changes the exit code**: a deployment that is up with an unsynced summary is still
+up, and failing a production deploy over it would punish the wrong thing.
+
+This lives here rather than in `status` because [`status`](#pagevault-status---json) is deliberately
+offline — it prints your saved answers and says so. It is not on the `/health` endpoint itself
+because that endpoint is unauthenticated, and when you last synced is a fact about how you work.
+
 ### `pagevault sync-access [--reap] [--yes] [--json]`
 Reconcile the Cloudflare Access viewer group with what KV authorizes. `--reap` also removes people KV
 no longer authorizes (reclaiming seats) — it confirms first.

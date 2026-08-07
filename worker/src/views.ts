@@ -135,6 +135,95 @@ export const MAX_SUMMARY_BYTES = 1024 * 1024;
 export const DAILY_RETENTION_DAYS = 90;
 
 /**
+ * How long Analytics Engine keeps a row. Cloudflare documents "about three months"; 90 days is the
+ * conservative reading, and being early about a warning is the harmless direction to be wrong in.
+ */
+export const ANALYTICS_RETENTION_DAYS = 90;
+
+/**
+ * When to start saying something, as fractions of the retention horizon rather than fixed day
+ * counts — so the thresholds move with the horizon instead of quietly meaning something different
+ * if it ever changes.
+ */
+const WARN_AT = ANALYTICS_RETENTION_DAYS / 3; // 30 days of runway left
+const URGENT_AT = ANALYTICS_RETENTION_DAYS / 9; // 10
+
+export interface SyncRisk {
+  /**
+   * `never` — no sync has run · `ok` — plenty of runway · `warn`, `urgent` — the oldest uncaptured
+   * day is approaching the horizon · `losing` — history has already gone and is still going.
+   */
+  state: "never" | "ok" | "warn" | "urgent" | "losing";
+  /** The last day the summary has captured, or null when nothing has. */
+  capturedThrough: string | null;
+  /** Days of views sitting in Analytics Engine that no sync has promoted yet. */
+  uncapturedDays: number;
+  /** Days until the oldest uncaptured day falls out of retention. Null when nothing is pending. */
+  daysUntilLoss: number | null;
+  /** Days of history that are already unrecoverable. Nothing can bring these back. */
+  lostDays: number;
+}
+
+/**
+ * How much history is at risk, and how long there is to act (ADR-023 decision 9).
+ *
+ * Capture is automatic; promotion is not. Every view reaches Analytics Engine unprompted, but only
+ * `views --sync` moves it into the durable summary — Analytics Engine is a 90-day conveyor belt and
+ * the summary is the warehouse, and nothing takes boxes off the belt but the operator. So the
+ * operating invariant is **sync at least once every 90 days**, and missing it is a quiet failure:
+ * nothing errors, nothing looks wrong, and the data is simply never there later.
+ *
+ * 🔴 This alarms on **risk, not on age**, and the difference is the whole point. "Synced 40 days
+ * ago" is a fact about the past that the reader has to do arithmetic on. "12 days of history become
+ * unrecoverable in 3 weeks" is a fact about the future that tells them whether to act today. The
+ * first is a status line; only the second is worth interrupting someone for.
+ *
+ * It cannot be automated away. The Worker cannot read Analytics Engine at all, at any schedule
+ * (ADR-019 decision 1) — a Worker cron is structurally impossible here, not merely unwired. Making
+ * the miss loud is the only move available.
+ */
+export function syncRisk(summary: ViewSummary | null, now: string): SyncRisk {
+  const today = dayKey(Date.parse(now));
+
+  // Never synced is its own answer, not zero days at risk. Zero would read as "you are up to
+  // date", which is the opposite of true — everything is uncaptured, and none of it is safe.
+  if (!summary?.coverage?.to || !today) {
+    return { state: "never", capturedThrough: null, uncapturedDays: 0, daysUntilLoss: null, lostDays: 0 };
+  }
+
+  const capturedThrough = summary.coverage.to;
+  const oldestUncaptured = addDays(capturedThrough, 1);
+
+  // Captured through today or later: nothing is waiting on the belt.
+  if (!oldestUncaptured || oldestUncaptured > today) {
+    return { state: "ok", capturedThrough, uncapturedDays: 0, daysUntilLoss: null, lostDays: 0 };
+  }
+
+  const uncapturedDays = daysBetween(oldestUncaptured, today) + 1;
+  // The oldest uncaptured day falls out of retention once today passes it by the horizon.
+  const daysUntilLoss = ANALYTICS_RETENTION_DAYS - daysBetween(oldestUncaptured, today);
+  const lostDays = Math.max(0, -daysUntilLoss);
+
+  const state: SyncRisk["state"] =
+    lostDays > 0 ? "losing" : daysUntilLoss <= URGENT_AT ? "urgent" : daysUntilLoss <= WARN_AT ? "warn" : "ok";
+
+  return { state, capturedThrough, uncapturedDays, daysUntilLoss, lostDays };
+}
+
+const MS_PER_DAY = 86_400_000;
+
+/** Whole days from `a` to `b`, both `YYYY-MM-DD`. Negative when `b` is earlier. */
+function daysBetween(a: string, b: string): number {
+  return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / MS_PER_DAY);
+}
+
+/** `YYYY-MM-DD` shifted by n days, or "" when the input was not a date. */
+function addDays(key: string, n: number): string {
+  const ms = Date.parse(`${key}T00:00:00Z`);
+  return Number.isFinite(ms) ? dayKey(ms + n * MS_PER_DAY) : "";
+}
+
+/**
  * Read the stored summary.
  *
  * A v1 summary is **discarded rather than migrated** — it holds only lifetime totals, so there is no
