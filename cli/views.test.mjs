@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatViews, summarizeViews } from "./lib/views.mjs";
+import { formatReferrers, formatViews, summarizeViews } from "./lib/views.mjs";
 
 /**
  * The rendering half of `views`. The query half needs the network and is exercised by running
@@ -168,6 +168,102 @@ test("columns line up even when a cell carries ANSI", () => {
   const [head, first, second] = out.split("\n");
   const strip = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
   // The dimmed dash must not widen its column — width is measured on visible characters.
+  assert.equal(strip(first).indexOf("acme"), strip(head).indexOf("PORTAL"));
+  assert.equal(strip(second).indexOf("acme"), strip(head).indexOf("PORTAL"));
+});
+
+// ---------------------------------------------------------------------------
+// The new blob positions (ADR-023, decisions 5, 6 and 8)
+// ---------------------------------------------------------------------------
+
+const index = (over = {}) => row({ doc: "", title: "", viewer: null, kind: "index", ...over });
+
+test("🔴 a row predating the kind field reads as a document view, never as nothing", () => {
+  // Decision 8 says empty means "not recorded then". For blob5 that history is knowable: every
+  // row written before the field existed WAS a document view, because portalIndex was not
+  // instrumented and no other kind could be written. So mapping empty → document states a fact.
+  const { summary } = sum([row({ kind: "" }), row({ doc: "b", kind: undefined })]);
+  assert.equal(Object.keys(summary.docs).length, 2);
+});
+
+test("🔴 portal landings never inflate a document's view count", () => {
+  // The summary is what MCP serves as a property of a document. Someone who landed on the
+  // collection page and opened nothing must not read as someone who opened the report.
+  const { summary } = sum([row({ views: 3 }), index({ views: 40 })]);
+  assert.equal(summary.docs["k3x9mq2vb7pd"].views, 3);
+  assert.equal(Object.keys(summary.docs).length, 1);
+});
+
+test("an index row is skipped on its kind, not on its empty document id", () => {
+  // Belt and braces: an index event that somehow carried an id must still not become a document.
+  const { summary } = sum([index({ doc: "k3x9mq2vb7pd", views: 9 })]);
+  assert.deepEqual(Object.keys(summary.docs), []);
+});
+
+test("names the portal index instead of rendering an empty document cell", () => {
+  const out = formatViews({ days: 30, rows: [index({ views: 4 })] }, null);
+  assert.match(out, /\(portal index\)/);
+});
+
+test("counts landings apart from document views, in both directions", () => {
+  const out = formatViews({ days: 30, rows: [row({ views: 3 }), index({ views: 40 })] }, null);
+  // 43 across 2 documents would be wrong twice: one of them is not a document, and 40 of the
+  // views are of a collection page.
+  assert.match(out, /3 views across 1 document, last 30 days\./);
+  assert.match(out, /40 portal landings/);
+  assert.doesNotMatch(out, /43 views/);
+});
+
+test("says nothing about landings when there were none", () => {
+  const out = formatViews({ days: 30, rows: [row()] }, null);
+  assert.doesNotMatch(out, /portal landing/);
+});
+
+test("singularises a lone landing", () => {
+  const out = formatViews({ days: 30, rows: [index({ views: 1 })] }, null);
+  assert.match(out, /1 portal landing —/);
+});
+
+// ---------------------------------------------------------------------------
+// formatReferrers — where the traffic came from
+// ---------------------------------------------------------------------------
+
+const src = (over = {}) => ({ portal: "acme", referrer: "linkedin.com", views: 12, ...over });
+
+test("renders hosts with their counts", () => {
+  const out = formatReferrers({ days: 30, sources: [src(), src({ referrer: "t.co", views: 4 })] }, null);
+  assert.match(out, /linkedin\.com/);
+  assert.match(out, /t\.co/);
+  assert.match(out, /12/);
+});
+
+test("labels an absent referrer 'direct' — a measurement, not a gap", () => {
+  // queryReferrers only returns rows written after the field existed, so a blank referrer means
+  // the browser sent none. That is a fact about the visit, not a hole in the data.
+  const out = formatReferrers({ days: 30, sources: [src({ referrer: null, views: 7 })] }, null);
+  assert.match(out, /direct/);
+});
+
+test("returns nothing at all when there are no sources, so the caller can drop the block", () => {
+  assert.equal(formatReferrers({ days: 30, sources: [] }, null), "");
+  assert.equal(formatReferrers({ days: 30, sources: undefined }, null), "");
+});
+
+test("🔴 says the host is all there is, and that previews inflate it", () => {
+  // Both notes are load-bearing. The first is the privacy promise (decision 5) stated where an
+  // operator reads the data; the second stops "why does this public page have 400 views" from
+  // being filed as a bug.
+  const out = formatReferrers({ days: 7, sources: [src()] }, null);
+  assert.match(out, /never the page it linked from/);
+  assert.match(out, /previews and unfurls are counted/i);
+  assert.match(out, /last 7 days/);
+});
+
+test("columns line up in the sources table when a cell carries ANSI", () => {
+  const colour = { dim: (s) => `\x1b[2m${s}\x1b[0m`, bold: (s) => s };
+  const out = formatReferrers({ days: 30, sources: [src({ referrer: null }), src({ referrer: "mail.google.com" })] }, colour);
+  const [head, first, second] = out.split("\n");
+  const strip = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
   assert.equal(strip(first).indexOf("acme"), strip(head).indexOf("PORTAL"));
   assert.equal(strip(second).indexOf("acme"), strip(head).indexOf("PORTAL"));
 });

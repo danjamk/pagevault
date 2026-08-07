@@ -26,9 +26,15 @@ export const DATASET = "pagevault_views";
 export class ViewsError extends Error {}
 
 /**
- * Blob positions are fixed by `recordView` in worker/src/analytics.ts. If that order ever
- * changes, this changes with it — there is no schema registry, and Analytics Engine will
- * happily return whatever is in blob2 under whatever name we ask for.
+ * 🔴 Blob positions are fixed by `recordView` in worker/src/analytics.ts, which holds the
+ * authoritative copy of this table. If that order ever changes, this changes with it — there is
+ * no schema registry, and Analytics Engine will happily return whatever is in blob2 under
+ * whatever name we ask for.
+ *
+ *   blob1 doc · blob2 title · blob3 surface · blob4 viewer · blob5 kind · blob6 referrer host
+ *
+ * Positions are never reused, never reordered, never repurposed (ADR-023, decision 8). Rows
+ * written before a field existed return empty for it, and empty means "not recorded then".
  */
 const SELECT = [
   "index1 AS portal",
@@ -36,6 +42,7 @@ const SELECT = [
   "blob2 AS title",
   "blob3 AS surface",
   "blob4 AS viewer",
+  "blob5 AS kind",
   // 🔴 sum(_sample_interval), never count(). Analytics Engine samples under load and reports
   // the sampling rate per row; count() silently under-reports once sampling kicks in, and it
   // under-reports by exactly the amount that makes the number look plausible.
@@ -44,12 +51,123 @@ const SELECT = [
 ].join(", ");
 
 /**
- * Query recent views.
+ * The referrer is NOT in the SELECT above, and that is decision 5 rather than an omission.
  *
+ * Referrers aggregate at *portal* granularity. Host cardinality multiplied by document
+ * multiplied by surface is how a `GROUP BY` that already returns one row per viewer turns into
+ * hundreds, pushing real documents past `--limit` to make room for one visit from a link
+ * shortener. So they get their own query, and it stays cheap.
+ */
+const REFERRER_SELECT = ["index1 AS portal", "blob6 AS referrer", "sum(_sample_interval) AS views"].join(", ");
+
+/** Query recent views — one row per document, surface, viewer and kind. */
+export async function queryViews(creds, opts = {}) {
+  requireCreds(creds);
+
+  const days = windowDays(opts.days);
+  const limit = Number(opts.limit ?? 100);
+
+  const where = [`timestamp > NOW() - INTERVAL '${days}' DAY`];
+  // Values are quoted through sqlString rather than interpolated: a portal slug is operator
+  // input, but a document id can come off a URL, and a broken query is a worse error message
+  // than a rejected argument.
+  if (opts.portal) where.push(`index1 = ${sqlString(opts.portal)}`);
+  if (opts.doc) where.push(`blob1 = ${sqlString(opts.doc)}`);
+
+  const parsed = await runQuery(
+    creds,
+    [
+      `SELECT ${SELECT}`,
+      `FROM ${DATASET}`,
+      `WHERE ${where.join(" AND ")}`,
+      "GROUP BY portal, doc, title, surface, viewer, kind",
+      "ORDER BY views DESC",
+      `LIMIT ${Math.floor(limit)}`,
+      "FORMAT JSON",
+    ].join("\n"),
+  );
+
+  return {
+    days,
+    rows: (parsed.data ?? []).map((r) => ({
+      portal: r.portal ?? "",
+      doc: r.doc ?? "",
+      title: r.title ?? "",
+      surface: r.surface ?? "",
+      // Empty by construction on the public and capability surfaces — they have no Access
+      // application in front of them, so there was never an identity to record (ADR-015).
+      viewer: r.viewer || null,
+      // 🔴 The one place empty is read AS a value, and it is sound only here. Every row written
+      // before 0.32.0 predates the kind field, and every one of them was a document view —
+      // `portalIndex` was not instrumented, so no other kind of row could exist. Reading empty
+      // as "document" is therefore a statement of fact about history, not a default. Do not
+      // copy this pattern to blob6, where empty genuinely means "unknown"; see queryReferrers.
+      kind: r.kind || "document",
+      views: Number(r.views ?? 0),
+      lastView: r.last_view ?? null,
+    })),
+  };
+}
+
+/**
+ * Where traffic came from, per portal (ADR-023, decision 5).
+ *
+ * A separate query rather than more columns on the one above — see REFERRER_SELECT for why.
+ * Hosts only: the path, query and fragment were discarded in the Worker before the write, so
+ * there is nothing here to strip and nothing that could have been stored.
+ */
+export async function queryReferrers(creds, opts = {}) {
+  requireCreds(creds);
+
+  const days = windowDays(opts.days);
+  const limit = Number(opts.limit ?? 20);
+
+  // 🔴 `blob5 != ''` is what keeps this honest, and it is not a filter for tidiness.
+  //
+  // Rows written before 0.32.0 have an empty blob6 because the field did not exist, which is
+  // indistinguishable from the empty blob6 that means "arrived directly". Counting the first as
+  // the second would report years of unknown traffic as DIRECT — reading "not recorded then" as
+  // a value, which is exactly what decision 8 forbids. The kind field arrived in the same write
+  // as the referrer, so its presence is the proof that this row's blank referrer was measured.
+  const where = [`timestamp > NOW() - INTERVAL '${days}' DAY`, "blob5 != ''"];
+  if (opts.portal) where.push(`index1 = ${sqlString(opts.portal)}`);
+
+  const parsed = await runQuery(
+    creds,
+    [
+      `SELECT ${REFERRER_SELECT}`,
+      `FROM ${DATASET}`,
+      `WHERE ${where.join(" AND ")}`,
+      "GROUP BY portal, referrer",
+      "ORDER BY views DESC",
+      `LIMIT ${Math.floor(limit)}`,
+      "FORMAT JSON",
+    ].join("\n"),
+  );
+
+  return {
+    days,
+    sources: (parsed.data ?? []).map((r) => ({
+      portal: r.portal ?? "",
+      // null, not "": the reader labels it "direct", and a null cannot be mistaken for a host
+      // whose name happens to be empty.
+      referrer: r.referrer || null,
+      views: Number(r.views ?? 0),
+    })),
+  };
+}
+
+/**
  * `days` is capped by reality, not by us: Analytics Engine retains three months, so anything
  * past ~90 returns nothing rather than erroring. The callers say so in their help text.
  */
-export async function queryViews({ accountId, token }, opts = {}) {
+function windowDays(value) {
+  const days = Number(value ?? 30);
+  if (!Number.isFinite(days) || days <= 0) throw new ViewsError(`--days must be a positive number, got "${value}".`);
+  return Math.floor(days);
+}
+
+function requireCreds({ accountId, token }) {
   if (!accountId) {
     // Naming BOTH doors was wrong for an installed package (it does not have `make`), and pointing
     // an operator whose production is deployed by CI at `init` is worse than unhelpful — that
@@ -73,28 +191,10 @@ export async function queryViews({ accountId, token }, opts = {}) {
       "No CLOUDFLARE_API_TOKEN. Reading views needs a token with the Account Analytics Read permission.",
     );
   }
+}
 
-  const days = Number(opts.days ?? 30);
-  if (!Number.isFinite(days) || days <= 0) throw new ViewsError(`--days must be a positive number, got "${opts.days}".`);
-  const limit = Number(opts.limit ?? 100);
-
-  const where = [`timestamp > NOW() - INTERVAL '${Math.floor(days)}' DAY`];
-  // Values are quoted through sqlString rather than interpolated: a portal slug is operator
-  // input, but a document id can come off a URL, and a broken query is a worse error message
-  // than a rejected argument.
-  if (opts.portal) where.push(`index1 = ${sqlString(opts.portal)}`);
-  if (opts.doc) where.push(`blob1 = ${sqlString(opts.doc)}`);
-
-  const sql = [
-    `SELECT ${SELECT}`,
-    `FROM ${DATASET}`,
-    `WHERE ${where.join(" AND ")}`,
-    "GROUP BY portal, doc, title, surface, viewer",
-    "ORDER BY views DESC",
-    `LIMIT ${Math.floor(limit)}`,
-    "FORMAT JSON",
-  ].join("\n");
-
+/** POST one statement to the SQL API and hand back the parsed body. Both queries go through here. */
+async function runQuery({ accountId, token }, sql) {
   const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/analytics_engine/sql`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "text/plain" },
@@ -105,27 +205,11 @@ export async function queryViews({ accountId, token }, opts = {}) {
 
   if (!res.ok) throw new ViewsError(explain(res.status, body));
 
-  let parsed;
   try {
-    parsed = JSON.parse(body);
+    return JSON.parse(body);
   } catch {
     throw new ViewsError(`Analytics Engine returned something that isn't JSON:\n${body.slice(0, 300)}`);
   }
-
-  return {
-    days: Math.floor(days),
-    rows: (parsed.data ?? []).map((r) => ({
-      portal: r.portal ?? "",
-      doc: r.doc ?? "",
-      title: r.title ?? "",
-      surface: r.surface ?? "",
-      // Empty by construction on the public and capability surfaces — they have no Access
-      // application in front of them, so there was never an identity to record (ADR-015).
-      viewer: r.viewer || null,
-      views: Number(r.views ?? 0),
-      lastView: r.last_view ?? null,
-    })),
-  };
 }
 
 /**
@@ -148,6 +232,12 @@ export function summarizeViews({ days, rows }, { syncedAt, knownIds = null } = {
   const skipped = new Set();
 
   for (const r of rows) {
+    // 🔴 Portal landings are traffic, not readership, and this summary is what MCP serves as a
+    // property of a DOCUMENT. Folding index views into a document's count would be wrong twice
+    // over: they have no document, and they would inflate "did the client open it" with people
+    // who opened nothing. Skipped on kind rather than on the empty id, so a future index event
+    // that does carry an id cannot slip in through the back.
+    if (r.kind === "index") continue;
     if (!r.doc) continue;
 
     // The dataset is account-level and outlives the deployment that wrote it (#129), so rows can
@@ -233,7 +323,9 @@ export function formatViews({ days, rows }, c) {
   const head = ["VIEWS", "DOCUMENT", "PORTAL", "HOW", "WHO", "LAST"];
   const body = rows.map((r) => [
     String(r.views),
-    truncate(r.title || r.doc, 38),
+    // An index row has no document because nobody opened one — they landed on the collection
+    // page. Naming that beats an empty cell, which reads as a rendering bug (ADR-023, 6).
+    r.kind === "index" ? dim("(portal index)") : truncate(r.title || r.doc, 38),
     r.portal,
     r.surface,
     // A dash, not "anonymous": nothing was withheld, there was nothing to record.
@@ -244,18 +336,63 @@ export function formatViews({ days, rows }, c) {
   const widths = head.map((h, i) => Math.max(visible(h).length, ...body.map((row) => visible(row[i]).length)));
   const line = (cells) => cells.map((cell, i) => pad(cell, widths[i])).join("  ").trimEnd();
 
-  const total = rows.reduce((n, r) => n + r.views, 0);
+  // Counted apart, because they answer different questions. Rolling them into one total would
+  // make "views across N documents" a number that is neither views of documents nor traffic.
+  const docRows = rows.filter((r) => r.kind !== "index");
+  const indexRows = rows.filter((r) => r.kind === "index");
+  const total = docRows.reduce((n, r) => n + r.views, 0);
+  const landings = indexRows.reduce((n, r) => n + r.views, 0);
+
   return [
     bold(line(head)),
     ...body.map(line),
     "",
-    dim(`${plural(total, "view")} across ${plural(rows.length, "document")}, last ${plural(days, "day")}.`),
+    dim(`${plural(total, "view")} across ${plural(docRows.length, "document")}, last ${plural(days, "day")}.`),
+    ...(landings
+      ? [dim(`${plural(landings, "portal landing")} — someone opened a collection page, not a document.`)]
+      : []),
     // Unconditional on purpose (#129). The conditional version — warn only when the window predates
     // the current deployment — sounds smarter and is worse: `upgrade` redeploys, so `deployedAt`
     // resets on every routine upgrade and the hint would fire almost always. A note that is right
     // every time and short enough to skim beats one that is precise in theory and noise in practice.
     dim("The dataset is account-level and outlives any single deployment, so rows may name"),
     dim("documents a teardown removed. Cross-check with `pagevault list`. Records age out at 3 months."),
+  ].join("\n");
+}
+
+/**
+ * Render where the traffic came from. Returns "" when there is nothing to say, so the caller can
+ * drop the whole block rather than print a heading over an empty table.
+ *
+ * Hosts, never URLs. There is no path here to redact because none was ever written — the
+ * reduction happens in the Worker before the record exists (ADR-023, decision 5).
+ */
+export function formatReferrers({ days, sources }, c) {
+  const dim = c?.dim ?? ((s) => s);
+  const bold = c?.bold ?? ((s) => s);
+
+  if (!sources?.length) return "";
+
+  const head = ["VIEWS", "SOURCE", "PORTAL"];
+  const body = sources.map((s) => [
+    String(s.views),
+    // "direct" is a measured fact here and not a fallback: queryReferrers only returns rows
+    // written after the referrer field existed, so a blank one means the browser sent none.
+    s.referrer ?? dim("direct"),
+    s.portal,
+  ]);
+
+  const widths = head.map((h, i) => Math.max(visible(h).length, ...body.map((row) => visible(row[i]).length)));
+  const line = (cells) => cells.map((cell, i) => pad(cell, widths[i])).join("  ").trimEnd();
+
+  return [
+    bold(line(head)),
+    ...body.map(line),
+    "",
+    dim(`Traffic sources, last ${plural(days, "day")}. The linking host only — never the page it linked from.`),
+    // Named rather than left to be discovered as a bug report. A LinkedIn preview, a Slack
+    // unfurl and a mail-client preload all fetch the page and all land here.
+    dim("Automated previews and unfurls are counted, so public numbers read high."),
   ].join("\n");
 }
 

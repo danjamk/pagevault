@@ -17,7 +17,7 @@ import { emptyRegistry, findByName, findByUrl, listDeployments, loadRegistry, sa
 import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "../lib/format.mjs";
 import { helpText, usageError } from "../lib/help.mjs";
 import { buildExport } from "../lib/export.mjs";
-import { formatViews, plural, queryViews, summarizeViews } from "../lib/views.mjs";
+import { formatReferrers, formatViews, plural, queryReferrers, queryViews, summarizeViews } from "../lib/views.mjs";
 
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
@@ -965,12 +965,16 @@ async function views(flags) {
   const { loadContext, loadCloudToken } = await import("../lib/provision/context.mjs");
   const ctx = loadContext();
 
+  const creds = { accountId: flags.account || ctx.accountId, token: process.env.CLOUDFLARE_API_TOKEN || loadCloudToken() };
+
   let result;
+  let sources;
   try {
-    result = await queryViews(
-      { accountId: flags.account || ctx.accountId, token: process.env.CLOUDFLARE_API_TOKEN || loadCloudToken() },
-      { days: flags.days, portal: flags.portal, doc: flags.doc, limit: flags.limit },
-    );
+    result = await queryViews(creds, { days: flags.days, portal: flags.portal, doc: flags.doc, limit: flags.limit });
+    // Skipped under --doc: referrers aggregate per portal (ADR-023, decision 5), so filtering to
+    // one document would print a portal's whole traffic under that document's heading. Not a
+    // narrower answer — a wrong one.
+    if (!flags.doc) sources = await queryReferrers(creds, { days: flags.days, portal: flags.portal });
   } catch (err) {
     // ViewsError messages are written to be read, not debugged. Re-wrap so the CLI prints the
     // message plainly instead of a stack.
@@ -979,8 +983,11 @@ async function views(flags) {
 
   // The table is human output, so it goes to stderr like every other table here. --json is the
   // pipe: `pagevault views --json | jq` should carry data and nothing else.
-  if (flags.json) return out(JSON.stringify(result, null, 2));
+  if (flags.json) return out(JSON.stringify(sources ? { ...result, sources: sources.sources } : result, null, 2));
+
   note(formatViews(result, null));
+  const referrers = sources ? formatReferrers(sources, null) : "";
+  if (referrers) note(`\n${referrers}`);
 }
 
 /**
