@@ -219,6 +219,12 @@ export interface ShellOptions {
    * viewer's email is recorded. See ADR-015, decision 1.
    */
   surface: ViewSurface;
+  /**
+   * The raw `Referer` header, passed through untouched. It is reduced to a bare host inside
+   * `recordView` and never stored otherwise — see `referrerHost` for why the stripping lives
+   * there rather than at the call sites (ADR-023, decision 5).
+   */
+  referer?: string | null;
   /** Where "back" goes. Absent on a `/p/` capability link — there is no collection. */
   backHref?: string;
   backLabel?: string;
@@ -259,7 +265,7 @@ export async function renderShell(
 
   // After the mint, not before: a view that could not be served is not a view. This is the
   // one place all three surfaces meet, which is why the hook is here and not on the routes.
-  recordView(env, meta, opts.surface, opts.email);
+  recordView(env, meta, opts.surface, opts.email, opts.referer);
 
   // The shell's own script/style are nonced. A bug in artifact serving must not be able
   // to degrade the page that holds the capability token.

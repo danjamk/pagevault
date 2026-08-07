@@ -2,7 +2,7 @@ import { SELF, env } from "cloudflare:test";
 import { SignJWT, type JWK, exportJWK, generateKeyPair } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetJWKSCache } from "../src/auth.js";
-import { handlePortalRoute } from "../src/portal.js";
+import { handlePortalRoute, handlePublicPortalRoute } from "../src/portal.js";
 import { type DocMeta, type Portal, type PortalKind, putDoc, putMembers, putPortal } from "../src/store.js";
 
 /**
@@ -510,5 +510,99 @@ describe("🔴 /pub/{slug} — the public tier lives OFF the Access path", () =>
 
     expect((await SELF.fetch(`${HOST}/pub/scratch`)).status).toBe(404);
     expect((await SELF.fetch(`${HOST}/pub/scratch/sc1111111111`)).status).toBe(404);
+  });
+});
+
+/**
+ * 🔴 ADR-023, decision 6 — the portal index is a recorded event carrying no identity.
+ *
+ * analytics.test.ts proves `recordPortalView` cannot write a viewer, because it has no
+ * parameter for one. These prove the ROUTES actually reach it, on both surfaces, and only
+ * after the authorization gate — a different bug, and invisible to that unit test.
+ */
+describe("portal index views are recorded, and carry nobody", () => {
+  interface Point {
+    indexes?: string[];
+    blobs?: string[];
+  }
+
+  /** An env whose ANALYTICS binding records rather than ships. */
+  function watched(over: Partial<typeof env> = {}) {
+    const points: Point[] = [];
+    return {
+      points,
+      env: {
+        ...env,
+        ...over,
+        ANALYTICS: { writeDataPoint: (p: Point) => void points.push(p) },
+      } as unknown as typeof env,
+    };
+  }
+
+  beforeEach(seedTwoClients);
+
+  it("🔴 records no viewer on /v/, where Access established one", async () => {
+    const { points, env: e } = watched();
+
+    const res = await handlePortalRoute(
+      new Request(`${HOST}/v/acme`, { headers: { ...(await as(ACME_CFO)), referer: "https://mail.google.com/mail/u/0/#inbox/x" } }),
+      e,
+      "acme",
+      null,
+    );
+
+    expect(res.status).toBe(200);
+    expect(points).toHaveLength(1);
+    // id, title, surface, viewer, kind, referrer — the viewer slot is empty even though
+    // ACME_CFO's address was verified two functions up the stack.
+    expect(points[0]!.blobs).toEqual(["", "", "portal", "", "index", "mail.google.com"]);
+    expect(points[0]!.indexes).toEqual(["acme"]);
+  });
+
+  it("records a public portal landing on /pub/, with no identity to begin with", async () => {
+    await putPortal(env, portal("marketing", "public", "Marketing"));
+    const { points, env: e } = watched();
+
+    const res = await handlePublicPortalRoute(
+      new Request(`${HOST}/pub/marketing`, { headers: { referer: "https://www.linkedin.com/posts/abc?x=1" } }),
+      e,
+      "marketing",
+      null,
+    );
+
+    expect(res.status).toBe(200);
+    expect(points[0]!.blobs).toEqual(["", "", "public", "", "index", "www.linkedin.com"]);
+  });
+
+  it("🔴 records nothing when the index was refused — a page not served is not a view", async () => {
+    const { points, env: e } = watched();
+
+    const res = await handlePortalRoute(new Request(`${HOST}/v/acme`, { headers: await as(REALPLUS_CTO) }), e, "acme", null);
+
+    expect(res.status).toBe(404);
+    expect(points).toHaveLength(0);
+  });
+
+  it("records a direct landing with an empty referrer, not a missing row", async () => {
+    const { points, env: e } = watched();
+
+    await handlePortalRoute(new Request(`${HOST}/v/acme`, { headers: await as(ACME_CFO) }), e, "acme", null);
+
+    expect(points).toHaveLength(1);
+    expect(points[0]!.blobs?.[5]).toBe("");
+  });
+
+  it("a document view through the same route is kind=document, and keeps its viewer", async () => {
+    const { points, env: e } = watched();
+
+    await handlePortalRoute(
+      new Request(`${HOST}/v/acme/ac1111111111`, { headers: { ...(await as(ACME_CFO)), referer: "https://t.co/xyz" } }),
+      e,
+      "acme",
+      "ac1111111111",
+    );
+
+    expect(points).toHaveLength(1);
+    expect(points[0]!.blobs).toEqual(["ac1111111111", "acme report ac1111111111", "portal", ACME_CFO, "document", "t.co"]);
   });
 });
