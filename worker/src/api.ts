@@ -41,7 +41,7 @@ import {
   putMembers,
   putPortal,
 } from "./store.js";
-import { assertFits, getViewSummary, mergeSummary, parseViewSummary, putViewSummary, withStats } from "./views.js";
+import { assertFits, getViewSummary, mergeSummary, parseViewSummary, putViewSummary, syncRisk, withStats } from "./views.js";
 import { log } from "./log.js";
 
 /**
@@ -315,6 +315,10 @@ async function listDocsHandler(request: Request, env: Env): Promise<Response> {
     // everything measured since the first sync, so a day count could only mislead about what the
     // numbers include (ADR-023 §1).
     ...(summary ? { viewsSyncedAt: summary.syncedAt, viewsCoverage: summary.coverage } : {}),
+    // Computed HERE rather than by each reader (ADR-023 §9). The CLI, the console panel and the
+    // MCP tool all need the same answer, and three implementations of one horizon calculation is
+    // three chances for them to disagree about when your history is about to disappear.
+    viewsRisk: syncRisk(summary, new Date().toISOString()),
   });
 }
 

@@ -1115,6 +1115,9 @@ async function syncViews(flags) {
         ? [`⚠ Hit the ${limit}-row query limit, so the summary may be incomplete. Narrow it with --days.`]
         : []),
       ...(ctx.ownerEmail ? [] : ["No owner address on this machine, so views are not split into yours and the client's."]),
+      // The invariant, stated at the one moment the operator has just satisfied it (ADR-023 §9).
+      // Saying it here is what makes the next miss a lapse rather than a surprise.
+      `Captured through ${result.coverage.to}. Sync again within 90 days or the tail ages out uncovered.`,
       `read_document and list_documents now report these over MCP, as of the sync — not live.`,
     ].join("\n"),
   );

@@ -7,10 +7,18 @@
 **Extends:** ADR-015 decisions 1, 4, 7 (what a view record contains) · ADR-019 decision 3 (one key, one write)
 **Closes:** #150
 
-> **Built so far:** decisions 1–8. The referrer host, the portal index event and the append-only
-> blob contract landed in #160; the durable summary, day buckets, the Worker-side merge, history
-> outliving the document and the owner split landed in #161. **Decision 9** — surfacing a sync that
-> has not run, before the loss rather than after — is #165 and is the one still outstanding.
+> **Built: all nine decisions.** The referrer host, the portal index event and the append-only blob
+> contract landed in #160; the durable summary, day buckets, the Worker-side merge, history
+> outliving the document and the owner split landed in #161; the staleness warning landed in #165.
+> What remains under this ADR is presentation — #162 (CLI report), #163 (MCP tool), #164 (console
+> panel) — rather than any decision recorded here.
+>
+> Decision 9 landed on `pagevault health` rather than `status`, which the issue had named. `status`
+> is deliberately offline — it prints saved answers and says so — and putting a live warning there
+> would have made it fetch. `/health` was the other candidate and is worse: it is unauthenticated,
+> and when an operator last synced is a fact about how they work rather than a liveness signal. The
+> warning is loud but never fatal: prod CI gates deploys on `health`'s exit code, and a deployment
+> that is up with an unsynced summary is still up.
 >
 > Two things were decided during implementation and are recorded here rather than left in a PR:
 >

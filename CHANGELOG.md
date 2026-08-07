@@ -7,6 +7,21 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **`pagevault health` says when view history is about to become unrecoverable.** Views reach
+  Analytics Engine on their own, but only a sync makes them durable — and Analytics Engine is a
+  90-day conveyor belt that nothing but the operator takes boxes off. Missing that window used to
+  be silent: nothing errored, nothing looked wrong, and the data was simply never there later.
+  ([#165](../../issues/165), [ADR-023](docs/adr/ADR-023-the-summary-is-the-history.md) §9)
+- It alarms on **risk, not age**. "Synced 40 days ago" is a fact about the past that leaves you to
+  do the arithmetic; *"71 days of view history become unrecoverable in 20 days"* is the one that
+  tells you whether to act today. A deployment that has never synced says so, rather than reporting
+  zero days at risk — which would read as "up to date" at the moment it is least true.
+- The warning is loud but **never fatal**: prod CI gates deploys on `health`'s exit code, and a
+  deployment that is up with an unsynced summary is still up.
+- `views --sync` now closes by naming the invariant it just satisfied, so the next miss is a lapse
+  rather than a surprise.
+
 ## [0.33.0] — 2026-08-07
 
 View counts stop going down. The summary is the history now, not a snapshot of a window.

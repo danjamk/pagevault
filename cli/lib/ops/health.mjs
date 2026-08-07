@@ -100,8 +100,15 @@ export async function healthCmd({ json = false, flags = {} } = {}) {
       }
       mcp = "up";
     }
+
+    // Sync risk rides along with the bearer we already resolved (ADR-023 §9, #165). It lives here
+    // rather than in `status` because `status` is deliberately offline — it prints saved answers
+    // and says so — and it is not on `/health`, which is unauthenticated: when you last synced is
+    // a fact about how the operator works, and it does not belong on a public endpoint.
+    const risk = bearer ? await fetchSyncRisk(base, bearer) : null;
+
     if (json) {
-      emit({ ok: true, version: last.version, expected, mcp, pinned, source: target.source });
+      emit({ ok: true, version: last.version, expected, mcp, pinned, source: target.source, views: risk });
       return;
     }
     ok(
@@ -110,6 +117,7 @@ export async function healthCmd({ json = false, flags = {} } = {}) {
         : `/health reports ${c.bold(last.version)}. This install did not deploy it, so there is no build to match it against.`,
     );
     mcp === "up" ? ok("/mcp answers — the MCP surface is up.") : warn("No PAGEVAULT_API_TOKEN — skipped the /mcp reachability check.");
+    reportSyncRisk(risk);
     process.exit(0);
   }
 
@@ -130,4 +138,67 @@ export async function healthCmd({ json = false, flags = {} } = {}) {
     `/health reports ${c.bold(last.version ?? "unknown")}, but this checkout is ${c.bold(expected)}.`,
     "The deployment isn't running this commit's code. Re-run the deploy, or investigate a stuck rollout.",
   );
+}
+
+/**
+ * Ask the deployment how much view history is waiting to be captured.
+ *
+ * The Worker computes it — the CLI, the console panel and the MCP tool all need the same answer,
+ * and three implementations of one horizon calculation is three chances to disagree about when
+ * someone's history is about to disappear.
+ *
+ * Never fatal. `health` exists to answer "is this deployment up", and a deployment that is up with
+ * an unreadable summary is still up.
+ */
+async function fetchSyncRisk(base, bearer) {
+  try {
+    const res = await fetch(`${base}/api/docs`, { headers: { Authorization: `Bearer ${bearer}` } });
+    if (!res.ok) return null;
+    return (await res.json())?.viewsRisk ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 🔴 Alarm on RISK, not on age.
+ *
+ * "Synced 40 days ago" is a fact about the past that leaves the reader to do the arithmetic.
+ * "12 days of history become unrecoverable in 3 weeks" is a fact about the future, and it is the
+ * one that tells them whether to act today. Only the second is worth interrupting anyone for.
+ */
+function reportSyncRisk(risk) {
+  if (!risk) return;
+  // Not `runHint`: `make views` has no sync path — scripts/views.mjs only queries — so
+  // `pagevault views --sync` is the only way to do this from either front door.
+  const fix = "pagevault views --sync";
+  const days = (n) => `${n} day${n === 1 ? "" : "s"}`;
+
+  if (risk.state === "never") {
+    // Not "0 days at risk" — that reads as "up to date", which is the opposite of true.
+    warn("No view history captured yet.");
+    console.log(`  ${c.dim(`Views reach Analytics Engine on their own, but only`)} ${c.bold(fix)} ${c.dim("makes them durable.")}`);
+    return;
+  }
+  if (risk.state === "ok") {
+    if (risk.uncapturedDays === 0) return ok("View history is captured through today.");
+    return ok(`View history captured through ${risk.capturedThrough} — ${days(risk.daysUntilLoss)} of runway.`);
+  }
+
+  if (risk.state === "losing") {
+    // Loud, but NOT fatal. Prod CI gates deploys on this command's exit code, and a deployment that
+    // is up with an unsynced summary is still up — failing the deploy would punish the wrong thing
+    // and train someone to stop reading the output.
+    const lostVerb = risk.lostDays === 1 ? "has" : "have";
+    warn(`${days(risk.lostDays)} of view history ${lostVerb} already been lost, and more goes every day.`);
+    console.log(`  ${c.dim(`Captured through ${risk.capturedThrough}. Analytics Engine keeps about 90 days, and nothing`)}`);
+    console.log(`  ${c.dim("but a sync takes it off that belt — what aged out uncovered does not come back.")}`);
+    console.log(`  ${c.dim("Run")} ${c.bold(fix)} ${c.dim("to capture everything still there.")}`);
+    return;
+  }
+
+  // "71 days ... become", "1 day ... becomes" — the verb agrees with the count, not with "history".
+  const verb = risk.uncapturedDays === 1 ? "becomes" : "become";
+  warn(`${days(risk.uncapturedDays)} of view history ${verb} unrecoverable in ${days(risk.daysUntilLoss)}.`);
+  console.log(`  ${c.dim(`Captured through ${risk.capturedThrough}. Fix it with`)} ${c.bold(fix)}${c.dim(".")}`);
 }
