@@ -322,13 +322,24 @@ reports that there is no group, which is expected.
   views: H(
     "Usage: pagevault views [--days 30] [--portal s] [--doc id] [--account id] [--json]   ·   views --sync",
     `
-Which documents were actually opened. Reads Analytics Engine directly with your Cloudflare token
-— the Worker's binding is write-only, so it can never run this query itself (ADR-015).
+Which documents were actually opened, and where the traffic came from. Reads Analytics Engine
+directly with your Cloudflare token — the Worker's binding is write-only, so it can never run this
+query itself (ADR-015).
 
   --account <id>   the Cloudflare account to query. Defaults to the one this install provisioned;
                    pass it when this machine did not provision the deployment — production
                    deployed by CI, say. A token scoped to Account Analytics (Read) is enough,
                    and cannot deploy or destroy anything.
+
+Below the table, the hosts that linked to your documents — or "direct". The linking HOST only,
+never the page it linked from: that path is someone else's private context (ADR-023). Skipped
+under --doc, where a per-portal aggregate would be a wrong answer rather than a narrower one.
+
+A "(portal index)" row is someone landing on a collection page without opening anything. Counted
+apart from document views, and recording no viewer on any surface — including /v/, where Access
+knows who it was.
+
+Automated previews and unfurls fetch the page too, so public numbers read high.
 
 View records are ACCOUNT-LEVEL and outlive the deployment that wrote them: after a teardown and
 rebuild this shows history the new deployment never created. Cloudflare keeps them three months
