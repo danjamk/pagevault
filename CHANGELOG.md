@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.32.1] — 2026-08-07
+
+The deployment listing stops disagreeing with `status` about the same deployment.
+
 ### Fixed
 - **`pagevault deployments` reports `PROVISIONED` correctly, and reports it the same from every
   directory.** It read `no` for a deployment whose build record was sitting in a checkout on this
@@ -1393,7 +1397,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.32.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.32.1...HEAD
+[0.32.1]: https://github.com/danjamk/pagevault/compare/v0.32.0...v0.32.1
 [0.32.0]: https://github.com/danjamk/pagevault/compare/v0.31.2...v0.32.0
 [0.31.2]: https://github.com/danjamk/pagevault/compare/v0.31.1...v0.31.2
 [0.31.1]: https://github.com/danjamk/pagevault/compare/v0.31.0...v0.31.1
