@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.34.0] — 2026-08-07
+
+The quiet way to lose view history now says something first.
+
 ### Added
 - **`pagevault health` says when view history is about to become unrecoverable.** Views reach
   Analytics Engine on their own, but only a sync makes them durable — and Analytics Engine is a
@@ -1459,7 +1463,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.33.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.34.0...HEAD
+[0.34.0]: https://github.com/danjamk/pagevault/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/danjamk/pagevault/compare/v0.32.2...v0.33.0
 [0.32.2]: https://github.com/danjamk/pagevault/compare/v0.32.1...v0.32.2
 [0.32.1]: https://github.com/danjamk/pagevault/compare/v0.32.0...v0.32.1
