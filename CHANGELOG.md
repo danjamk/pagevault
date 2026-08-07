@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-08-07
+
+Views can now answer where the traffic came from, and portal landings stop being invisible.
+
 ### Added
 - **`views` answers where the traffic came from, not just who opened what.** A view now records the
   **host** that linked to it — `linkedin.com`, `mail.google.com`, or `direct` — and `pagevault views`
@@ -1376,7 +1380,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.31.2...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/danjamk/pagevault/compare/v0.31.2...v0.32.0
 [0.31.2]: https://github.com/danjamk/pagevault/compare/v0.31.1...v0.31.2
 [0.31.1]: https://github.com/danjamk/pagevault/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/danjamk/pagevault/compare/v0.30.0...v0.31.0
