@@ -67,15 +67,35 @@ Credentials and build state live together, in one place, outside any repo:
   "deployments": {
     "prod": { "url": "https://pagevault.example.com", "token": "…", "protected": true },
     "test": { "url": "https://pagevault.test.example", "token": "…",
-              "accountId": "…", "rung": 3, "host": "…", "kvId": "…" }
+              "markerPath": "/Users/me/code/pagevault/.pagevault.json" }
   }
 }
 ```
 
-Provisioning fields are **optional fields on a deployment**, not a separate file. A deployment you
-did not provision simply has no `accountId` — a fact about it, not an error state. That is what
+Provisioning state is **an optional field on a deployment**, not a separate file. A deployment you
+did not provision simply does not have it — a fact about it, not an error state. That is what
 dissolves #144: `status` can say *"prod · connected · not provisioned from this machine"* because
 the model can finally express it.
+
+> **Amended 2026-08-07 (#170).** This originally showed `accountId`, `rung`, `host` and `kvId`
+> copied onto the entry. They are not: the entry records `markerPath`, and every reader follows it
+> to the build record and reads those fields fresh.
+>
+> Copying was tried on paper and fails on staleness. A rebuilt deployment changes its `accountId`,
+> the copy does not, and a registry asserting a **wrong** account is worse than one asserting none —
+> it is the credential-and-target mismatch this whole ADR exists to end, relocated into the fix.
+>
+> Deriving it instead from the *nearest* marker fails differently and worse: `deployments` is a
+> global listing, so the answer would be `no` from `~` and `yes` from a checkout, for one deployment,
+> seconds apart. An answer that changes with your working directory cannot be reasoned about.
+>
+> A recorded path is neither. It cannot go stale in content, because nothing is copied; it does not
+> move with the cwd, because it is not a search; and every way it can break — the checkout deleted,
+> moved, or re-provisioned against a different deployment — resolves to `not provisioned from this
+> machine`, which is true in all three cases. Only build-record markers get a path. A pointer marker
+> (`{ "deployment": "test" }`) means the registry is already authoritative for that directory, so
+> there is nothing to point back at, and recording one would give a single relationship two sources
+> that can disagree.
 
 #### The Cloudflare credential does not move
 
