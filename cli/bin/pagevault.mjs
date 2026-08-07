@@ -1016,8 +1016,10 @@ async function syncViews(flags) {
   // 90 days, not the table's 30. "Have they ever opened it" is a lifetime question, and Analytics
   // Engine retains about three months — so a sync takes the whole window it can still see.
   const days = Number(flags.days ?? 90);
-  // Rows are grouped per (portal, doc, title, surface, viewer), so one document can be many rows.
-  // The table's default limit of 100 would truncate an aggregate silently.
+  // Rows are grouped per (portal, doc, title, surface, viewer, kind), so one document can be many
+  // rows — plus the portal-index rows, which `summarizeViews` drops but which still arrive and
+  // still count against this limit. The table's default of 100 would truncate an aggregate
+  // silently.
   const limit = Number(flags.limit ?? 10000);
 
   let result;
