@@ -615,8 +615,21 @@ traffic to a collection page is measurable without inferring it from document op
   `recordView` and the CLI's `SELECT` are a contract held together by a comment in both files.
   New fields take new positions; nothing is reused, reordered or repurposed, and every reader
   treats an empty blob as "not recorded then" rather than as a value (decision 8).
-- **Retention is three months.** This is a rolling window, not a history. A nine-month
-  engagement outlives its own view data, and nothing in the UI should imply otherwise.
+- **Analytics Engine retains three months; the summary keeps everything.** The stored summary is
+  the durable history and Analytics Engine is a 90-day feed into it
+  ([ADR-023](adr/ADR-023-the-summary-is-the-history.md) §1). Each `views --sync` contributes the
+  window it could see, and what it contributed stays — so a nine-month engagement no longer outlives
+  its own view data. The operating invariant is the other side of that bargain: **sync at least once
+  every 90 days**, or lose the tail that ages out uncovered.
+- **The summary is per-day, sparse, and merged by the Worker.** A day with no views is absent rather
+  than zero, and so is a surface. `POST /api/views/summary` is read-modify-write: the payload
+  declares the window it covers, that window is authoritative deployment-wide, and everything
+  outside it is untouched. The merge is in the Worker rather than the CLI because that makes history
+  append-only *by construction* — a CLI at an old version, or a `--sync --days 7` from a second
+  machine, would otherwise clobber everything it did not measure (§3). Buckets past 90 days compact
+  to monthly, which is what bounds the value.
+- **`views --sync --reset` is the one way back.** Append-only with no way out is how a bad history
+  becomes permanent. It asks for the deployment URL before it does it.
 - **The dataset is account-level and outlives the deployment.** Nothing in a view record names
   which deployment wrote it, so after a teardown and rebuild `views` blends records from a
   deployment that no longer exists with the current one's, and presents all of it as current.

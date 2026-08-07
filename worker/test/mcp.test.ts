@@ -915,11 +915,14 @@ describe("view metrics ride along with the read tools (#127)", () => {
    */
   const SYNCED = "2026-07-29T12:00:00.000Z";
 
+  // v2 (#161): docs map to sparse day buckets rather than lifetime totals, so the fixtures name a
+  // day. `coverage` is what the merge clears by, and it is stated rather than inferred from a
+  // window length — see mergeSummary.
   const sync = (docs: Record<string, unknown>, syncedAt = SYNCED) =>
     SELF.fetch(`${HOST}/api/views/summary`, {
       method: "POST",
       headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ syncedAt, windowDays: 90, docs }),
+      body: JSON.stringify({ v: 2, syncedAt, coverage: { from: "2026-05-01", to: "2026-07-29" }, docs, portals: {} }),
     });
 
   /** Publish through MCP, then backdate it so it falls inside the measured window. */
@@ -948,7 +951,7 @@ describe("view metrics ride along with the read tools (#127)", () => {
 
   it("read_document reports counts, surfaces and when they were measured", async () => {
     const id = await publishBackdated("Measured");
-    await sync({ [id]: { views: 4, lastViewedAt: "2026-07-28T09:00:00Z", surfaces: { link: 3, public: 0, portal: 1 } } });
+    await sync({ [id]: { "2026-07-28": { link: 3, portal: 1, t: "09:00:00" } } });
 
     const { structured, text } = await callToolFull("read_document", { id });
 
@@ -971,7 +974,7 @@ describe("view metrics ride along with the read tools (#127)", () => {
 
   it("list_documents stamps the listing once and never leaks a viewer identity", async () => {
     const id = await publishBackdated("Listed");
-    await sync({ [id]: { views: 2, lastViewedAt: "2026-07-28T09:00:00Z", surfaces: { link: 2, public: 0, portal: 0 } } });
+    await sync({ [id]: { "2026-07-28": { link: 2, t: "09:00:00" } } });
 
     const { structured, text } = await callToolFull("list_documents", {});
 

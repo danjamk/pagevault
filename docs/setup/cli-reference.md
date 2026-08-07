@@ -292,10 +292,32 @@ Records are kept for **three months** and then age out on their own; `destroy` c
 because the Worker deliberately holds no credential that can read or delete analytics
 ([ADR-015](../adr/ADR-015-what-a-view-record-contains.md) §5–6).
 
-### `pagevault views --sync`
+### `pagevault views --sync [--reset] [--yes]`
 Push a summary of those counts into your deployment so an **agent** can see them. `read_document`
 and `list_documents` then report `views`, `lastViewedAt`, and which door readers came through —
 as of the sync, never live.
+
+The stored summary **accumulates**. Each sync adds the window it could see and never removes what an
+earlier one contributed, so your history outlives Analytics Engine's three-month retention
+([ADR-023](../adr/ADR-023-the-summary-is-the-history.md) §1). Before this, every sync re-derived from
+a rolling 90-day query — so a document opened 43 times in January reported `views: 3` by June, with a
+*newer* `viewsSyncedAt` making it look fresher at the moment it became less true.
+
+⚠️ **Sync at least once every 90 days.** That is the other side of the bargain: views only reach the
+durable summary when a sync runs, so a window that ages out of Analytics Engine uncovered is gone.
+Nothing errors — the data is simply never there later. A daily schedule is the sensible cadence and
+costs one KV write.
+
+Your own views are counted apart from the client's, where the deployment can tell — the split is
+computed on your machine from an address that never leaves it. Where this machine does not hold the
+deployment's build record the split is **absent rather than guessed**.
+
+`--reset` throws the stored history away and rebuilds from the current window alone. It is the one
+destructive option here, and it asks for the deployment URL before doing it: anything older than 90
+days is not in Analytics Engine any more and does not come back.
+
+**Backups matter more than they did.** The summary lives in KV, so `backup` carries it and `destroy`
+ends it. A backup is now the difference between keeping and losing history.
 
 The query still runs here, on your machine, with your Cloudflare token; only the aggregate
 travels ([ADR-019](../adr/ADR-019-view-metrics-reach-mcp-by-sync.md)). **Counts and surfaces

@@ -41,7 +41,7 @@ import {
   putMembers,
   putPortal,
 } from "./store.js";
-import { getViewSummary, parseViewSummary, putViewSummary, withStats } from "./views.js";
+import { assertFits, getViewSummary, mergeSummary, parseViewSummary, putViewSummary, withStats } from "./views.js";
 import { log } from "./log.js";
 
 /**
@@ -233,15 +233,39 @@ async function accessSyncHandler(request: Request, env: Env): Promise<Response> 
  * This is the only way view metrics enter the Worker. There is no GET counterpart and no query
  * path: the Worker stores the result and serves it joined onto documents, which is the whole of
  * ADR-019 — data in, never the credential that produced it.
+ *
+ * 🔴 The merge is HERE rather than in the CLI, and that placement is the decision (ADR-023 §3). It
+ * makes history append-only *by construction*: if the CLI merged, a CLI at an old version, or a
+ * `--sync --days 7` from a second machine, would clobber everything it did not measure. Trusting the
+ * client is the posture `parseViewSummary` already refuses to take.
+ *
+ * `?reset=true` is the one escape hatch, and it is named as destructive rather than discovered.
+ * Append-only with no way out is how a bad history becomes permanent.
  */
 async function putViewSummaryHandler(request: Request, env: Env): Promise<Response> {
-  const summary = parseViewSummary(await readJson(request));
+  const incoming = parseViewSummary(await readJson(request));
+  const reset = new URL(request.url).searchParams.get("reset") === "true";
+
+  // Read-modify-write on eventually-consistent KV, deliberately. Two syncs inside the ~60s window
+  // could both read the pre-merge value and the second would win, losing the first's contribution —
+  // and the next sync repairs it, because a 90-day query re-derives every recent bucket from
+  // scratch. Self-healing is the property that makes this safe; nothing here depends on
+  // read-after-write, and nothing built on top of it should.
+  const stored = reset ? null : await getViewSummary(env);
+  const summary = mergeSummary(stored, incoming);
+
+  // The payload fit; the merged history may not. Refuse rather than truncate — a summary quietly
+  // missing half a portal reports "never opened" for documents that were.
+  assertFits(summary);
+
   await putViewSummary(env, summary);
+
   return json({
     ok: true,
     syncedAt: summary.syncedAt,
-    windowDays: summary.windowDays,
+    coverage: summary.coverage,
     documents: Object.keys(summary.docs).length,
+    ...(reset ? { reset: true } : {}),
   });
 }
 
@@ -287,7 +311,10 @@ async function listDocsHandler(request: Request, env: Env): Promise<Response> {
   const summary = await getViewSummary(env);
   return json({
     docs: docs.map((doc) => withStats(doc, summary)),
-    ...(summary ? { viewsSyncedAt: summary.syncedAt, viewsWindowDays: summary.windowDays } : {}),
+    // `viewsCoverage` replaces `viewsWindowDays`: the counts are no longer "the last N days" but
+    // everything measured since the first sync, so a day count could only mislead about what the
+    // numbers include (ADR-023 §1).
+    ...(summary ? { viewsSyncedAt: summary.syncedAt, viewsCoverage: summary.coverage } : {}),
   });
 }
 

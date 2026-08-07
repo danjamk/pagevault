@@ -17,7 +17,7 @@ import { emptyRegistry, findByName, findByUrl, listDeployments, loadRegistry, sa
 import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "../lib/format.mjs";
 import { helpText, usageError } from "../lib/help.mjs";
 import { buildExport } from "../lib/export.mjs";
-import { formatReferrers, formatViews, plural, queryReferrers, queryViews, summarizeViews } from "../lib/views.mjs";
+import { formatReferrers, formatViews, plural, queryBuckets, queryReferrers, queryViews, summarizeReferrers, summarizeViews } from "../lib/views.mjs";
 
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
@@ -1055,48 +1055,88 @@ async function syncViews(flags) {
   // 90 days, not the table's 30. "Have they ever opened it" is a lifetime question, and Analytics
   // Engine retains about three months — so a sync takes the whole window it can still see.
   const days = Number(flags.days ?? 90);
-  // Rows are grouped per (portal, doc, title, surface, viewer, kind), so one document can be many
-  // rows — plus the portal-index rows, which `summarizeViews` drops but which still arrive and
-  // still count against this limit. The table's default of 100 would truncate an aggregate
-  // silently.
+  // Rows are grouped per (portal, doc, surface, viewer, kind, DAY) now, so one document is one row
+  // per day it was opened rather than one row overall — plus the portal-index rows, which
+  // `summarizeViews` drops but which still arrive and still count against this limit.
   const limit = Number(flags.limit ?? 10000);
 
+  const creds = { accountId: flags.account || ctx.accountId, token: process.env.CLOUDFLARE_API_TOKEN || loadCloudToken() };
+  const syncedAt = new Date().toISOString();
+
   let result;
+  let sources;
   try {
-    result = await queryViews(
-      { accountId: flags.account || ctx.accountId, token: process.env.CLOUDFLARE_API_TOKEN || loadCloudToken() },
-      { days, limit },
-    );
+    result = await queryBuckets(creds, { days, limit, now: syncedAt });
+    sources = await queryReferrers(creds, { days, limit: 200 });
   } catch (err) {
     throw new PvError(err.message);
   }
 
-  // What still exists, so the summary can drop rows for documents that were revoked or torn down.
+  // What still exists, so the summary skips ids this deployment never created (#129). A document
+  // it HAS seen and since revoked keeps its history — the Worker merges by window and never
+  // deletes an entry it merely did not hear about (ADR-023 decision 4).
   const { docs = [] } = await api(target, "GET", "/docs");
   const knownIds = new Set(docs.map((d) => d.id));
 
-  const { summary, skipped } = summarizeViews(result, { syncedAt: new Date().toISOString(), knownIds });
-  const res = await api(target, "POST", "/views/summary", summary);
+  // 🔴 The owner address never leaves this machine. It is read here to bucket a view as yours or
+  // the client's, and then dropped — the Worker receives counts, never the address (ADR-023 §7).
+  // Where this machine does not hold a build record, `ownerEmail` is empty and the split is
+  // ABSENT rather than guessed, which the Worker reads as "not measured" rather than as zero.
+  const { summary, skipped } = summarizeViews(result, { syncedAt, knownIds, ownerEmail: ctx.ownerEmail ?? "" });
+  summary.portals = summarizeReferrers(sources);
+
+  // `--reset` is the one named destructive path (ADR-023 §3). Append-only with no way out is how a
+  // bad history becomes permanent — but it discards every bucket older than this window, which
+  // Analytics Engine can no longer restate, so it asks first.
+  const reset = flags.reset === true;
+  if (reset && flags.yes !== true && !(await confirmReset(target))) {
+    return note("Cancelled — nothing was written.");
+  }
+
+  const res = await api(target, "POST", `/views/summary${reset ? "?reset=true" : ""}`, summary);
 
   // A truncated query would under-report views as confidently as a complete one, so say it.
-  const truncated = result.rows.length >= limit;
   const counted = Object.keys(summary.docs).length;
-  const total = Object.values(summary.docs).reduce((n, d) => n + d.views, 0);
+  const total = Object.values(summary.docs).reduce(
+    (n, history) => n + Object.values(history).reduce((m, b) => m + (b.link ?? 0) + (b.pub ?? 0) + (b.portal ?? 0), 0),
+    0,
+  );
 
-  if (flags.json) return out(JSON.stringify({ ...res, skipped, truncated }, null, 2));
+  if (flags.json) return out(JSON.stringify({ ...res, skipped, truncated: result.truncated }, null, 2));
 
   note(
     [
-      `Synced ${plural(counted, "document")} · ${plural(total, "view")} · last ${plural(days, "day")}.`,
+      `Synced ${plural(counted, "document")} · ${plural(total, "view")} · ${result.coverage.from} to ${result.coverage.to}.`,
+      ...(reset ? ["History was reset — everything before this window is gone."] : []),
       ...(skipped.length
-        ? [`Skipped ${plural(skipped.length, "document")} no longer published — the dataset outlives the deployment.`]
+        ? [`Skipped ${plural(skipped.length, "document")} this deployment never created — the dataset outlives deployments.`]
         : []),
-      ...(truncated
+      ...(result.truncated
         ? [`⚠ Hit the ${limit}-row query limit, so the summary may be incomplete. Narrow it with --days.`]
         : []),
+      ...(ctx.ownerEmail ? [] : ["No owner address on this machine, so views are not split into yours and the client's."]),
       `read_document and list_documents now report these over MCP, as of the sync — not live.`,
     ].join("\n"),
   );
+}
+
+/**
+ * `--sync --reset` throws away history Analytics Engine cannot restate. Typed confirmation, not
+ * y/N: this is the one command here whose damage is unrecoverable, and it should feel like it.
+ */
+async function confirmReset(target) {
+  if (!stdin.isTTY) {
+    throw new PvError("--sync --reset needs a terminal to confirm, or --yes to skip the prompt.");
+  }
+  const rl = createInterface({ input: stdin, output: stderr });
+  try {
+    note(`This deletes every stored view bucket for ${target.url} and rebuilds from the last 90 days.`);
+    note("Anything older than that is not in Analytics Engine any more and will not come back.");
+    const answer = await rl.question("Type the deployment URL to confirm: ");
+    return answer.trim() === target.url;
+  } finally {
+    rl.close();
+  }
 }
 
 main().catch((err) => {

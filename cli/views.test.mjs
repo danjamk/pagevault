@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatReferrers, formatViews, summarizeViews } from "./lib/views.mjs";
+import { formatReferrers, formatViews, summarizeReferrers, summarizeViews } from "./lib/views.mjs";
 
 /**
  * The rendering half of `views`. The query half needs the network and is exercised by running
@@ -69,97 +69,150 @@ test("warns that the dataset outlives the deployment, every time it shows rows",
 });
 
 // ---------------------------------------------------------------------------
-// summarizeViews — the aggregation MCP serves (#127, ADR-019)
+// summarizeViews — the day buckets the Worker merges (#161, ADR-023)
 // ---------------------------------------------------------------------------
 
 const SYNCED = "2026-07-29T12:00:00.000Z";
-const sum = (rows, opts = {}) => summarizeViews({ days: 90, rows }, { syncedAt: SYNCED, ...opts });
+const COVERAGE = { from: "2026-05-01", to: "2026-07-29" };
 
-test("totals a document's views across every surface and viewer", () => {
-  // One document, three rows: the same person through the portal twice, a stranger through the
-  // public link. The rows are grouped per (doc, surface, viewer), so summing rows is the job.
+const brow = (over = {}) => ({
+  portal: "acme",
+  doc: "k3x9mq2vb7pd",
+  surface: "portal",
+  viewer: "cfo@acme.com",
+  kind: "document",
+  day: "2026-07-28",
+  views: 3,
+  lastView: "2026-07-28T21:14:05Z",
+  ...over,
+});
+
+const sum = (rows, opts = {}) =>
+  summarizeViews({ coverage: COVERAGE, rows }, { syncedAt: SYNCED, ...opts });
+
+test("buckets a document's views by day, keyed by the stored surface names", () => {
   const { summary } = sum([
-    row({ views: 2, surface: "portal", viewer: "cfo@acme.com" }),
-    row({ views: 1, surface: "portal", viewer: "cto@acme.com" }),
-    row({ views: 4, surface: "link", viewer: null }),
+    brow({ views: 2, surface: "portal" }),
+    brow({ views: 4, surface: "link", viewer: null }),
+    brow({ day: "2026-07-29", views: 1, surface: "public", viewer: null }),
   ]);
 
-  assert.deepEqual(summary.docs["k3x9mq2vb7pd"], {
-    views: 7,
-    lastViewedAt: "2026-07-22T21:14:05Z",
-    surfaces: { link: 4, public: 0, portal: 3 },
-  });
+  assert.deepEqual(Object.keys(summary.docs["k3x9mq2vb7pd"]).sort(), ["2026-07-28", "2026-07-29"]);
+  assert.equal(summary.docs["k3x9mq2vb7pd"]["2026-07-28"].portal, 2);
+  assert.equal(summary.docs["k3x9mq2vb7pd"]["2026-07-28"].link, 4);
+  // `pub`, not `public` — the stored key differs from the query's surface name.
+  assert.equal(summary.docs["k3x9mq2vb7pd"]["2026-07-29"].pub, 1);
+});
+
+test("stamps v2 and carries the coverage window the Worker clears by", () => {
+  const { summary } = sum([brow()]);
+  assert.equal(summary.v, 2);
+  assert.deepEqual(summary.coverage, COVERAGE);
+  assert.equal(summary.syncedAt, SYNCED);
+});
+
+test("keeps only the time of day — the date is already the key", () => {
+  const { summary } = sum([brow({ lastView: "2026-07-28T21:14:05Z" }), brow({ lastView: "2026-07-28 09:00:00" })]);
+  assert.equal(summary.docs["k3x9mq2vb7pd"]["2026-07-28"].t, "21:14:05");
+});
+
+test("normalizes Analytics Engine's DateTime before comparing times", () => {
+  // AE returns ClickHouse DateTime ("2026-07-28 09:00:00"). Left unnormalized the slice would cut
+  // in the wrong place and the later view would lose.
+  const { summary } = sum([brow({ lastView: "2026-07-28 23:00:00" }), brow({ lastView: "2026-07-28T09:00:00Z" })]);
+  assert.equal(summary.docs["k3x9mq2vb7pd"]["2026-07-28"].t, "23:00:00");
 });
 
 test("carries no viewer identity into the summary, on any surface", () => {
-  // ADR-019 decision 4. The rows have emails; what MCP serves must not. This is the assertion
-  // that would catch a well-meaning "it'd be handy to know who" refactor.
-  const { summary } = sum([row({ viewer: "cfo@acme.com" }), row({ doc: "b", viewer: "ceo@acme.com" })]);
+  // ADR-019 decision 4. The rows have emails; what MCP serves must not.
+  const { summary } = sum([brow(), brow({ doc: "b", viewer: "ceo@acme.com" })], { ownerEmail: "me@example.com" });
   assert.doesNotMatch(JSON.stringify(summary), /@acme\.com/);
 });
 
-test("keeps the latest view, not the last row seen", () => {
-  const { summary } = sum([
-    row({ lastView: "2026-07-22T21:14:05Z" }),
-    row({ lastView: "2026-07-28T09:00:00Z", surface: "link" }),
-    row({ lastView: "2026-07-01T09:00:00Z", surface: "public" }),
-  ]);
-  assert.equal(summary.docs["k3x9mq2vb7pd"].lastViewedAt, "2026-07-28T09:00:00Z");
-});
-
-test("normalizes Analytics Engine's DateTime to ISO before comparing", () => {
-  // AE returns ClickHouse DateTime ("2026-07-28 09:00:00"), and "2026-07-28 09:00:00" sorts
-  // BELOW "2026-07-22T21:14:05Z" as a raw string — the space is 0x20, the T is 0x54. Left
-  // unnormalized, the newer view loses and lastViewedAt silently reports the older one.
-  const { summary } = sum([
-    row({ lastView: "2026-07-22T21:14:05Z" }),
-    row({ lastView: "2026-07-28 09:00:00", surface: "link" }),
-  ]);
-  assert.equal(summary.docs["k3x9mq2vb7pd"].lastViewedAt, "2026-07-28T09:00:00Z");
-});
-
-test("drops rows for documents that no longer exist, and names how many", () => {
-  // The dataset is account-level and outlives the deployment (#129), so a rebuild leaves rows
-  // pointing at ids that `list_documents` will never return.
-  const { summary, skipped } = sum(
-    [row(), row({ doc: "ghostdoc1234" }), row({ doc: "ghostdoc1234", surface: "link" })],
-    { knownIds: new Set(["k3x9mq2vb7pd"]) },
+test("🔴 splits owner views out of portal views, where an identity exists", () => {
+  const { summary } = sum(
+    [
+      brow({ views: 2, surface: "portal", viewer: "me@example.com" }),
+      brow({ views: 5, surface: "portal", viewer: "cfo@acme.com" }),
+    ],
+    { ownerEmail: "Me@Example.com" },
   );
+  const b = summary.docs["k3x9mq2vb7pd"]["2026-07-28"];
+  assert.equal(b.portal, 7, "the surface total still counts every portal view");
+  assert.equal(b.owner, 2, "and the owner's share is named, case-insensitively");
+});
 
+test("🔴 leaves the owner split ABSENT when this machine does not know the address", () => {
+  // ADR-023 §7: absent, never guessed. A wrong attribution is worse than a missing one, and the
+  // Worker reads absent as "not measured" rather than as zero.
+  const { summary } = sum([brow({ surface: "portal" })], { ownerEmail: "" });
+  assert.equal("owner" in summary.docs["k3x9mq2vb7pd"]["2026-07-28"], false);
+});
+
+test("records a known zero as zero — nobody but the client opened it", () => {
+  // Present-and-zero is a real statement and must survive as one.
+  const { summary } = sum([brow({ surface: "portal", viewer: "cfo@acme.com" })], { ownerEmail: "me@example.com" });
+  assert.equal(summary.docs["k3x9mq2vb7pd"]["2026-07-28"].owner, 0);
+});
+
+test("never attributes an anonymous surface to the owner", () => {
+  // /pub and /p have no Access application, so a view through them is neither owner nor client.
+  // Claiming otherwise would be exactly the guess decision 7 rules out.
+  const { summary } = sum([brow({ surface: "link", viewer: null })], { ownerEmail: "me@example.com" });
+  assert.equal("owner" in summary.docs["k3x9mq2vb7pd"]["2026-07-28"], false);
+});
+
+test("🔴 portal landings never enter a document's history", () => {
+  const { summary } = sum([brow({ views: 3 }), brow({ doc: "", kind: "index", views: 40 })]);
   assert.deepEqual(Object.keys(summary.docs), ["k3x9mq2vb7pd"]);
-  // Deduped by document, not counted per row — two rows for one dead document is one document.
+  assert.equal(summary.docs["k3x9mq2vb7pd"]["2026-07-28"].portal, 3);
+});
+
+test("skips ids this deployment never created, and names how many", () => {
+  const { summary, skipped } = sum([brow(), brow({ doc: "ghostdoc1234" }), brow({ doc: "ghostdoc1234", day: "2026-07-27" })], {
+    knownIds: new Set(["k3x9mq2vb7pd"]),
+  });
+  assert.deepEqual(Object.keys(summary.docs), ["k3x9mq2vb7pd"]);
+  // Deduped by document, not per row — two days of one dead document is one document.
   assert.deepEqual(skipped, ["ghostdoc1234"]);
 });
 
 test("keeps every document when no id set is supplied", () => {
-  const { summary, skipped } = sum([row(), row({ doc: "ghostdoc1234" })]);
+  const { summary, skipped } = sum([brow(), brow({ doc: "ghostdoc1234" })]);
   assert.equal(Object.keys(summary.docs).length, 2);
   assert.deepEqual(skipped, []);
 });
 
+test("🔴 emits nothing for a day that recorded no surface", () => {
+  // Sparse has to be BUILT, not merely validated. Shipping an empty bucket for the Worker to drop
+  // means the wire payload is dense even when the stored value is not.
+  const { summary } = sum([brow({ surface: "carrier-pigeon" })]);
+  assert.deepEqual(JSON.parse(JSON.stringify(summary.docs)), {});
+});
+
 test("an empty result is a valid summary, not a failure", () => {
-  // A deployment nobody has opened yet must still sync. The Worker distinguishes "no summary"
-  // from "a summary with no rows" — the second is the honest "measured, nothing opened".
   const { summary } = sum([]);
-  // Compared after a JSON round-trip, which is what actually goes over the wire: `docs` is a
-  // null-prototype object (so a document id of `__proto__` is a key, not a prototype swap), and
-  // deepEqual treats that as unequal to a plain `{}`.
-  assert.deepEqual(JSON.parse(JSON.stringify(summary)), { syncedAt: SYNCED, windowDays: 90, docs: {} });
+  assert.deepEqual(JSON.parse(JSON.stringify(summary)), { v: 2, syncedAt: SYNCED, coverage: COVERAGE, docs: {}, portals: {} });
 });
 
-test("stamps the window it measured, so the reader knows what zero means", () => {
-  const { summary } = summarizeViews({ days: 7, rows: [row()] }, { syncedAt: SYNCED });
-  assert.equal(summary.windowDays, 7);
-  assert.equal(summary.syncedAt, SYNCED);
+// ---------------------------------------------------------------------------
+// summarizeReferrers — the per-portal rollup
+// ---------------------------------------------------------------------------
+
+test("rolls referrers up per portal, with direct kept as its own host", () => {
+  const portals = summarizeReferrers({
+    sources: [
+      { portal: "acme", referrer: "linkedin.com", views: 4 },
+      { portal: "acme", referrer: null, views: 2 },
+      { portal: "marketing", referrer: "linkedin.com", views: 9 },
+    ],
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(portals)), { acme: { "linkedin.com": 4, "": 2 }, marketing: { "linkedin.com": 9 } });
 });
 
-test("ignores a surface it does not recognise rather than inventing a key", () => {
-  // Defensive: surfaces come from the Worker's own writeDataPoint, but the summary shape is a
-  // contract with the MCP output schema and must not grow keys from remote data.
-  const { summary } = sum([row({ surface: "carrier-pigeon", views: 3 })]);
-  assert.deepEqual(summary.docs["k3x9mq2vb7pd"].surfaces, { link: 0, public: 0, portal: 0 });
-  // The view still counts — it happened, we just cannot attribute the door.
-  assert.equal(summary.docs["k3x9mq2vb7pd"].views, 3);
+test("an empty source list is an empty rollup, not a crash", () => {
+  assert.deepEqual(JSON.parse(JSON.stringify(summarizeReferrers({}))), {});
+  assert.deepEqual(JSON.parse(JSON.stringify(summarizeReferrers({ sources: [] }))), {});
 });
 
 test("columns line up even when a cell carries ANSI", () => {
@@ -177,22 +230,6 @@ test("columns line up even when a cell carries ANSI", () => {
 // ---------------------------------------------------------------------------
 
 const index = (over = {}) => row({ doc: "", title: "", viewer: null, kind: "index", ...over });
-
-test("🔴 a row predating the kind field reads as a document view, never as nothing", () => {
-  // Decision 8 says empty means "not recorded then". For blob5 that history is knowable: every
-  // row written before the field existed WAS a document view, because portalIndex was not
-  // instrumented and no other kind could be written. So mapping empty → document states a fact.
-  const { summary } = sum([row({ kind: "" }), row({ doc: "b", kind: undefined })]);
-  assert.equal(Object.keys(summary.docs).length, 2);
-});
-
-test("🔴 portal landings never inflate a document's view count", () => {
-  // The summary is what MCP serves as a property of a document. Someone who landed on the
-  // collection page and opened nothing must not read as someone who opened the report.
-  const { summary } = sum([row({ views: 3 }), index({ views: 40 })]);
-  assert.equal(summary.docs["k3x9mq2vb7pd"].views, 3);
-  assert.equal(Object.keys(summary.docs).length, 1);
-});
 
 test("an index row is skipped on its kind, not on its empty document id", () => {
   // Belt and braces: an index event that somehow carried an id must still not become a document.

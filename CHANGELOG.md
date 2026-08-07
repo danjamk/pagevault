@@ -7,6 +7,37 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Changed
+- **View counts stop going down.** The stored summary was re-derived from a rolling 90-day query on
+  every sync, so a document opened 43 times in January reported `views: 3` by June — and
+  `viewsSyncedAt` moved forward, making the number look *fresher* at the moment it became less true.
+  The summary is now the durable history and Analytics Engine is a 90-day feed into it: each sync
+  adds the window it could see and never removes what an earlier one contributed.
+  ([#161](../../issues/161), [ADR-023](docs/adr/ADR-023-the-summary-is-the-history.md) §1–4, §7)
+- **Views are stored per day, sparsely.** A day with no views is absent rather than zero, and so is
+  a surface. Days past 90 compact to monthly. That is what makes a trend possible without a
+  database, and it bounds the one KV value the whole feature lives in.
+- **The Worker merges; the CLI no longer replaces.** `POST /api/views/summary` is read-modify-write.
+  The payload declares the window it covers, that window is authoritative deployment-wide, and
+  buckets outside it are untouched — so a `--sync --days 7` from a second machine cannot clobber
+  three months it never measured.
+- **A document's history outlives the document.** Revoking one no longer erases its traffic. Ids the
+  deployment never created are still skipped, because the dataset is account-level (#129).
+- **Your own views are counted apart from the client's**, computed on your machine from an address
+  that never reaches the Worker — and left absent rather than guessed where that address is unknown.
+
+### Added
+- **`pagevault views --sync --reset`** — discard the stored history and rebuild from the current
+  window. The one destructive path, and it asks for the deployment URL first. Append-only with no
+  way out is how a bad history becomes permanent.
+
+### Upgrade notes
+- A summary stored by an earlier version is **discarded on first read** rather than migrated: it
+  held lifetime totals with no dates, and there is no honest place to put those on a timeline. Run
+  `pagevault views --sync` once and the last 90 days come back correctly dated.
+- `viewsWindowDays` in `/api/docs` is replaced by `viewsCoverage: { from, to }`. The counts are no
+  longer "the last N days", so a day count could only mislead about what they include.
+
 ## [0.32.2] — 2026-08-07
 
 The end of a recovery names a command you can actually type.
