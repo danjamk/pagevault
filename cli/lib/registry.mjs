@@ -163,18 +163,27 @@ export function remove(registry, name) {
 }
 
 /**
- * The registry as a list, for display. `provisioned` mirrors `resolveTarget`'s meaning of the word:
- * this machine holds the build record, so the provisioning commands can run. Its absence is a fact
- * about the deployment, not a fault (#144).
+ * The registry as a list, for display. `provisioned` means what it means everywhere else: this
+ * machine holds the build record, so the provisioning commands can run. Its absence is a fact about
+ * the deployment, not a fault (#144).
+ *
+ * The answer is **injected** rather than computed here, and that is a boundary rather than a
+ * preference. Deciding it means reading a marker off disk, marker reading lives in `target.mjs`, and
+ * `target.mjs` already imports this file — computing it here would either close that loop or
+ * duplicate the record→URL rule in two places, and a contract with two definitions has none. So the
+ * caller supplies the predicate and this stays a pure function over an already-loaded registry.
+ *
+ * Without one, every row reads `false`. That is the honest default: a caller who did not offer a way
+ * to check has not established that anything is provisioned.
  */
-export function listDeployments(registry) {
+export function listDeployments(registry, { provisioned = () => false } = {}) {
   if (!registry) return [];
   return Object.entries(registry.deployments).map(([name, entry]) => ({
     name,
     url: entry?.url ?? "",
     current: name === registry.current,
     protected: entry?.protected === true,
-    provisioned: Boolean(entry && (entry.rung !== undefined || entry.accountId)),
+    provisioned: Boolean(entry) && provisioned(entry) === true,
     hasToken: Boolean(entry?.token),
   }));
 }

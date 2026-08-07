@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -337,13 +337,24 @@ test("a client-only install is a state, not an error (#144)", () => {
 /** A throwaway home holding a registry with a protected `prod` and a plain `test`. */
 function registryHome() {
   const home = mkdtempSync(join(tmpdir(), "pv-registry-"));
+
+  // A checkout somewhere else on this machine, holding `test`'s build record. Deliberately NOT at
+  // `$PAGEVAULT_HOME/.pagevault.json`, so nothing here is found by locateMarker() — `test` reads as
+  // provisioned only because its entry records where to look (#170).
+  const checkout = join(home, "checkout");
+  mkdirSync(checkout, { recursive: true });
+  writeFileSync(
+    join(checkout, ".pagevault.json"),
+    JSON.stringify({ rung: 3, accountId: "acct", host: "test.invalid", deployedUrl: "https://test.invalid" }),
+  );
+
   writeFileSync(
     join(home, "deployments.json"),
     JSON.stringify({
       current: "prod",
       deployments: {
         prod: { url: "https://prod.invalid", token: "prod-bearer", protected: true },
-        test: { url: "https://test.invalid", token: "test-bearer", rung: 3, accountId: "acct" },
+        test: { url: "https://test.invalid", token: "test-bearer", markerPath: join(checkout, ".pagevault.json") },
       },
     }),
   );
@@ -386,6 +397,74 @@ test("`deployments` lists what is reachable and which one is default", () => {
   assert.match(r.text, /test\s+https:\/\/test\.invalid/);
   // "Provisioned from this machine" is a fact about the deployment, not a fault (#144).
   assert.match(r.text, /PROVISIONED/);
+});
+
+test("🔴 PROVISIONED follows the recorded build record, not the current directory (#170)", () => {
+  const home = registryHome();
+  const r = runIn(home, "deployments");
+
+  // `test`'s record lives in a checkout nowhere near cwd or PAGEVAULT_HOME, and it still reads yes.
+  assert.match(r.text, /test\s+https:\/\/test\.invalid\s+yes/);
+  // `prod` is deployed by CI, holds no record here, and must keep saying no (#144).
+  assert.match(r.text, /prod\s+https:\/\/prod\.invalid\s+no/);
+  // Nothing is provisioned from where we are standing, so there is nothing to offer to record.
+  assert.doesNotMatch(r.text, /does not say so/);
+});
+
+test("a checkout that was deleted degrades to no rather than to a wrong yes", () => {
+  const home = registryHome();
+  rmSync(join(home, "checkout"), { recursive: true, force: true });
+
+  assert.match(runIn(home, "deployments").text, /test\s+https:\/\/test\.invalid\s+no/);
+});
+
+test("🔴 a checkout re-provisioned elsewhere stops claiming this deployment", () => {
+  const home = registryHome();
+  // Same path, now describing a different deployment. Without the URL re-check the entry would go
+  // on asserting that `upgrade` and `destroy` work against a deployment it no longer describes.
+  writeFileSync(
+    join(home, "checkout", ".pagevault.json"),
+    JSON.stringify({ rung: 3, deployedUrl: "https://somewhere-else.invalid" }),
+  );
+
+  assert.match(runIn(home, "deployments").text, /test\s+https:\/\/test\.invalid\s+no/);
+});
+
+test("a build record sitting right here, unrecorded, says how to record it", () => {
+  const home = registryHome();
+  // The confusing case the column produced before this: provisioning commands work from here, and
+  // the listing says they cannot. The nearest marker is fair game for a HINT — it describes where
+  // you are standing, not the deployment.
+  writeFileSync(join(home, ".pagevault.json"), JSON.stringify({ rung: 3, deployedUrl: "https://prod.invalid" }));
+
+  const r = runIn(home, "deployments");
+  assert.match(r.text, /prod is provisioned from this directory but does not say so/);
+  assert.match(r.text, /pagevault login --as prod/);
+  // A hint, never a silent write — the file on disk is untouched until the operator asks.
+  assert.equal(JSON.parse(readFileSync(join(home, "deployments.json"), "utf8")).deployments.prod.markerPath, undefined);
+});
+
+test("login --as records where the build record is, without being told", () => {
+  const home = registryHome();
+  const marker = join(home, ".pagevault.json");
+  writeFileSync(marker, JSON.stringify({ rung: 3, deployedUrl: "https://prod.invalid" }));
+
+  // No --url, no --token: amending an existing entry must not require retyping credentials, which
+  // is what makes this a usable migration for a registry written before markerPath existed.
+  const r = runIn(home, "login", "--as", "prod");
+  assert.equal(r.status, 0);
+  assert.equal(JSON.parse(readFileSync(join(home, "deployments.json"), "utf8")).deployments.prod.markerPath, marker);
+  assert.match(runIn(home, "deployments").text, /prod\s+https:\/\/prod\.invalid\s+yes/);
+});
+
+test("login --as records nothing when the marker describes a different deployment", () => {
+  const home = registryHome();
+  writeFileSync(join(home, ".pagevault.json"), JSON.stringify({ rung: 3, deployedUrl: "https://prod.invalid" }));
+
+  // Registering `test` while standing in prod's checkout must not hand test prod's build record.
+  runIn(home, "login", "--as", "test");
+  const saved = JSON.parse(readFileSync(join(home, "deployments.json"), "utf8")).deployments.test;
+  assert.notEqual(saved.markerPath, join(home, ".pagevault.json"));
 });
 
 test("`use` selects the default and it survives into the next command", () => {

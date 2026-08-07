@@ -14,6 +14,7 @@ import { pathToFileURL } from "node:url";
 import {
   c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, isInteractive, cfApi, cfAccounts, cfErr, slug,
   writeEnvLocalVar, fromEnv, acct, shortId, banner, chooseBearer, generatedConfigPath, RUNNING_FROM_REPO, runHint,
+  statePath, CONTEXT_FILE,
 } from "./context.mjs";
 import { provisionAccess } from "./provision.mjs";
 import { writeTier0Config } from "./tier0.mjs";
@@ -287,7 +288,13 @@ export async function deploy(opts = {}) {
     if (known) {
       // A deployment we already know by name. Its bearer belongs on ITS entry — never in the global
       // slot, which may be describing something else entirely.
-      const file = saveRegistry(upsert(registry, known.name, { url, token: bearerValue }), process.env);
+      //
+      // `markerPath` rides along because this is the moment it becomes true: we just wrote that
+      // build record, so we know both that it exists and which deployment it describes. A path, not
+      // a copy — `deployments` reads the record fresh through it, so nothing here can go stale
+      // (#170).
+      const patch = { url, token: bearerValue, markerPath: statePath(CONTEXT_FILE) };
+      const file = saveRegistry(upsert(registry, known.name, patch), process.env);
       ok(`Updated ${c.bold(known.name)} in ${file} — the bearer travels with the deployment.`);
       if (registry.current && registry.current !== known.name) {
         console.log(`  ${c.dim(`Still defaulting to ${registry.current} elsewhere. Switch with:`)} ${c.bold(`pagevault use ${known.name}`)}`);
