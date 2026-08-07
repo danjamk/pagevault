@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.31.2] — 2026-08-07
+
+The command that tells you which deployment you are on now does so from both directions.
+
 ### Fixed
 - **`status` names the deployment on both of its branches.** It branches on whether this machine
   holds the build record, and only the not-provisioned half ever said which deployment it was
@@ -1351,7 +1355,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.31.1...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.31.2...HEAD
+[0.31.2]: https://github.com/danjamk/pagevault/compare/v0.31.1...v0.31.2
 [0.31.1]: https://github.com/danjamk/pagevault/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/danjamk/pagevault/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/danjamk/pagevault/compare/v0.29.1...v0.30.0
