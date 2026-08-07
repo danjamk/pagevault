@@ -7,6 +7,14 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **`upgrade` no longer ends a recovery by naming a command an installed operator cannot run.** With
+  a backup file in the directory, it printed `Next: make restore FILE=…` — but an `npm install -g`
+  has no Makefile, so the one instruction offered at the end of the flow was the one that could not
+  be followed. It now says `pagevault restore <file>`, which is also the CLI's real calling
+  convention: the file is positional, and `FILE=` is make's. The line directly above it had switched
+  correctly on the same condition all along. ([#178](../../issues/178))
+
 ## [0.32.1] — 2026-08-07
 
 The deployment listing stops disagreeing with `status` about the same deployment.

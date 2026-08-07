@@ -14,7 +14,7 @@ import { pathToFileURL } from "node:url";
 import {
   c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, isInteractive, cfApi, cfAccounts, cfErr, slug,
   writeEnvLocalVar, fromEnv, acct, shortId, banner, chooseBearer, generatedConfigPath, RUNNING_FROM_REPO, runHint,
-  statePath, CONTEXT_FILE,
+  statePath, CONTEXT_FILE, restoreHint,
 } from "./context.mjs";
 import { provisionAccess } from "./provision.mjs";
 import { writeTier0Config } from "./tier0.mjs";
@@ -382,7 +382,9 @@ export async function deploy(opts = {}) {
   // replace and turns the next `restore` into a refusal (#125). Restore first, then verify.
   const backup = findBackupFile();
   if (backup) {
-    console.log(`\n${c.bold("Next:")} ${c.bold(`make restore FILE=${backup}`)} ${c.dim("— a backup file is sitting in this directory.")}`);
+    // Same switch as `verifyCmd` above, and for the same reason: an installed operator has no
+    // Makefile, so `make restore` is a command they cannot run.
+    console.log(`\n${c.bold("Next:")} ${c.bold(restoreHint(backup))} ${c.dim("— a backup file is sitting in this directory.")}`);
     console.log(`  ${c.dim(`Restore BEFORE ${verifyCmd}: verify publishes a sample document, and restoring is cleanest into a namespace nothing has written to yet.`)}`);
     console.log(`  ${c.dim(`Not recovering? Skip it and run ${verifyCmd}.`)}\n`);
     return;

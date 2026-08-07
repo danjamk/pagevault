@@ -39,6 +39,20 @@ export const RUNNING_FROM_REPO = !fileURLToPath(import.meta.url).includes(`${sep
 export const runHint = (makeCmd, cliCmd) => (RUNNING_FROM_REPO ? `make ${makeCmd}` : `pagevault ${cliCmd}`);
 
 /**
+ * How to restore `file`, in the form the operator can actually type.
+ *
+ * Its own function rather than `runHint` because the two forms differ in more than the leading
+ * word: `make` passes the file as `FILE=…`, the CLI takes it positionally. A `runHint("restore
+ * FILE=x", "restore x")` call would work and would also hide that asymmetry in an argument list,
+ * which is roughly how the bug this fixes got written.
+ *
+ * `fromRepo` is injectable so the rule can be tested without a second module loaded from a
+ * different path — the live caller shells out to Cloudflare and cannot be exercised directly.
+ */
+export const restoreHint = (file, fromRepo = RUNNING_FROM_REPO) =>
+  fromRepo ? `make restore FILE=${file}` : `pagevault restore ${file}`;
+
+/**
  * The directory holding operator state. See the note above.
  *
  * 🔴 It follows the marker (#155). ADR-021 phase 2 gave every operator command one rule for which
