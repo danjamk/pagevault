@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.33.0] — 2026-08-07
+
+View counts stop going down. The summary is the history now, not a snapshot of a window.
+
 ### Changed
 - **View counts stop going down.** The stored summary was re-derived from a rolling 90-day query on
   every sync, so a document opened 43 times in January reported `views: 3` by June — and
@@ -1440,7 +1444,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.32.2...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.33.0...HEAD
+[0.33.0]: https://github.com/danjamk/pagevault/compare/v0.32.2...v0.33.0
 [0.32.2]: https://github.com/danjamk/pagevault/compare/v0.32.1...v0.32.2
 [0.32.1]: https://github.com/danjamk/pagevault/compare/v0.32.0...v0.32.1
 [0.32.0]: https://github.com/danjamk/pagevault/compare/v0.31.2...v0.32.0
