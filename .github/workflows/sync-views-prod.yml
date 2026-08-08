@@ -1,0 +1,119 @@
+name: Sync production view metrics
+
+# Maintainer tooling — NOT part of the fork-and-publish path. A forker never needs this file;
+# delete it in a fork and nothing breaks. It is inert without the `production` environment's
+# secrets. It is kept in the public repo as the worked example of the operator-side schedule
+# ADR-023 asks for, since "run it on a schedule" is easy to say and less obvious to wire up.
+#
+# WHY THIS EXISTS
+#
+# Capture is automatic; promotion is not. Every view reaches Analytics Engine unprompted, but only
+# `pagevault sync-views` moves it into the durable summary — Analytics Engine is a ~90-day conveyor
+# belt and the summary is the warehouse. Nothing takes boxes off the belt but this command, so the
+# operating invariant after ADR-023 is: sync at least once every 90 days, or lose the tail that
+# ages out uncovered. Nothing errors when you miss it. The data is simply never there later.
+#
+# WHY IT CANNOT BE A WORKER CRON
+#
+# The Worker cannot read Analytics Engine at all, at any schedule — its binding is write-only and
+# reading needs an account-scoped credential ADR-015 §6 deliberately keeps off it. A cron inside the
+# Worker would have nothing to call. The schedule has to live operator-side, and for a deployment
+# CI deploys, "operator-side" is here.
+#
+# WHY NOT ON A LAPTOP
+#
+# Same reason as deploy-prod.yml (#38): production's Cloudflare credential is not on a developer's
+# machine, by design. `resolveWriteTarget` also refuses a sync run from a checkout whose marker
+# names a different deployment — it would read one account's analytics and write them to another,
+# storing a summary whose ids match nothing and reporting a measured zero for every document. So
+# for production this workflow is not merely convenient, it is the only correct place.
+
+on:
+  schedule:
+    # 03:17 UTC daily. Daily is the cadence the docs recommend and it costs one KV write against a
+    # 1000/day budget. The odd minute is deliberate: GitHub's scheduler is busiest on the hour and
+    # drops jobs under load, and a missed run here is invisible.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+# One sync at a time. The Worker merges read-modify-write on eventually-consistent KV: two syncs
+# inside the ~60s window can race and the loser's contribution is lost. It self-heals on the next
+# run, but there is no reason to create the race.
+concurrency:
+  group: sync-views-prod
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    # Scopes the secrets to THIS job only, exactly as deploy-prod.yml does.
+    environment: production
+    env:
+      # Job-level so the notify steps can test them in `if:` — a step cannot read env it sets
+      # itself. Absent in a fork, which is the point: the `if` guards below make Slack entirely
+      # optional rather than a hard dependency of the schedule.
+      SLACK_HEARTBEAT_WEBHOOK: ${{ secrets.SLACK_HEARTBEAT_WEBHOOK }}
+      SLACK_ALERT_WEBHOOK: ${{ secrets.SLACK_ALERT_WEBHOOK }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The prod intent file, same base64 secret deploy-prod.yml uses. It carries the accountId the
+      # Analytics Engine query needs and the host the summary is POSTed to — and having it here is
+      # what makes the marker and the target agree, so the cross-deployment guard passes.
+      - name: Restore .pagevault.json (prod intent)
+        run: printf '%s' "$PAGEVAULT_PROD_CONFIG" | base64 -d > .pagevault.json
+        env:
+          PAGEVAULT_PROD_CONFIG: ${{ secrets.PAGEVAULT_PROD_CONFIG }}
+
+      # Which deployment this run is about, for the notifications. The HOST only — never the
+      # accountId, which is not a secret but is not something to post into a chat channel either.
+      - name: Identify the deployment
+        run: node -e "console.log('DEPLOYMENT=' + (require('./.pagevault.json').host || 'unknown'))" >> "$GITHUB_ENV"
+
+      # 🔴 The two credentials never meet in the product, and they do not meet here either. The
+      # Cloudflare token reads Analytics Engine; the deployment bearer carries only the aggregate.
+      # That is the whole of ADR-019 — the Worker gains data, never the capability to compute it.
+      #
+      # CLOUDFLARE_API_TOKEN needs `Account · Account Analytics · Read`. It is the same secret
+      # deploy-prod.yml uses, so if this step fails with a 403 that permission is what is missing;
+      # the CLI's error names the exact dashboard path.
+      #
+      # stdout is pure JSON (every human line goes to stderr), so it can be captured and parsed
+      # without stripping anything. `tee` keeps it in the log too — a notification that says
+      # "synced 12 documents" is worth nothing if the log cannot be checked against it.
+      - name: Sync view metrics
+        run: node cli/bin/pagevault.mjs sync-views --json | tee sync-result.json
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          PAGEVAULT_API_TOKEN: ${{ secrets.PAGEVAULT_API_TOKEN }}
+
+      # A heartbeat on EVERY successful run, not only on change. A scheduled job that silently
+      # stops running is invisible — which is the same shape of failure one level up as the one
+      # this job exists to prevent, so it gets the same treatment: say something routinely, and let
+      # the silence be the alarm.
+      - name: Heartbeat to Slack
+        if: success() && env.SLACK_HEARTBEAT_WEBHOOK != ''
+        run: node .github/scripts/notify-slack.mjs heartbeat sync-result.json
+
+      # Failure goes to the channel that interrupts someone. The message says what it costs rather
+      # than only that a job went red: a failed sync is not a broken build, it is history quietly
+      # not being saved.
+      - name: Alert Slack on failure
+        if: failure() && env.SLACK_ALERT_WEBHOOK != ''
+        run: node .github/scripts/notify-slack.mjs alert sync-result.json
+
+      # No `health` step here, and the reason is worth writing down because adding one is the
+      # obvious next idea. `health` asserts the deployed build matches THIS checkout's build, and
+      # deployment is decoupled from releases (ADR-010) — production legitimately runs a commit
+      # main has moved past. A scheduled job that failed on that would cry wolf daily, and a
+      # scheduled job that cries wolf gets muted, which is the exact failure this workflow exists
+      # to prevent.

@@ -541,16 +541,23 @@ describe("CLI against a live Worker — Public (no Access)", { timeout: 180_000 
     assert.match(r.stderr, /--remove/);
   });
 
-  it("views --sync refuses a filtered sync before it queries anything", () => {
+  it("sync-views refuses a filtered sync before it queries anything", () => {
     // #127. A per-portal summary would claim to cover the deployment while holding one client,
     // so every document outside it would report a MEASURED zero views — "they never opened it"
     // about documents nobody measured. The guard runs before the Analytics Engine call, which is
     // also why this is assertable here with no Cloudflare credential in the environment.
-    for (const flag of ["--portal", "--doc"]) {
-      const r = run("views", "--sync", flag, "acme");
-      assert.equal(r.status, 1, `views --sync ${flag} should exit 1`);
-      assert.match(r.stderr, /cannot be combined with --sync/);
-      assert.match(r.stderr, /whole deployment/);
+    //
+    // Both spellings, because `views --sync` is kept working on purpose (#166): it is in docs,
+    // muscle memory and possibly a crontab, and a scheduled sync that starts failing silently is
+    // the exact failure ADR-023 §9 exists to prevent. This is the test that would catch the old
+    // form quietly ceasing to reach the real command.
+    for (const argv of [["sync-views"], ["views", "--sync"]]) {
+      for (const flag of ["--portal", "--doc"]) {
+        const r = run(...argv, flag, "acme");
+        assert.equal(r.status, 1, `${argv.join(" ")} ${flag} should exit 1`);
+        assert.match(r.stderr, /cannot be combined with sync-views/);
+        assert.match(r.stderr, /whole deployment/);
+      }
     }
   });
 

@@ -320,11 +320,11 @@ reports that there is no group, which is expected.
   ),
 
   views: H(
-    "Usage: pagevault views [--days 30] [--portal s] [--doc id] [--account id] [--json]   ·   views --sync",
+    "Usage: pagevault views [--days 30] [--portal s] [--doc id] [--account id] [--json]",
     `
-Which documents were actually opened, and where the traffic came from. Reads Analytics Engine
-directly with your Cloudflare token — the Worker's binding is write-only, so it can never run this
-query itself (ADR-015).
+Which documents were actually opened, and where the traffic came from. A read-only look at the
+last 90 days. Reads Analytics Engine directly with your Cloudflare token — the Worker's binding is
+write-only, so it can never run this query itself (ADR-015).
 
   --account <id>   the Cloudflare account to query. Defaults to the one this install provisioned;
                    pass it when this machine did not provision the deployment — production
@@ -345,31 +345,44 @@ View records are ACCOUNT-LEVEL and outlive the deployment that wrote them: after
 rebuild this shows history the new deployment never created. Cloudflare keeps them three months
 and documents no way to delete a dataset.
 
-  --sync   push a summary of these counts into your deployment, so an agent can see them.
-           read_document and list_documents then report views, when they were last opened, and
-           which door readers came through — as of the sync, never live. Counts and surfaces
-           only: viewer emails stay here, on your machine (ADR-019).
+This command only LOOKS. To make the numbers durable — and to let an agent see them — run
+\`pagevault sync-views\`.`,
+  ),
 
-           The stored summary ACCUMULATES: each sync adds the window it could see and never
-           removes what an earlier one contributed, so history outlives Analytics Engine's
-           90-day retention. Sync at least once every 90 days or lose the tail that ages out
-           uncovered.
+  "sync-views": H(
+    "Usage: pagevault sync-views [--days 90] [--account id] [--reset] [--yes] [--json]",
+    `
+Move view counts out of Analytics Engine and into your deployment, where they last.
 
-  --reset  throw the stored history away and rebuild from this window alone. The one
-           destructive option here: anything older than 90 days is not in Analytics Engine
-           any more and does not come back. Asks first unless --yes.
+This is the write half of \`views\`, and it is a separate command because it does a different kind
+of thing: \`views\` looks at a 90-day window, \`sync-views\` rescues that window before it ages out
+permanently. As a flag on \`views\` the consequential act looked like an option on the harmless one.
+\`views --sync\` still works and always will.
 
-           Whole-deployment by design, so --portal and --doc are refused: a partial summary would
-           report a MEASURED zero for every document it left out. Defaults to a 90-day window
-           (the table defaults to 30) because "have they ever opened it" is a lifetime question.
-           Costs one KV write.
+Analytics Engine keeps about three months and nothing takes data off that belt but this command.
+The stored summary ACCUMULATES: each run adds the window it could see and never removes what an
+earlier one contributed, so your history outlives that retention. Run it at least once every 90
+days or lose the tail that ages out uncovered — \`pagevault health\` says how much runway is left.
 
-           SCHEDULE IT. Daily is the sensible cadence and one KV write a day is nothing. The
-           WORKER cannot run this for you — its Analytics Engine binding is write-only, so it
-           cannot read its own metrics at any schedule (ADR-019). That is a fact about the
-           Worker, not advice against scheduling: since 0.33.0 an operator-side schedule is
-           what keeps history from ageing out uncovered. \`pagevault health\` says how long
-           you have.`,
+Counts and surfaces only. Viewer emails stay here, on your machine (ADR-019). read_document and
+list_documents then report views, when they were last opened, and which door readers came through
+— as of the sync, never live.
+
+  --account <id>   the Cloudflare account to read. Needed when this machine did not provision the
+                   deployment; Account Analytics (Read) is enough and cannot deploy or destroy.
+
+  --reset          throw the stored history away and rebuild from this window alone. The one
+                   destructive option here: anything older than 90 days is not in Analytics Engine
+                   any more and does not come back. Asks first unless --yes.
+
+Whole-deployment by design, so --portal and --doc are refused: a partial summary would report a
+MEASURED zero for every document it left out. Defaults to a 90-day window (the table defaults to
+30) because "have they ever opened it" is a lifetime question. Costs one KV write.
+
+SCHEDULE IT. Daily is the sensible cadence and one KV write a day is nothing. The WORKER cannot
+run this for you — its Analytics Engine binding is write-only, so it cannot read its own metrics
+at any schedule (ADR-019). That is a fact about the Worker, not advice against scheduling: since
+0.33.0 an operator-side schedule is what keeps history from ageing out uncovered.`,
   ),
 
   backup: H(

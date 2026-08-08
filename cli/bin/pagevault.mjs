@@ -218,6 +218,8 @@ async function main() {
       return exportTree(positional, flags);
     case "views":
       return views(flags);
+    case "sync-views":
+      return syncViews(flags);
     case "backup":
       return backup(flags);
     case "restore":
@@ -978,7 +980,7 @@ Operate your deployment:
   pagevault health [--json]           assert /health reports the version you shipped
   pagevault sync-access [--reap] [--yes] [--json]  reconcile the Access viewer group with KV
   pagevault views [--days 30] [--portal s] [--doc id] [--json]  which documents were opened
-  pagevault views --sync              push those counts to MCP (one write; not live after)
+  pagevault sync-views [--days 90] [--reset]        make those counts durable — run it on a schedule
   pagevault backup [--out <file.json>]  snapshot KV — same-host disaster recovery
   pagevault restore <file.json> [--force]  replay a backup (never deletes; asks first)
   pagevault destroy [--keep-data]     tear the deployment down (asks; irreversible)
@@ -999,7 +1001,18 @@ Export writes a browsable folder (index.html + one folder per portal); its path 
  * answer back so MCP can serve it (#127, ADR-019) — the Worker gains data, never the credential.
  */
 async function views(flags) {
-  if (flags.sync !== undefined) return syncViews(flags);
+  // `views --sync` predates `sync-views` and still works. It is kept rather than cut because it is
+  // in the docs, in muscle memory, and quite possibly in someone's crontab — and a scheduled sync
+  // that starts failing silently is precisely the failure ADR-023 §9 exists to prevent. The notice
+  // goes to stderr, so a `--json` pipe is unaffected.
+  if (flags.sync !== undefined) {
+    // No colour helper here on purpose: it lives in provision/context.mjs, which the document
+    // commands dynamic-import precisely so the lean client stays lean. A deprecation note is not
+    // worth loading the provisioning tree.
+    note("Note: `views --sync` is now `pagevault sync-views` — same flags, same behaviour.");
+    note("      The old form keeps working; the new one reads correctly in a crontab.");
+    return syncViews(flags);
+  }
 
   const { loadContext, loadCloudToken } = await import("../lib/provision/context.mjs");
   const ctx = loadContext();
@@ -1042,7 +1055,7 @@ async function syncViews(flags) {
   // lie in the one direction that matters ("the client never opened it"). Refuse, never narrow.
   for (const flag of ["portal", "doc"]) {
     if (flags[flag] !== undefined) {
-      throw new PvError(`--${flag} cannot be combined with --sync — the summary covers the whole deployment or it is wrong.`);
+      throw new PvError(`--${flag} cannot be combined with sync-views — the summary covers the whole deployment or it is wrong.`);
     }
   }
 
@@ -1050,7 +1063,7 @@ async function syncViews(flags) {
   const ctx = loadContext();
   // Before spending a Cloudflare query: the account we are about to read and the deployment we are
   // about to write to must be the same deployment.
-  const target = resolveWriteTarget(flags, "views --sync");
+  const target = resolveWriteTarget(flags, "sync-views");
 
   // 90 days, not the table's 30. "Have they ever opened it" is a lifetime question, and Analytics
   // Engine retains about three months — so a sync takes the whole window it can still see.

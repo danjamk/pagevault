@@ -626,3 +626,28 @@ test("a single-deployment install sees no name row it cannot use", () => {
   assert.match(r.text, /Deployment\s+https:\/\/only\.invalid/);
   assert.doesNotMatch(r.text, /Protected/);
 });
+
+test("sync-views is dispatched, and refuses a filtered sync before touching the network", () => {
+  // Whole-deployment by design: a partial summary reports a MEASURED zero for every document it
+  // left out, which is the lie that matters ("the client never opened it").
+  const r = runIn(registryHome(), "sync-views", "--portal", "acme");
+  assert.notEqual(r.status, 0);
+  assert.match(r.text, /--portal cannot be combined with sync-views/);
+});
+
+test("🔴 `views --sync` still works, and says where it moved", () => {
+  // Kept rather than cut: it is in the docs, in muscle memory, and quite possibly in a crontab —
+  // and a scheduled sync that starts failing silently is the exact failure ADR-023 §9 exists to
+  // prevent. The note goes to stderr so a --json pipe is unaffected.
+  const r = runIn(registryHome(), "views", "--sync", "--portal", "acme");
+  assert.match(r.text, /is now `pagevault sync-views`/);
+  assert.match(r.text, /--portal cannot be combined with sync-views/, "it still reached the real command");
+});
+
+test("both forms are reachable from help, and views no longer advertises the flag", () => {
+  assert.match(runIn(registryHome(), "help", "sync-views").text, /Move view counts out of Analytics Engine/);
+  // `views` is now described as read-only, and points at the command that makes numbers durable.
+  const views = runIn(registryHome(), "help", "views").text;
+  assert.match(views, /A read-only look/);
+  assert.match(views, /pagevault sync-views/);
+});

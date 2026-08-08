@@ -27,7 +27,7 @@ environment — never two PageVault deployments in one account.
 
 This protects every command that needs a **Cloudflare** token — `deploy`, `destroy`, `backup`,
 `restore`. It says nothing about the **bearer**, which is what `publish`, `rm`, `revoke`,
-`sync-access` and `views --sync` use. The moment a laptop holds a production bearer — which is the
+`sync-access` and `sync-views` use. The moment a laptop holds a production bearer — which is the
 correct setup for operating a CI-deployed deployment, and what `pagevault login` exists to create —
 this split stops covering the surface you touch every day.
 
@@ -57,7 +57,7 @@ prod token from your machine:
 4. **Delete the scratch clone** (or at least remove the prod token from its `.env.local`). From
    here on, prod is CI's job.
 
-## The three GitHub Environment secrets
+## The GitHub Environment secrets
 
 Settings → Environments → **`production`** → add:
 
@@ -67,6 +67,8 @@ Settings → Environments → **`production`** → add:
 | `CF_RUNTIME_TOKEN` | the scoped runtime token → becomes the Worker's `CF_API_TOKEN` (ADR-002 group sync) |
 | `PAGEVAULT_API_TOKEN` | the prod bearer for CLI/MCP. Used only to *set* the secret on a first-ever prod deploy; once the Worker has it, deploys reuse it and never rotate |
 | `PAGEVAULT_PROD_CONFIG` | prod's `.pagevault.json`, base64'd (see below) |
+| `SLACK_HEARTBEAT_WEBHOOK` | *optional* — where the daily sync reports success |
+| `SLACK_ALERT_WEBHOOK` | *optional* — where a failed sync goes |
 
 Scoping them to the `production` environment — not the repo — keeps them out of reach of `ci.yml`
 and any other workflow. On a **public** repo, environment secrets and the required-reviewer gate
@@ -77,6 +79,46 @@ Capture the config secret from your bootstrapped clone:
 ```bash
 base64 -i .pagevault.json | pbcopy   # macOS — paste as PAGEVAULT_PROD_CONFIG
 ```
+
+## Keeping production's view history alive
+
+Deploying prod starts *capture*; it does not start *retention*. Views land in Analytics Engine on
+their own, but only `pagevault sync-views` moves them into the durable summary, and Analytics Engine
+drops rows after about 90 days ([ADR-023](../adr/ADR-023-the-summary-is-the-history.md) §1). Miss the
+window and the data is silently never there later.
+
+For production there is nowhere else that sync can correctly run. Its Cloudflare credential is not on
+your laptop by design, and `resolveWriteTarget` refuses a sync from a checkout whose marker names a
+different deployment — it would read one account's analytics and write them to another. So the
+schedule lives in CI: **`.github/workflows/sync-views-prod.yml`**, daily at 03:17 UTC, plus a manual
+`workflow_dispatch`.
+
+### Slack notifications (optional)
+
+Add the two webhook secrets above and every run reports:
+
+- **Heartbeat, on every success** — deployment, documents synced, the window covered, and anything
+  skipped or truncated. On every run rather than only on change, because a scheduled job that
+  silently *stops* running is invisible; routine noise is what makes the silence legible.
+- **Alert, on failure** — to whichever channel actually interrupts you. The message says what a
+  failure costs rather than that a job went red: history is quietly not being saved, and each failed
+  run shortens the window in which that is still fixable.
+
+Leave the secrets unset and the notification steps skip. Nothing else changes, which is what keeps
+the workflow useful as an example in a fork.
+
+⚠️ A Slack webhook URL is a **bearer credential** — anyone holding it can post to that channel. It
+belongs in the environment secrets and nowhere else: not in the repo, not in a message, not pasted
+into an issue. The notifier logs HTTP status only and never the response body, because a response
+can echo the request and the request URL *is* the credential.
+
+A notification never fails the job. On the alert path the run is already red; on the heartbeat path
+the sync **succeeded**, and turning that red because a chat message did not land would make a Slack
+outage look exactly like lost data.
+
+⚠️ `CLOUDFLARE_API_TOKEN` needs `Account · Account Analytics · Read` for this workflow — the same
+secret the deploy uses, but a permission the deploy does not require. If it was never added, the sync
+fails with a 403 and the CLI's error names the dashboard path that fixes it.
 
 ## Deploying
 
