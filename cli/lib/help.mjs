@@ -362,8 +362,14 @@ and documents no way to delete a dataset.
            Whole-deployment by design, so --portal and --doc are refused: a partial summary would
            report a MEASURED zero for every document it left out. Defaults to a 90-day window
            (the table defaults to 30) because "have they ever opened it" is a lifetime question.
-           Costs one KV write. Re-run it whenever you want the numbers refreshed; there is no
-           cron, deliberately — a publish that waited on an analytics query could hang.`,
+           Costs one KV write.
+
+           SCHEDULE IT. Daily is the sensible cadence and one KV write a day is nothing. The
+           WORKER cannot run this for you — its Analytics Engine binding is write-only, so it
+           cannot read its own metrics at any schedule (ADR-019). That is a fact about the
+           Worker, not advice against scheduling: since 0.33.0 an operator-side schedule is
+           what keeps history from ageing out uncovered. \`pagevault health\` says how long
+           you have.`,
   ),
 
   backup: H(
