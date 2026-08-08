@@ -18,7 +18,7 @@ import {
   searchPortal,
   updatePortalMembers,
 } from "./documents.js";
-import type { Env } from "./env.js";
+import { type Env, analyticsEnabled } from "./env.js";
 import { log } from "./log.js";
 import {
   type DocMeta,
@@ -793,7 +793,11 @@ function buildServer(env: Env, origin: string): McpServer {
         const byslug = new Map((await listPortals(env)).map((p) => [p.slug, p]));
         // One KV read for the whole listing, never one per document (#127).
         const summary = await getViewSummary(env);
-        const prose = docs.map((d) => describe(d, statsFor(summary, d))).join("\n\n");
+        // Asked of the binding, never inferred from an empty summary (#185). An agent that reads
+        // `views: 0` will tell the operator the client never opened it, which is the one thing a
+        // deployment that records nothing cannot support.
+        const recording = analyticsEnabled(env);
+        const prose = docs.map((d) => describe(d, statsFor(summary, d, recording))).join("\n\n");
         return structured(
           // The staleness stamp goes once at the foot rather than onto every line — but it does
           // have to be in the PROSE. `viewsSyncedAt` in structuredContent is invisible to a host
@@ -801,7 +805,7 @@ function buildServer(env: Env, origin: string): McpServer {
           summary ? `${prose}\n\nView counts are as of the last sync, ${summary.syncedAt.slice(0, 10)} — not live.` : prose,
           {
             documents: docs.map((d) =>
-              docOut(d, docUrl(base, d.portal, d.id, byslug.get(d.portal) ?? null), statsFor(summary, d)),
+              docOut(d, docUrl(base, d.portal, d.id, byslug.get(d.portal) ?? null), statsFor(summary, d, recording)),
             ),
             ...syncedAtOf(summary),
           },
@@ -853,7 +857,7 @@ function buildServer(env: Env, origin: string): McpServer {
         const { meta, source, truncated } = result;
         const url = docUrl(baseUrl(env, origin), meta.portal, meta.id, await getPortal(env, meta.portal));
         const summary = await getViewSummary(env);
-        const stats = statsFor(summary, meta);
+        const stats = statsFor(summary, meta, analyticsEnabled(env));
         return structured(
           [
             `# ${meta.title}`,

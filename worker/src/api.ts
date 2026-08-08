@@ -22,7 +22,7 @@ import {
   searchPortal,
   updatePortalMembers,
 } from "./documents.js";
-import type { Env } from "./env.js";
+import { type Env, analyticsEnabled } from "./env.js";
 import { countAccessSeats } from "./seats.js";
 import {
   type DocMeta,
@@ -309,8 +309,11 @@ async function listDocsHandler(request: Request, env: Env): Promise<Response> {
   // rides at the top level so a caller can say "as of Tuesday" rather than implying it just
   // looked; both it and the per-document fields are absent when no sync has run.
   const summary = await getViewSummary(env);
+  // Asked of the binding, never inferred from an empty summary: "recorded nothing" and "cannot
+  // record" produce identical data and mean opposite things (#185).
+  const recording = analyticsEnabled(env);
   return json({
-    docs: docs.map((doc) => withStats(doc, summary)),
+    docs: docs.map((doc) => withStats(doc, summary, recording)),
     // `viewsCoverage` replaces `viewsWindowDays`: the counts are no longer "the last N days" but
     // everything measured since the first sync, so a day count could only mislead about what the
     // numbers include (ADR-023 §1).
@@ -318,7 +321,7 @@ async function listDocsHandler(request: Request, env: Env): Promise<Response> {
     // Computed HERE rather than by each reader (ADR-023 §9). The CLI, the console panel and the
     // MCP tool all need the same answer, and three implementations of one horizon calculation is
     // three chances for them to disagree about when your history is about to disappear.
-    viewsRisk: syncRisk(summary, new Date().toISOString()),
+    viewsRisk: syncRisk(summary, new Date().toISOString(), recording),
   });
 }
 
@@ -332,7 +335,7 @@ async function getDocHandler(request: Request, env: Env, id: string): Promise<Re
   const base = baseUrl(request, env);
   const summary = await getViewSummary(env);
   const body: Record<string, unknown> = {
-    ...withStats(meta, summary),
+    ...withStats(meta, summary, analyticsEnabled(env)),
     url: portal ? `${base}${documentPath(portal, id)}` : `${base}/v/${encodeURIComponent(meta.portal)}/${id}`,
   };
   if (summary) body["viewsSyncedAt"] = summary.syncedAt;
