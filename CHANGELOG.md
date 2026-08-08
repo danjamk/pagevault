@@ -7,6 +7,16 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **`views --sync` stops advising against the thing 0.34.0 tells you to do.** The help text said
+  *"there is no cron, deliberately"*, which reads as advice against scheduling. It was describing
+  why the **Worker** cannot self-sync — its Analytics Engine binding is write-only, so it cannot
+  read its own metrics at any cadence — which is a fact about the Worker, not a recommendation. An
+  operator-side schedule is encouraged, and since 0.33.0 it is what keeps history from ageing out
+  uncovered. Left as it was, `pagevault health` warned you to sync while `views --help` implied you
+  should not bother. Corrected in the help text, the CLI reference and the architecture doc.
+  ([#166](../../issues/166))
+
 ## [0.34.0] — 2026-08-07
 
 The quiet way to lose view history now says something first.

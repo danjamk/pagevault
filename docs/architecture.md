@@ -674,8 +674,13 @@ Three properties keep that honest, and each has a test:
   just looked.
 
 So the parity exception narrowed rather than closed: the CLI keeps identities and arbitrary
-windows, MCP gets counts as of the last sync. There is no cron — a publish that waited on an
-analytics query would hang when Analytics Engine did.
+windows, MCP gets counts as of the last sync.
+
+**The Worker cannot schedule this for itself, and that is structural rather than unwired.** Its
+Analytics Engine binding is write-only, so it cannot read its own metrics at any cadence — a cron
+inside the Worker would have nothing to call. An **operator-side** schedule is a different thing and
+is actively encouraged: daily is sensible, it costs one KV write, and since ADR-023 it is what keeps
+history from ageing out uncovered. `pagevault health` reports how much runway is left.
 
 `backup` and `restore` are CLI-only for the same structural reason. They read and write KV *key
 metadata*, which no `/api` endpoint exposes and which listings render from — so they talk to

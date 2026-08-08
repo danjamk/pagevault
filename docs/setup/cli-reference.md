@@ -348,8 +348,11 @@ only — viewer emails never leave this machine.**
   lifetime question, and Analytics Engine retains about three months.
 - **Documents that no longer exist are dropped**, and the count of them is reported — the dataset
   outlives the deployment, so a rebuild leaves rows pointing at ids that no longer resolve.
-- **Costs one KV write.** Re-run it whenever you want the numbers refreshed. There is no cron on
-  purpose: a publish that waited on an analytics query would hang when Analytics Engine did.
+- **Costs one KV write, so schedule it.** Daily is the sensible cadence. **The Worker cannot run
+  this for you** — its Analytics Engine binding is write-only, so it cannot read its own metrics at
+  any schedule ([ADR-019](../adr/ADR-019-view-metrics-reach-mcp-by-sync.md) §1). That is a fact
+  about the Worker rather than advice against scheduling: an operator-side schedule is exactly what
+  keeps history from ageing out uncovered, and `pagevault health` tells you how long you have.
 
 An agent sees nothing at all until the first sync, and nothing for a document published since the
 last one. That is deliberate — absent means "not measured", and only a real zero means nobody
