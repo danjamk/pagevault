@@ -27,7 +27,7 @@ environment — never two PageVault deployments in one account.
 
 This protects every command that needs a **Cloudflare** token — `deploy`, `destroy`, `backup`,
 `restore`. It says nothing about the **bearer**, which is what `publish`, `rm`, `revoke`,
-`sync-access` and `views --sync` use. The moment a laptop holds a production bearer — which is the
+`sync-access` and `sync-views` use. The moment a laptop holds a production bearer — which is the
 correct setup for operating a CI-deployed deployment, and what `pagevault login` exists to create —
 this split stops covering the surface you touch every day.
 

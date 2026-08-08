@@ -170,8 +170,8 @@ async function fetchSyncRisk(base, bearer) {
 function reportSyncRisk(risk) {
   if (!risk) return;
   // Not `runHint`: `make views` has no sync path — scripts/views.mjs only queries — so
-  // `pagevault views --sync` is the only way to do this from either front door.
-  const fix = "pagevault views --sync";
+  // `pagevault sync-views` is the only way to do this from either front door.
+  const fix = "pagevault sync-views";
   const days = (n) => `${n} day${n === 1 ? "" : "s"}`;
 
   if (risk.state === "never") {

@@ -258,13 +258,13 @@ Assert the live `/health` reports the exact build you shipped (`<version>+<sha>`
 answers. Non-zero exit on a mismatch or an unreachable deployment — this is what production CI runs.
 
 It also reports **how much view history is about to become unrecoverable**. Views reach Analytics
-Engine on their own, but only `pagevault views --sync` makes them durable, and Analytics Engine keeps
+Engine on their own, but only `pagevault sync-views` makes them durable, and Analytics Engine keeps
 about 90 days — so a window that ages out uncovered is gone, silently. This is the thing that says so
 before the loss instead of after:
 
 ```
 ! 71 days of view history become unrecoverable in 20 days.
-  Captured through 2026-05-28. Fix it with pagevault views --sync.
+  Captured through 2026-05-28. Fix it with pagevault sync-views.
 ```
 
 It reports **risk, not age** — "synced 40 days ago" leaves you to do the arithmetic. The warning is
@@ -310,8 +310,14 @@ Records are kept for **three months** and then age out on their own; `destroy` c
 because the Worker deliberately holds no credential that can read or delete analytics
 ([ADR-015](../adr/ADR-015-what-a-view-record-contains.md) §5–6).
 
-### `pagevault views --sync [--reset] [--yes]`
-Push a summary of those counts into your deployment so an **agent** can see them. `read_document`
+### `pagevault sync-views [--days 90] [--account id] [--reset] [--yes]`
+Move view counts out of Analytics Engine and into your deployment, where they last — and where an **agent** can see them.
+
+It is a separate command rather than a flag on `views` because it does a different kind of thing:
+`views` looks at a 90-day window, `sync-views` rescues that window before it ages out permanently. As
+`views --sync` the consequential act looked like an option on the harmless one. **`views --sync`
+still works** and prints a note pointing here — it is in docs, muscle memory and possibly a crontab,
+and a scheduled sync that starts failing silently is exactly what ADR-023 §9 exists to prevent. `read_document`
 and `list_documents` then report `views`, `lastViewedAt`, and which door readers came through —
 as of the sync, never live.
 

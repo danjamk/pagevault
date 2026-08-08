@@ -7,6 +7,22 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **`pagevault sync-views`** — the write half of `views`, promoted from a flag to its own command.
+  They do different kinds of thing: `views` looks at a 90-day window, `sync-views` rescues that
+  window before it ages out permanently. As `views --sync` the consequential act looked like an
+  option on the harmless one, and it did not read correctly in a crontab — which matters now that a
+  schedule is what keeps history alive. Symmetric with `sync-access`. ([#166](../../issues/166))
+- **A scheduled GitHub Action that syncs production daily.** Production is deployed by CI and its
+  Cloudflare credential is deliberately not on a laptop (#38), so there was nowhere the sync could
+  correctly run — the cross-deployment guard refuses it from a checkout naming a different
+  deployment. Maintainer tooling; a fork can delete it and nothing breaks.
+
+### Changed
+- **`views --sync` still works** and prints a note pointing at the new name. Kept rather than cut:
+  it is in the docs, in muscle memory and possibly in a crontab, and a scheduled sync that starts
+  failing silently is the exact failure ADR-023 §9 exists to prevent.
+
 ### Fixed
 - **`views --sync` stops advising against the thing 0.34.0 tells you to do.** The help text said
   *"there is no cron, deliberately"*, which reads as advice against scheduling. It was describing

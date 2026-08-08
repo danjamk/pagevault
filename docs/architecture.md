@@ -617,7 +617,7 @@ traffic to a collection page is measurable without inferring it from document op
   treats an empty blob as "not recorded then" rather than as a value (decision 8).
 - **Analytics Engine retains three months; the summary keeps everything.** The stored summary is
   the durable history and Analytics Engine is a 90-day feed into it
-  ([ADR-023](adr/ADR-023-the-summary-is-the-history.md) §1). Each `views --sync` contributes the
+  ([ADR-023](adr/ADR-023-the-summary-is-the-history.md) §1). Each `sync-views` contributes the
   window it could see, and what it contributed stays — so a nine-month engagement no longer outlives
   its own view data. The operating invariant is the other side of that bargain: **sync at least once
   every 90 days**, or lose the tail that ages out uncovered.
@@ -628,7 +628,7 @@ traffic to a collection page is measurable without inferring it from document op
   append-only *by construction* — a CLI at an old version, or a `--sync --days 7` from a second
   machine, would otherwise clobber everything it did not measure (§3). Buckets past 90 days compact
   to monthly, which is what bounds the value.
-- **`views --sync --reset` is the one way back.** Append-only with no way out is how a bad history
+- **`sync-views --reset` is the one way back.** Append-only with no way out is how a bad history
   becomes permanent. It asks for the deployment URL before it does it.
 - **The dataset is account-level and outlives the deployment.** Nothing in a view record names
   which deployment wrote it, so after a teardown and rebuild `views` blends records from a
@@ -654,7 +654,7 @@ widening ADR-002 exists to prevent — and the MCP server runs inside the Worker
 writes and the operator reads.
 
 **The answer still reaches an agent, by sync rather than by query**
-([ADR-019](adr/ADR-019-view-metrics-reach-mcp-by-sync.md), #127). `pagevault views --sync` runs
+([ADR-019](adr/ADR-019-view-metrics-reach-mcp-by-sync.md), #127). `pagevault sync-views` runs
 the query on the operator's machine, aggregates it, and PUTs a summary to `POST
 /api/views/summary` — one KV key, one write. `list_documents` and `read_document` then serve
 `views`, `lastViewedAt` and a per-surface breakdown alongside the metadata they already return.
