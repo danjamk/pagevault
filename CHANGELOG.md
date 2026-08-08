@@ -7,6 +7,18 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **A deployment that records nothing stops reporting zeros.** With no Analytics Engine binding, the
+  Worker records no views — but every surface reported as though it had measured and found none:
+  `views: 0` on every document, a successful sync of nothing, and zero days of history at risk. A
+  deployment that *cannot* measure looked identical to one nobody had visited, and the staleness
+  alarm called it healthy. `statsFor` already refused to collapse "no sync yet", "published since
+  the sync" and "measured, never opened"; it was missing the fourth answer. ([#185](../../issues/185))
+- **`pagevault health` says when view tracking is off**, and names what turns it on. Previously the
+  only place it appeared was one line of a deploy log.
+- **Stored history survives the binding being removed.** Turning tracking off does not make what was
+  already measured untrue — it stops it accruing.
+
 ## [0.35.0] — 2026-08-08
 
 The sync becomes its own command, and production finally has somewhere to run it.
