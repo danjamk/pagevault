@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.35.2] — 2026-08-09
+
+A deploy asks the deployment what it already has, instead of deciding from silence.
+
 ### Fixed
 - **A re-deploy no longer turns off a capability the deployment had.** View tracking resolved from a
   flag, then `.pagevault.json`, then — non-interactively — `false`. Production rebuilds its intent
@@ -1539,7 +1543,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.35.1...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.35.2...HEAD
+[0.35.2]: https://github.com/danjamk/pagevault/compare/v0.35.1...v0.35.2
 [0.35.1]: https://github.com/danjamk/pagevault/compare/v0.35.0...v0.35.1
 [0.35.0]: https://github.com/danjamk/pagevault/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/danjamk/pagevault/compare/v0.33.0...v0.34.0
