@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { classifyMarker, describeTarget, findMarker, locateMarker, provisionedFrom, readMarker, recordUrl, resolveBearer, resolveTarget } from "../cli/lib/target.mjs";
+import { classifyMarker, describeTarget, findMarker, locateMarker, provisionedFrom, readEnvVar, readMarker, recordUrl, resolveBearer, resolveBearerSource, resolveTarget, stateEnvPath, stateToken } from "../cli/lib/target.mjs";
 
 // --- classification: content, never an assumed shape -------------------------------------------
 
@@ -256,6 +256,62 @@ test("an explicit token still wins over a conflict — the operator named it", (
   // `PAGEVAULT_API_TOKEN=… pagevault verify` is how you deliberately act on the other deployment.
   const conflicted = resolveIn("/repo");
   assert.equal(resolveBearer(conflicted, { env: "explicit", config: "prod-bearer" }), "explicit");
+});
+
+// --- the state dir's bearer (#195) --------------------------------------------------------------
+
+test("🔴 the state dir's bearer is only sent to the deployment its marker describes", () => {
+  // `.env.local` sits beside the build record, so it belongs to whatever that record names. Standing
+  // in a checkout and naming another deployment resolves the other one — and must not be handed this
+  // one's token. That is #155's shape, one file over.
+  const here = resolveIn("/repo");
+  assert.equal(resolveBearer(here, { state: "test-bearer" }), "test-bearer");
+
+  const elsewhere = resolveIn("/repo", { flags: { url: "https://other.example.com" } });
+  assert.equal(elsewhere.markerUrl, "https://test.example.com", "the marker still says what it said");
+  assert.equal(resolveBearer(elsewhere, { state: "test-bearer" }), "", "not this deployment's credential");
+
+  // No marker at all means nothing to pair a state bearer to, so there is nothing to send.
+  const noMarker = resolveTarget({ cwd: "/elsewhere", env: {}, config: { url: "https://prod.example.com" }, locate: () => null });
+  assert.equal(resolveBearer(noMarker, { state: "stray" }), "");
+});
+
+test("the bearer names the store it came from, because two of them share a name (#195)", () => {
+  // A deploy reporting PAGEVAULT_API_TOKEN set, then a command reporting no bearer, was two true
+  // statements about the Worker's secret and this machine's copy. Provenance is what makes the pair
+  // readable.
+  const t = resolveIn("/repo", { config: { url: "https://test.example.com", token: "c" } });
+  assert.match(resolveBearerSource(t, { env: "E" }).from, /environment/);
+  assert.equal(resolveBearerSource(t, { state: "S" }).from, stateEnvPath(t));
+  assert.match(resolveBearerSource(t, { config: "C" }).from, /login config/);
+  assert.equal(resolveBearerSource(t, {}).from, null);
+
+  const named = resolveIn("/repo", {
+    registry: { current: null, deployments: { test: { url: "https://test.example.com", token: "test-bearer" } } },
+  });
+  assert.equal(resolveBearerSource(named, { state: "S", config: "C" }).from, "test in deployments.json");
+});
+
+test("the state `.env.local` is the one beside the build record, not the cwd's", () => {
+  const t = resolveIn("/repo/worker/src");
+  assert.equal(stateEnvPath(t), join("/repo", ".env.local"), "beside the marker, wherever we are standing");
+  assert.equal(stateEnvPath(resolveTarget({ cwd: "/x", env: {}, config: {}, locate: () => null })), null);
+  // A missing file is "no bearer here", never a throw from a credential lookup.
+  assert.equal(stateToken(t, { exists: () => false }), "");
+});
+
+test("readEnvVar parses what .env.local actually looks like on every platform", () => {
+  const io = (text) => ({ exists: () => true, read: () => text });
+  assert.equal(readEnvVar("/f", "PAGEVAULT_API_TOKEN", io("PAGEVAULT_API_TOKEN=abc\n")), "abc");
+  // CRLF, quotes, and a leading BOM — PowerShell 5.1 writes all three.
+  assert.equal(readEnvVar("/f", "PAGEVAULT_API_TOKEN", io("OTHER=x\r\nPAGEVAULT_API_TOKEN=\"abc\"\r\n")), "abc");
+  assert.equal(readEnvVar("/f", "PAGEVAULT_API_TOKEN", io("﻿PAGEVAULT_API_TOKEN=abc\n")), "abc");
+  // A value containing `=` survives — only the FIRST one separates key from value.
+  assert.equal(readEnvVar("/f", "K", io("K=a=b\n")), "a=b");
+  // A key that merely starts the same must not match.
+  assert.equal(readEnvVar("/f", "PAGEVAULT_API", io("PAGEVAULT_API_TOKEN=abc\n")), undefined);
+  assert.equal(readEnvVar(null, "K", io("K=v\n")), undefined);
+  assert.equal(readEnvVar("/f", "K", { exists: () => true, read: () => { throw new Error("EACCES"); } }), undefined);
 });
 
 // --- the named registry (ADR-021 phase 3) ------------------------------------------------------

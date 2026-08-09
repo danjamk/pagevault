@@ -15,7 +15,7 @@ import { dirname, join, relative, sep } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { fileURLToPath } from "node:url";
-import { locateMarker } from "../target.mjs";
+import { locateMarker, readEnvVar } from "../target.mjs";
 
 export const CONTEXT_FILE = ".pagevault.json";
 
@@ -728,18 +728,12 @@ export async function tokenSetupFlow() {
  * credential came from — `loadCloudToken` exports the token into the environment, which makes
  * every later "is it in the environment?" check answer yes regardless of its real origin.
  *
- * `.trim()` also eats a leading U+FEFF, so a UTF-8-with-BOM file (what Windows PowerShell 5.1
- * writes for `-Encoding utf8`) still parses. UTF-16LE does not, which is why we never suggest `>`
- * on Windows — see `saveTokenCommand`.
+ * The parsing itself lives in `target.mjs`, which the lean document commands already load and which
+ * now reads this same file to find a bearer (#195). One parser, because a second copy of a format
+ * this small is precisely what drifts — UTF-16LE, for instance, does not parse, which is why we
+ * never suggest `>` on Windows (see `saveTokenCommand`), and that has to stay true in one place.
  */
-export function fromEnvFile(key) {
-  const envFile = envLocalPath();
-  if (!existsSync(envFile)) return undefined;
-  const line = readFileSync(envFile, "utf8")
-    .split("\n")
-    .find((l) => l.trim().startsWith(`${key}=`));
-  return line ? line.slice(line.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "") : undefined;
-}
+export const fromEnvFile = (key) => readEnvVar(envLocalPath(), key);
 
 /** A value from the environment, or from gitignored .env.local. */
 export function fromEnv(key) {

@@ -147,8 +147,16 @@ locating the Worker template.
 ```
 
 Credentials stay in `~/.pagevault/deployments.json` at mode 0600, outside every repo, one copy.
-No bearer is ever written into a repository working tree — not even a gitignored one, because a
-gitignore is one `git add -f` or one careless archive away from being wrong.
+The **marker** never holds one: a file whose whole job is to be found by ascent is the last place a
+bearer belongs.
+
+> **Corrected 2026-08-09 (#195).** This paragraph originally ended "No bearer is ever written into a
+> repository working tree — not even a gitignored one." That was already untrue when it was written.
+> A checkout's gitignored `.env.local` holds `PAGEVAULT_API_TOKEN`; `deploy` writes it there on the
+> mint path, and `verify` and `health` have always read it. The claim is correct about the registry
+> and about the marker, and overstated as a rule about the working tree. Left visible rather than
+> quietly edited, because the document commands were the one caller NOT reading `.env.local` — and a
+> sentence saying they shouldn't is part of why that gap survived a release.
 
 #### The reader discriminates on content, and keeps accepting the old shape
 
