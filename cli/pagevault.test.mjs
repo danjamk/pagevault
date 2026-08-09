@@ -548,6 +548,35 @@ test("without a matching entry the #155 refusal still stands", () => {
   assert.notEqual(r.status, 0);
   assert.match(r.text, /No bearer for https:\/\/test\.invalid/);
   assert.match(r.text, /pagevault login --as/, "it must say how to fix it, not just that it refused");
+  // Refusing is right; refusing without saying where it looked reads as a bug on a machine that
+  // plainly holds a token (#195).
+  assert.match(r.text, /looked in/);
+});
+
+test("🔴 the bearer `init` left in .env.local is one the document commands can find (#195)", () => {
+  // The first thirty seconds after a successful first install. `init` sets the bearer as the Worker's
+  // secret and writes this machine's copy to `.env.local` beside the build record — and `list` then
+  // said there was no bearer, because `commandTarget` never looked there while `verify` and `health`,
+  // resolving the identical target, did.
+  const home = mkdtempSync(join(tmpdir(), "pv-statebearer-"));
+  writeFileSync(join(home, ".pagevault.json"), JSON.stringify({ rung: 1, accountId: "acct", deployedUrl: "https://test.invalid" }));
+  writeFileSync(join(home, ".env.local"), "CLOUDFLARE_API_TOKEN=cf\nPAGEVAULT_API_TOKEN=state-bearer\n");
+
+  const r = runIn(home, "list");
+  assert.doesNotMatch(r.text, /No bearer/, "it must get as far as the network, not refuse on this machine");
+  assert.match(r.text, /Could not reach https:\/\/test\.invalid/, "and .invalid is where it tried");
+});
+
+test("🔴 a state bearer is not sent to a deployment its marker does not describe", () => {
+  // The other half. `.env.local` belongs to the build record beside it, so naming a different
+  // deployment must not pick it up — #155, one file over.
+  const home = mkdtempSync(join(tmpdir(), "pv-statecross-"));
+  writeFileSync(join(home, ".pagevault.json"), JSON.stringify({ rung: 1, accountId: "acct", deployedUrl: "https://test.invalid" }));
+  writeFileSync(join(home, ".env.local"), "PAGEVAULT_API_TOKEN=test-bearer\n");
+
+  const r = runIn(home, "list", "--url", "https://other.invalid");
+  assert.notEqual(r.status, 0);
+  assert.match(r.text, /No bearer for https:\/\/other\.invalid/);
 });
 
 test("--protected is a flag, in both directions, without retyping credentials", () => {

@@ -7,6 +7,37 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **The bearer `init` just set is one the CLI can actually use.** `init` reported
+  `PAGEVAULT_API_TOKEN set` and the very next `pagevault list` reported `No bearer` — four lines
+  apart, same words, reading as a flat contradiction on the one run where the operator has no
+  context to resolve it. Both were true of different stores: the Worker's secret, and this machine's
+  copy in `.env.local`. The document commands were the only caller not reading that second one —
+  `verify` and `health` resolve the identical target and have always read it — so a successful first
+  install left the CLI unable to talk to what it had just built. ([#195](../../issues/195))
+- **A deploy no longer guesses whether the next command will work.** It asked a different question
+  than the document commands do, which is how it could report both things at once. It now computes
+  the answer with the same resolver they use, and names *which* store the bearer came from —
+  `PAGEVAULT_API_TOKEN` meaning two things is what made the pair unreadable.
+- **A printed `login` command can be pasted.** It carried `<name>` for the operator to invent and
+  `$PAGEVAULT_API_TOKEN` for them to dig out of a gitignored file. The name is now suggested from the
+  hostname, and the token is `$PAGEVAULT_API_TOKEN` only when the shell can actually expand it.
+
+### Changed
+- **The state bearer is paired to its build record.** `.env.local` belongs to the `.pagevault.json`
+  beside it, so it is sent only when that record describes the deployment being acted on.
+  `verify --url <other>` from inside a checkout previously took that checkout's token — [#155](../../issues/155)'s
+  shape, one file over. Nothing that worked stops working; the case that was wrong now refuses.
+- **`No bearer for <url>` says where it looked.** Refusing is right; refusing without accounting for
+  the token sitting on the machine reads as a bug in the tool.
+- **A deploy that holds the bearer plaintext writes it to `.env.local`.** So a token supplied by an
+  exported environment variable survives into the next shell. Skipped in CI, where the runner is
+  about to disappear and the value is already a secret.
+- **[ADR-021](docs/adr/ADR-021-a-deployment-is-a-named-thing.md) corrects a claim it never held to.**
+  It said no bearer is ever written into a repository working tree; a checkout's gitignored
+  `.env.local` has always held one. The correction is visible in the ADR rather than quietly edited —
+  a sentence saying the document commands shouldn't read that file is part of why they didn't.
+
 ## [0.35.3] — 2026-08-09
 
 A first deploy on a fresh account stops failing on a feature nobody asked for.

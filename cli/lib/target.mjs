@@ -14,11 +14,14 @@ import { homedir } from "node:os";
 import { dirname, join, parse } from "node:path";
 // `findByUrl` only — a pure comparison over an already-loaded registry. Loading the registry is the
 // caller's job, which keeps this module free of I/O it did not ask for.
-import { findByUrl } from "./registry.mjs";
+import { findByUrl, REGISTRY_FILE } from "./registry.mjs";
 import { sameDeployment } from "./client.mjs";
 
 /** The file a checkout is recognized by. Also the file CI reconstructs — see `classifyMarker`. */
 export const MARKER = ".pagevault.json";
+
+/** The gitignored file `init` writes the bearer into, beside the marker. */
+export const ENV_FILE = ".env.local";
 
 /**
  * The nearest marker, walking up from `start` to the filesystem root. Returns its path or null.
@@ -282,7 +285,52 @@ export function describeTarget(t) {
 }
 
 /**
- * The bearer that belongs to the resolved deployment — or nothing (#155).
+ * One `KEY=value` out of a `.env.local`-shaped file, or undefined.
+ *
+ * The single parser: `fromEnvFile` in provision/context.mjs delegates here rather than keeping a
+ * second copy. Two implementations of one tiny format is exactly how the newline bug in the
+ * Analytics strip got written and then stayed invisible for months (#190), and this one is read by
+ * both the lean document commands and the provisioning tree.
+ *
+ * `.trim()` also eats a leading U+FEFF, so a UTF-8-with-BOM file — what Windows PowerShell 5.1
+ * writes for `-Encoding utf8` — still parses.
+ */
+export function readEnvVar(path, key, { exists = existsSync, read = readFileSync } = {}) {
+  if (!path || !exists(path)) return undefined;
+  let text;
+  try {
+    text = read(path, "utf8");
+  } catch {
+    return undefined; // unreadable is "we don't know", never a throw from a credential lookup
+  }
+  const line = text.split("\n").find((l) => l.trim().startsWith(`${key}=`));
+  return line ? line.slice(line.indexOf("=") + 1).trim().replace(/^["']|["']$/g, "") : undefined;
+}
+
+/** The `.env.local` belonging to a target's build record — the same directory, or null. */
+export const stateEnvPath = (target) => (target?.markerPath ? join(dirname(target.markerPath), ENV_FILE) : null);
+
+/**
+ * The bearer `init` left in the state dir, or "".
+ *
+ * Reading it is unconditional; whether it may be SENT is `resolveBearerSource`'s call. Keeping those
+ * apart is what lets the no-bearer message say "looked here, found nothing" separately from "found
+ * one, and it belongs to another deployment".
+ */
+export const stateToken = (target, io) => readEnvVar(stateEnvPath(target), "PAGEVAULT_API_TOKEN", io) ?? "";
+
+/**
+ * Does the state dir's bearer describe the deployment we resolved?
+ *
+ * `.env.local` sits beside the build record, so it belongs to whatever that record names — which is
+ * not always what the command is acting on. `pagevault verify --url <other>` from inside a checkout
+ * resolves the other deployment and would otherwise be handed this one's token: #155 again, one file
+ * over. No marker means nothing to pair it to, so it is not sent.
+ */
+const stateDescribesTarget = (t) => Boolean(t?.markerUrl) && sameDeployment(t.markerUrl, t.url);
+
+/**
+ * The bearer that belongs to the resolved deployment, and WHICH store it came from — or neither.
  *
  * 🔴 A credential is not interchangeable with a URL. `verify` used to take the URL from a
  * checkout's marker and the token from `~/.pagevault/config.json`, and sent PRODUCTION's bearer to
@@ -299,11 +347,18 @@ export function describeTarget(t) {
  * was stored against this exact deployment, matched to it by name or by URL. When one is present
  * the disagreement above is no longer a reason to refuse — we are holding the right credential, so
  * `conflicted` gates only the login config's token, which is the one that could be the wrong one.
+ *
+ * 🔴 `from` exists because "PAGEVAULT_API_TOKEN" names two different things — the Worker's secret
+ * and this machine's copy — and a deploy that reported one set while the next command reported none
+ * read as a flat contradiction (#195). A message that names the store cannot make that mistake.
  */
-export function resolveBearer(target, { env = "", state = "", config = "" } = {}) {
-  if (env) return env;
-  if (target?.entry?.token) return target.entry.token;
-  if (state) return state;
-  if (config && !target.conflicted) return config;
-  return "";
+export function resolveBearerSource(target, { env = "", state = "", config = "" } = {}) {
+  if (env) return { token: env, from: "PAGEVAULT_API_TOKEN in the environment" };
+  if (target?.entry?.token) return { token: target.entry.token, from: `${target.name} in ${REGISTRY_FILE}` };
+  if (state && stateDescribesTarget(target)) return { token: state, from: stateEnvPath(target) };
+  if (config && !target?.conflicted) return { token: config, from: "the login config" };
+  return { token: "", from: null };
 }
+
+/** The bearer alone. The overwhelmingly common call — provenance only matters when reporting. */
+export const resolveBearer = (target, sources) => resolveBearerSource(target, sources).token;

@@ -121,6 +121,27 @@ Rung 3 is the guardrail: inside a checkout you get that checkout's deployment wh
 remember to say so, the same way `git` and `npm` find theirs. Every command prints which one it chose
 and why — on stderr, so `pagevault publish report.html | pbcopy` still carries only the URL.
 
+### And which bearer it authenticates with
+
+Resolved separately, and **paired to the deployment above** — a credential is not interchangeable
+with a URL. Every command uses the same four sources, in this order:
+
+| Rung | Source | Sent only when |
+|---|---|---|
+| 1 | `PAGEVAULT_API_TOKEN` in the environment | always — naming it is how you deliberately override |
+| 2 | the registry entry for this deployment | it was stored against this exact deployment |
+| 3 | `.env.local` beside the build record | that record describes the deployment being acted on |
+| 4 | the login config | the login describes the deployment being acted on |
+
+Rungs 3 and 4 carry a condition because a token that belongs to another deployment is never sent —
+not to fail safe in the abstract, but because a bearer shared between two deployments would
+authenticate against the wrong one and write there. When nothing qualifies, the command says
+`No bearer for <url>` and lists where it looked, rather than trying the nearest token it can find.
+
+Rung 3 is why `pagevault list` works the moment `init` finishes. The Worker holds the bearer as a
+**secret**, which cannot be read back; `.env.local` is this machine's own copy of the same value, and
+it sits beside `.pagevault.json` so the two are paired by construction.
+
 ### Protecting one
 
 ```bash

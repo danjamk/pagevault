@@ -13,14 +13,15 @@ import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import {
   c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, isInteractive, cfApi, cfAccounts, cfErr, slug,
-  writeEnvLocalVar, fromEnv, acct, shortId, banner, chooseBearer, generatedConfigPath, RUNNING_FROM_REPO, runHint,
+  writeEnvLocalVar, fromEnv, fromEnvFile, acct, shortId, banner, chooseBearer, generatedConfigPath, RUNNING_FROM_REPO, runHint,
   statePath, CONTEXT_FILE, restoreHint, analyticsChoice, analyticsDashboard,
 } from "./context.mjs";
 import { parseArgs } from "../format.mjs";
 import { provisionAccess } from "./provision.mjs";
 import { writeTier0Config } from "./tier0.mjs";
-import { saveLoginConfig, loadConfig, sameDeployment, CONFIG_PATH } from "../client.mjs";
+import { saveLoginConfig, loadConfig, sameDeployment } from "../client.mjs";
 import { findByUrl, loadRegistry, saveRegistry, shouldAdoptCurrent, upsert } from "../registry.mjs";
+import { resolveBearerSource, resolveTarget, stateToken } from "../target.mjs";
 
 const CONFIG_OUT = generatedConfigPath();
 
@@ -257,14 +258,14 @@ export async function deploy(opts = {}) {
   let bearerValue;
 
   if (bearer.action === "skip") {
-    ok("PAGEVAULT_API_TOKEN is already set — reused, not rotated.");
+    ok("PAGEVAULT_API_TOKEN is already the Worker's secret — reused, not rotated.");
     // Worker already has it; the plaintext isn't on the Worker (secrets are write-only), but a
     // re-deploy from the same install has it in .env.local — enough to (re)write the login config.
     bearerValue = fromEnv("PAGEVAULT_API_TOKEN");
   } else if (bearer.action === "set") {
     const put = await setBearer(bearer.value);
     if (put.ok) {
-      ok("PAGEVAULT_API_TOKEN set from the environment — your existing CLI / MCP bearer, unchanged.");
+      ok("PAGEVAULT_API_TOKEN set as the Worker's secret — the value from your environment, unchanged.");
       bearerValue = bearer.value;
     } else {
       warn(`Couldn't set PAGEVAULT_API_TOKEN (${cfErr(put.errors)}).`);
@@ -277,13 +278,25 @@ export async function deploy(opts = {}) {
       // bearer, and `make verify` (which publishes the welcome doc). .env.local is gitignored.
       writeEnvLocalVar("PAGEVAULT_API_TOKEN", value);
       bearerValue = value;
-      ok("PAGEVAULT_API_TOKEN set on the Worker and saved to .env.local (your CLI / MCP bearer):");
+      ok("PAGEVAULT_API_TOKEN set as the Worker's secret and saved to .env.local (your CLI / MCP bearer):");
       console.log(`     ${c.bold(value)}`);
       console.log(`     ${c.dim("Same token the Worker uses — verify will publish your first document with it.")}`);
     } else {
       warn(`Couldn't set PAGEVAULT_API_TOKEN automatically (${cfErr(put.errors)}).`);
       console.log(`  Set it by hand under Node 22: ${c.bold(`npx wrangler secret put PAGEVAULT_API_TOKEN --config ${CONFIG_OUT}`)}`);
     }
+  }
+
+  // 🔴 A Worker secret is write-only, so the machine that just set it needs its own copy or the very
+  // next document command has nothing to send (#195). `.env.local` is the copy that TRAVELS WITH the
+  // build record — same directory — which is what lets `target.mjs` pair the two without anyone
+  // naming a deployment. Written whenever we hold the plaintext and the file disagrees, so a bearer
+  // supplied by an exported env var is still on disk in the next shell.
+  //
+  // Not in CI: the runner is about to disappear, the value is already an environment secret, and a
+  // deploy job has no next command to help.
+  if (url && bearerValue && !process.env.CI && fromEnvFile("PAGEVAULT_API_TOKEN") !== bearerValue) {
+    writeEnvLocalVar("PAGEVAULT_API_TOKEN", bearerValue);
   }
 
   // Installed (ADR-014): leave the operator ready to publish with no second `login`. We know the URL
@@ -318,42 +331,28 @@ export async function deploy(opts = {}) {
       // Nothing else claims the default, or the login already describes this deployment. This is the
       // ordinary single-deployment install, and it behaves exactly as it always has.
       const path = saveLoginConfig({ url, token: bearerValue });
-      ok(`Saved ${path} — ${c.bold("pagevault publish")} is ready, no ${c.bold("login")} step needed.`);
+      ok(`Saved ${path} — this deployment is now the CLI default.`);
     } else {
       // Something else is the default and this deployment is not it. Refuse to move it silently; say
-      // what would make this deployment addressable instead.
+      // what would make this deployment addressable BY NAME from anywhere. Standing here already
+      // selects it — `reportReach` below says so — so this is about the global default, nothing more.
+      //
+      // The default lives in one of two places and `registry` may be null outright, so read it the
+      // way `shouldAdoptCurrent` decided it: the registry's selection, else the login config.
+      const current = registry?.current || loadConfig({}).url;
       console.log();
-      warn(`Deployed, but ${c.bold("pagevault")}'s document commands still default elsewhere.`);
+      warn(`${c.bold(current)} stays this machine's default deployment.`);
       console.log(`  ${c.dim("just deployed")}  ${c.bold(url)}`);
-      console.log(`  ${c.dim("default      ")}  ${loadConfig({}).url || registry?.current || c.dim("—")}`);
+      console.log(`  ${c.dim("default      ")}  ${current}`);
       console.log(`\n  ${c.dim("Not repointing it for you — that is how a deploy loses another deployment's bearer.")}`);
-      console.log(`     ${c.bold(`pagevault login --as <name> --url ${url} --token $PAGEVAULT_API_TOKEN`)}`);
-    }
-  } else if (RUNNING_FROM_REPO && url) {
-    // We deliberately do NOT repoint a repo run's login config (see above).
-    //
-    // This warning used to say the document commands "still point at a different deployment",
-    // comparing against config.json alone. That was true when they read config.json directly; since
-    // ADR-021 phase 3 they resolve the nearest marker first, and after this deploy the marker names
-    // exactly what we just built. So they point HERE — the claim would now be false (#159).
-    //
-    // What is still missing is the BEARER. A login describing another deployment is deliberately not
-    // sent here (#155), so the next `pagevault list` from this checkout fails for want of a
-    // credential rather than writing somewhere it should not. Better to say so now than to let a
-    // first publish discover it.
-    const configured = loadConfig({}).url; // file only — env is per-command and not ours to judge
-    const registered = Boolean(findByUrl(loadRegistry(), url));
-    const loginCovers = configured && sameDeployment(configured, url);
-    if (!registered && !loginCovers && !process.env.PAGEVAULT_API_TOKEN) {
-      console.log();
-      warn(`${c.bold("pagevault")}'s document commands will resolve this deployment but have no bearer for it.`);
-      console.log(`  ${c.dim("just deployed")}  ${c.bold(url)}`);
-      console.log(`  ${c.dim("config.json  ")}  ${configured || c.dim("—")} ${c.dim(`(${CONFIG_PATH})`)}`);
-      console.log(`\n  ${c.dim("Standing in this checkout already selects it. Give it a name and its bearer travels with it:")}`);
-      console.log(`     ${c.bold(`pagevault login --as <name> --url ${url} --token $PAGEVAULT_API_TOKEN`)}`);
-      console.log(`  ${c.dim("or set PAGEVAULT_API_TOKEN per command.")}`);
+      console.log(`  ${c.dim("Name this one to reach it from anywhere:")}`);
+      console.log(`     ${c.bold(`pagevault login --as ${suggestName(url)} --url ${url} --token ${tokenArg()}`)}`);
     }
   }
+
+  // Whatever the two blocks above did or declined to do, ONE line settles what the operator is about
+  // to hit — computed, not inferred. See reportReach.
+  if (url) reportReach(url);
 
   // What is readable without a login? On a Secured deployment that is worth saying out loud, because
   // a document published while the deployment was Public keeps its /p/ capability link forever — and
@@ -407,6 +406,79 @@ export async function deploy(opts = {}) {
 
   console.log(`\n${c.bold("Next:")} ${c.bold(verifyCmd)} ${c.dim("— smoke-test the deployment and publish your first document.")}`);
   console.log(`  ${c.dim("It hands back a public /p/ link you can open immediately — no login, no Access.")}\n`);
+}
+
+/**
+ * A deployment name worth suggesting, from its hostname.
+ *
+ * A suggestion, not a decision — the operator types it or types something else. But a printed
+ * command with `<name>` still in it is a command nobody can paste, and on a first run the values it
+ * asks for are exactly the ones the operator does not have yet (#195).
+ *
+ * On workers.dev the first label is always our Worker's name and says nothing; the one before
+ * `workers.dev` is the operator's own subdomain, which is the distinguishing part.
+ */
+export function suggestName(url) {
+  let host;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return "pagevault";
+  }
+  const labels = host.split(".");
+  return slug(host.endsWith(".workers.dev") ? (labels.at(-3) ?? host) : labels[0]);
+}
+
+/**
+ * The `--token` argument for a printed `login` command, in a form that works when pasted.
+ *
+ * `$PAGEVAULT_API_TOKEN` when the shell can expand it, a placeholder otherwise. Never the literal
+ * value: this path is reached when the machine could NOT find the bearer, and printing a live
+ * credential into scrollback to solve a message-clarity problem is a poor trade. The mint path
+ * prints its value because there is genuinely nowhere else to read it from.
+ */
+const tokenArg = () => (process.env.PAGEVAULT_API_TOKEN ? "$PAGEVAULT_API_TOKEN" : "<PAGEVAULT_API_TOKEN>");
+
+/**
+ * 🔴 Will the next `pagevault list` reach what we just deployed?
+ *
+ * Answered by the same resolver the document commands use, rather than inferred from a nearby fact.
+ * The two messages this replaces each guessed — one from `!process.env.PAGEVAULT_API_TOKEN`, one
+ * from a registry lookup — and neither was asking `commandTarget()`'s question. So a deploy could
+ * report PAGEVAULT_API_TOKEN set and, four lines later, report no bearer at all: both true, of
+ * different stores, and unreadable as anything but a contradiction on a first run (#195).
+ *
+ * Naming the store is the other half. "The Worker's secret" and "this machine's copy" are two
+ * things wearing one name, and until the output distinguishes them the operator has to.
+ */
+export function reportReach(url) {
+  const config = loadConfig({}); // file only — an env var is per-command and not this machine's state
+  const target = resolveTarget({ config, registry: loadRegistry() });
+  const { token, from } = resolveBearerSource(target, {
+    env: process.env.PAGEVAULT_API_TOKEN || "",
+    state: stateToken(target),
+    config: config.token,
+  });
+
+  console.log();
+  if (token && sameDeployment(target.url, url)) {
+    ok(`${c.bold("pagevault")}'s document commands act on this deployment from here.`);
+    console.log(`  ${c.dim(`bearer: ${from} — the Worker holds the same value as its secret.`)}`);
+    return;
+  }
+
+  warn(`Deployed, but ${c.bold("pagevault")}'s document commands cannot authenticate to it yet.`);
+  console.log(`  ${c.dim("just deployed")}  ${c.bold(url)}`);
+  // Only when they differ. Printing two identical URLs invites a hunt for a mismatch that is not
+  // the problem — the problem is the credential, and the line above already named the deployment.
+  if (!sameDeployment(target.url, url)) console.log(`  ${c.dim("they resolve ")}  ${target.url || c.dim("nothing")}`);
+  console.log(`\n  ${c.dim("The Worker holds the bearer as a secret, and a secret cannot be read back — so this")}`);
+  console.log(`  ${c.dim("machine needs its own copy. Register the deployment and it travels with it:")}`);
+  console.log(`     ${c.bold(`pagevault login --as ${suggestName(url)} --url ${url} --token ${tokenArg()}`)}`);
+  if (!process.env.PAGEVAULT_API_TOKEN) {
+    console.log(`  ${c.dim("The token is the one this deploy used — from your environment, or whatever you set as")}`);
+    console.log(`  ${c.dim(`the Worker's PAGEVAULT_API_TOKEN secret. Nothing on this machine has a copy to fill in.`)}`);
+  }
 }
 
 /**

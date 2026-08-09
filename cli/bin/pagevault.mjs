@@ -11,7 +11,7 @@ import { basename } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { api, apiText, loadConfig, sameDeployment, saveLoginConfig, waitReadable, PvError } from "../lib/client.mjs";
-import { resolveTarget, describeTarget, resolveBearer, provisionedFrom, locateMarker, readMarker, recordUrl } from "../lib/target.mjs";
+import { resolveTarget, describeTarget, resolveBearerSource, stateEnvPath, stateToken, provisionedFrom, locateMarker, readMarker, recordUrl } from "../lib/target.mjs";
 import { emptyRegistry, findByName, findByUrl, listDeployments, loadRegistry, saveRegistry, shouldAdoptCurrent, upsert } from "../lib/registry.mjs";
 
 import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "../lib/format.mjs";
@@ -70,19 +70,28 @@ function commandTarget(flags = {}) {
     );
   }
 
-  const token = resolveBearer(target, {
+  // 🔴 `state` — the `.env.local` sitting beside the build record — is the fourth source, and it
+  // was missing here while `verify` and `health` resolved the identical target WITH it. So `init`
+  // wrote the bearer, verify found it, and the very next `pagevault list` said there was none
+  // (#195). The document commands are the ones an operator runs first; they cannot be the ones
+  // looking in fewer places.
+  const { token } = resolveBearerSource(target, {
     env: process.env.PAGEVAULT_API_TOKEN || "",
+    state: stateToken(target),
     config: config.token,
   });
   if (!token) {
-    // Reached when the resolved deployment is not the one the login describes (#155). The login's
-    // token is deliberately NOT sent — that is how a production bearer once arrived at the test
-    // deployment. The fix is to give this deployment a name, so its own bearer is on file.
+    // Reached when no credential on this machine describes the resolved deployment (#155). The
+    // login's token is deliberately NOT sent when it describes another one — that is how a
+    // production bearer once arrived at the test deployment. Saying where we looked matters as much
+    // as saying we refused: "no bearer" against a machine that plainly has one reads as a bug.
     throw new PvError(
       `No bearer for ${target.url}.\n\n` +
         `  resolved   ${describeTarget(target)}\n` +
-        `  logged in  ${target.configUrl || "(nothing)"}\n\n` +
-        "The saved login describes a different deployment, so its token is not sent here.\n" +
+        `  logged in  ${target.configUrl || "(nothing)"}\n` +
+        `  looked in  the environment, ${stateEnvPath(target) ?? "no build record on this machine"},\n` +
+        `             the deployment registry, and the login config\n\n` +
+        "A token that describes a different deployment is never sent here.\n" +
         "Register this one and its bearer travels with it:\n\n" +
         `  pagevault login --as <name> --url ${target.url} --token <PAGEVAULT_API_TOKEN>\n\n` +
         `or name it for one command: PAGEVAULT_API_TOKEN=… pagevault …`,
