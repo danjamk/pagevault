@@ -7,6 +7,29 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **A re-deploy no longer turns off a capability the deployment had.** View tracking resolved from a
+  flag, then `.pagevault.json`, then — non-interactively — `false`. Production rebuilds its intent
+  file in CI from a secret that never mentioned analytics, so every deploy re-decided "off" from
+  silence — it was never on, and no deploy would ever have turned it on. What
+  the **live Worker actually binds** is now in the precedence chain, so a deployment that has already
+  answered the question keeps its answer. The one case that cannot be resolved by guessing — the
+  intent file says off while the Worker says on — refuses and names both options rather than picking
+  one. An unreadable deployment (a first deploy, a narrow token, a network blip) can never strip a
+  binding. ([#187](../../issues/187))
+
+### Added
+- **`--analytics` / `--no-analytics` on `pagevault upgrade`**, and `PAGEVAULT_ANALYTICS=on|off` for
+  runs with nobody to prompt. Turning view tracking on for a CI-deployed production previously meant
+  hand-editing a base64'd secret, which in practice meant nobody ever did.
+- **An `analytics` input on the production deploy workflow** — `unchanged`, `on`, or `off`.
+  `unchanged` sets nothing and lets the fallback work, so flipping it to `on` once is permanent.
+
+### Changed
+- **Every deploy says where its view-tracking answer came from** — a flag, the intent file, the live
+  Worker, or a default with nothing to go on. `off` printed with no provenance reads as a decision
+  when it was a silence, which is what made the production incident invisible.
+
 ## [0.35.1] — 2026-08-09
 
 A deployment that records nothing stops pretending it measured nothing.

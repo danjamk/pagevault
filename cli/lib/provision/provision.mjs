@@ -20,13 +20,47 @@ import { pathToFileURL } from "node:url";
 import {
   c, ok, info, warn, die, loadCloudToken, loadContext, saveContext, cfApi, cfErr, acct, shortId,
   fromEnv, writeEnvLocalVar, isInteractive, banner, releaseTag, BUNDLE_PATH, applyBundleMode,
-  generatedConfigPath, templatePath, runHint, RUNNING_FROM_REPO,
+  generatedConfigPath, templatePath, runHint, RUNNING_FROM_REPO, deployedBindings, analyticsChoice,
+  CONTEXT_FILE,
 } from "./context.mjs";
+import { parseArgs } from "../format.mjs";
 
 const CONFIG_IN = templatePath();
 const CONFIG_OUT = generatedConfigPath();
 const LEGACY_STATE = ".pagevault-provision.json";
 const GROUP_NAME = "pagevault-viewers";
+
+/**
+ * Which way view tracking resolves on this run, where that came from, and whether it is a downgrade.
+ *
+ * Pure, and separated from the provisioning it drives so both directions of the transition can be
+ * tested without a Cloudflare account (#187).
+ *
+ * @param {object} a
+ * @param {boolean|undefined} a.flag      what the operator asked for on THIS run (--analytics, PAGEVAULT_ANALYTICS)
+ * @param {boolean|undefined} a.declared  what `.pagevault.json` records
+ * @param {boolean|null|undefined} a.live whether the deployed Worker binds ANALYTICS; null = unknown
+ *
+ * 🔴 `live` sits in the precedence chain, not merely in an assertion. That is the actual fix. The
+ * bug was a re-deploy re-deciding an optional capability from silence every time, and no amount of
+ * shouting about it later helps a schedule nobody is watching — whereas a deployment that already
+ * answered the question keeps its answer for free, including in CI, without anyone editing a secret.
+ *
+ * The refusal is then only for a genuine contradiction: something here says off while the Worker
+ * says on. That case cannot be resolved by guessing, so it stops. Note `value === undefined` implies
+ * `live` was unknown — with a live reading there is always an answer — which is why the caller's
+ * prompt-or-default can never itself become a downgrade.
+ */
+export function resolveAnalytics({ flag, declared, live }) {
+  const known = live === true || live === false ? live : undefined;
+  const value = flag ?? declared ?? known;
+  const source =
+    flag !== undefined ? "flag" : declared !== undefined ? "declared" : known !== undefined ? "live" : "unset";
+  // Off is allowed to happen on purpose and no other way. `flag !== false` is the override: saying
+  // it out loud on this run is what distinguishes "stop recording" from "never mentioned it".
+  const downgrade = live === true && value === false && flag !== false;
+  return { value, source, downgrade };
+}
 
 export async function provisionAccess(opts = {}) {
   console.log(banner("provision Access", "(Secured)"));
@@ -182,7 +216,33 @@ export async function provisionAccess(opts = {}) {
   // reading 403 as "off" would silently strip view tracking from a deployment where it works.
   // An answer we store beats a signal we cannot disambiguate.
   const analyticsUrl = `https://dash.cloudflare.com/${account.id}/workers/analytics-engine`;
-  let analytics = opts.analytics ?? ctx.analytics;
+
+  // What the LIVE Worker holds, which is a different question from what this checkout intends.
+  // Production ran for eight releases with the binding absent because CI rebuilt an intent file
+  // that never mentioned it, and every re-deploy re-decided "off" from silence (#187).
+  const bindings = await deployedBindings(account.id);
+  const liveAnalytics = bindings === null ? null : bindings.includes("ANALYTICS");
+  let { value: analytics, source, downgrade } = resolveAnalytics({
+    flag: opts.analytics,
+    declared: ctx.analytics,
+    live: liveAnalytics,
+  });
+
+  if (downgrade) {
+    die("This deploy would turn view tracking OFF, and the live Worker currently has it on.", [
+      source === "declared"
+        ? `  ${CONTEXT_FILE} says off; the deployed Worker binds ANALYTICS. They disagree.`
+        : `  Nothing here asked for view tracking; the deployed Worker binds ANALYTICS.`,
+      "",
+      "  Dropping it is silent and one-way. The Worker stops recording, no error is raised, and the",
+      "  days between now and whenever someone notices are simply never in the data. Analytics Engine",
+      "  keeps ~90 days, so there is nothing to backfill from either.",
+      "",
+      "  Say which you mean:",
+      `    ${c.bold(runHint("deploy ANALYTICS=on", "upgrade --analytics"))}     keep recording`,
+      `    ${c.bold(runHint("deploy ANALYTICS=off", "upgrade --no-analytics"))}    stop recording, deliberately`,
+    ]);
+  }
 
   if (analytics === undefined) {
     if (isInteractive()) {
@@ -209,19 +269,33 @@ export async function provisionAccess(opts = {}) {
       const answer = (await rl.question(`  ${c.bold("Done that, and want view tracking? [y/N] ")}`)).trim().toLowerCase();
       rl.close();
       analytics = answer === "y" || answer === "yes";
+      source = "answer";
     } else {
-      // Non-interactive (CI, `--yes`) defaults OFF. A deploy that works beats a deploy that
-      // dies on an optional feature nobody asked for.
+      // Non-interactive (CI, `--yes`) defaults OFF, and only ever reaches here when the live Worker
+      // could not be read at all — a first deploy, or a token that cannot see script settings. Once
+      // there is a deployment to ask, it answers this, and the default stops being load-bearing.
+      // A deploy that works beats a deploy that dies on an optional feature nobody asked for.
       analytics = false;
+      source = "default";
     }
   }
 
+  // Say where the answer came from. "off" printed with no provenance is what made the production
+  // incident invisible: it read as a decision, and it was a silence.
+  const because = {
+    flag: "you asked for it on this run",
+    declared: `declared in ${CONTEXT_FILE}`,
+    live: "the deployed Worker already has it",
+    answer: "you just answered",
+    default: "nothing asked for it, and there is no deployment to ask",
+  }[source];
+
   if (analytics) {
-    ok("View tracking: on (Analytics Engine)");
+    ok(`View tracking: on (Analytics Engine) ${c.dim(`— ${because}`)}`);
     info(`  If the deploy fails with error 10089, it is not enabled yet — ${analyticsUrl}`);
   } else {
-    ok("View tracking: off — no Analytics Engine binding");
-    info(`  Turn it on later: enable it at ${c.dim(analyticsUrl)}, then \`${runHint("provision ANALYTICS=on", "init")}\`.`);
+    ok(`View tracking: off — no Analytics Engine binding ${c.dim(`— ${because}`)}`);
+    info(`  Turn it on later: enable it at ${c.dim(analyticsUrl)}, then \`${runHint("deploy ANALYTICS=on", "upgrade --analytics")}\`.`);
   }
 
   // --- One-time PIN: the zero-onboarding mechanism ---------------------------
@@ -422,8 +496,9 @@ export async function provisionAccess(opts = {}) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   // The stored answer is sticky, so these are how you change your mind about view tracking
-  // without hand-editing .pagevault.json.
-  const argv = process.argv.slice(2);
-  const analytics = argv.includes("--analytics") ? true : argv.includes("--no-analytics") ? false : undefined;
+  // without hand-editing .pagevault.json. `analyticsChoice` also reads PAGEVAULT_ANALYTICS, which
+  // is the only one of the two a CI-deployed production can use.
+  const { flags } = parseArgs(process.argv.slice(2));
+  const analytics = analyticsChoice(flags);
   await provisionAccess(analytics === undefined ? {} : { analytics });
 }

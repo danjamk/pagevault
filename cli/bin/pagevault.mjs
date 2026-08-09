@@ -851,7 +851,7 @@ async function login(flags) {
 // commands above load none of it and stay a lean HTTP client. Both deploy the prebuilt Worker
 // bundle the package ships. `--yes` (read from argv by the flow) makes them non-interactive.
 
-async function init() {
+async function init(flags = {}) {
   const { setup } = await import("../lib/provision/setup.mjs");
   const { deploy } = await import("../lib/provision/deploy.mjs");
 
@@ -861,14 +861,18 @@ async function init() {
   const { ready } = await setup({ next: "pagevault init" });
   if (!ready) return;
 
-  await deploy({ bundle: true });
+  await deploy({ bundle: true, flags });
 }
 
-async function upgrade() {
+async function upgrade(flags = {}) {
   // Redeploy the bundle that shipped with this installed package, keeping KV, config, and secrets.
   // Pairs with `npm update -g pagevault`: update the package for new code, then `pagevault upgrade`.
+  //
+  // `--analytics` / `--no-analytics` ride along because this is the command a CI-deployed operator
+  // actually has — flags reach provisioning, which otherwise takes view tracking from the declared
+  // intent and then from what the live Worker already binds (#187).
   const { deploy } = await import("../lib/provision/deploy.mjs");
-  await deploy({ bundle: true });
+  await deploy({ bundle: true, flags });
 }
 
 // The operator commands — diagnostics and teardown for YOUR deployment. Each is the same engine

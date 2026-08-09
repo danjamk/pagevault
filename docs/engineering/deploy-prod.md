@@ -92,6 +92,35 @@ different deployment — it would read one account's analytics and write them to
 schedule lives in CI: **`.github/workflows/sync-views-prod.yml`**, daily at 03:17 UTC, plus a manual
 `workflow_dispatch`.
 
+### Turning view tracking on or off from CI
+
+Capture only happens if the deployed Worker binds `ANALYTICS`, and production's did not. The intent
+file CI rebuilds from `PAGEVAULT_PROD_CONFIG` never mentioned analytics, provisioning read that
+silence as "off" on every deploy — so it was never on, and no deploy would ever have turned it on.
+The whole thing announced itself once as `✓ View tracking: off` in a log nobody reads
+([#187](https://github.com/danjamk/pagevault/issues/187)).
+
+Two things changed, and the first is the one that matters:
+
+1. **Provisioning reads the live Worker's bindings.** What the deployment already has now sits in the
+   precedence chain — flag, then declared intent, then the deployed Worker. So a re-deploy keeps view
+   tracking without anyone re-stating it, and turning it off requires saying so.
+2. **`deploy-prod.yml` takes an `analytics` input** — `unchanged` (the default), `on`, or `off`.
+
+`unchanged` is not a third state; it sets nothing and lets the fallback do its job. So flipping the
+input to `on` **once** is permanent — the deployment carries the answer from then on, and every later
+run leaves the input alone. Nobody has to edit a base64'd secret to change their mind.
+
+Turning it off is the direction that loses something, so it has to be deliberate:
+
+```bash
+pagevault upgrade --no-analytics          # or PAGEVAULT_ANALYTICS=off, or the workflow input
+```
+
+Without that, a deploy that would drop a binding the live Worker has **refuses and says so**. There
+is no backfill — Analytics Engine keeps about 90 days and days that were never recorded are simply
+not in the data.
+
 ### Two environments, on purpose
 
 The scheduled sync runs against an **`ops`** environment, not `production`. Two reasons, and the

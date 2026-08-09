@@ -34,6 +34,7 @@ documents carry across keeping their ids and filenames.
   --email you@example.com   the owner — the identity that can always see everything
   --rung 1|2|3            the escape hatch: 1 = workers.dev, 2 = your domain, 3 = Secured
   --cf-token <token>      your CLOUDFLARE API token, instead of saving it to .env.local first
+  --analytics             turn view tracking on (asked for interactively; off by default with --yes)
   --yes                   never prompt; flags and the environment supply every answer
 
 ⚠ --cf-token is the CLOUDFLARE credential — the one that provisions. \`login --token\` is the
@@ -48,11 +49,19 @@ documents carry across keeping their ids and filenames.
   ),
 
   upgrade: H(
-    "Usage: pagevault upgrade [--yes]",
+    "Usage: pagevault upgrade [--yes] [--analytics|--no-analytics]",
     `
 Redeploy the Worker bundle that shipped with your installed package — the second half of
 \`npm update -g pagevault\`. Keeps your KV data, config and secrets, and never rotates a live
-bearer.`,
+bearer.
+
+  --analytics       turn view tracking ON (needs Analytics Engine enabled on the account)
+  --no-analytics    turn view tracking OFF, deliberately
+
+Neither flag is the normal case. Left alone, an upgrade keeps view tracking exactly as the
+deployment already has it — so a redeploy can never quietly drop it. Passing --no-analytics is
+the only way to switch it off, because doing that by accident costs data nothing can recover:
+Analytics Engine keeps about 90 days and there is no backfill.`,
   ),
 
   login: H(

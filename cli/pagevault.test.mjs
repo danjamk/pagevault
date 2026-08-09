@@ -12,6 +12,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "./lib/format.mjs";
 import { loadConfig } from "./lib/client.mjs";
+import { resolveAnalytics } from "./lib/provision/provision.mjs";
+import { analyticsChoice } from "./lib/provision/context.mjs";
 
 const BIN = fileURLToPath(new URL("./bin/pagevault.mjs", import.meta.url));
 
@@ -650,4 +652,121 @@ test("both forms are reachable from help, and views no longer advertises the fla
   const views = runIn(registryHome(), "help", "views").text;
   assert.match(views, /A read-only look/);
   assert.match(views, /pagevault sync-views/);
+});
+
+// --- View tracking across a re-deploy (#187) --------------------------------
+//
+// The bug: `opts.analytics ?? ctx.analytics`, falling back to false when non-interactive. Production
+// rebuilds .pagevault.json in CI from a secret that never mentioned analytics, so every deploy
+// re-decided "off" from silence — and the Worker recorded nothing for eight releases while every
+// surface reported healthy zeros.
+//
+// What these pin is the precedence, in both directions. The live Worker is IN the chain, not merely
+// asserted against: a deployment that already answered the question keeps its answer for free.
+
+test("🔴 a re-deploy that asks for nothing keeps what the deployment already has (#187)", () => {
+  // The production case exactly: no flag, an intent file that never mentions analytics, and a
+  // Worker that binds ANALYTICS. Before the fix this resolved to false, silently.
+  assert.deepEqual(resolveAnalytics({ flag: undefined, declared: undefined, live: true }), {
+    value: true,
+    source: "live",
+    downgrade: false,
+  });
+});
+
+test("never having had view tracking is not a downgrade — it stays off, quietly", () => {
+  assert.deepEqual(resolveAnalytics({ flag: undefined, declared: undefined, live: false }), {
+    value: false,
+    source: "live",
+    downgrade: false,
+  });
+});
+
+test("🔴 a contradiction refuses rather than picking a side", () => {
+  // Declared off, deployed on. Guessing either way loses something: honour the file and days of
+  // history stop existing; honour the Worker and an explicit instruction is ignored.
+  const r = resolveAnalytics({ flag: undefined, declared: false, live: true });
+  assert.equal(r.value, false);
+  assert.equal(r.source, "declared");
+  assert.equal(r.downgrade, true);
+});
+
+test("--no-analytics is the override, and the only way off", () => {
+  // Said out loud on THIS run, so it is a decision rather than an omission — no refusal.
+  for (const declared of [undefined, true, false]) {
+    const r = resolveAnalytics({ flag: false, declared, live: true });
+    assert.equal(r.value, false, `declared=${declared}`);
+    assert.equal(r.source, "flag");
+    assert.equal(r.downgrade, false, "an explicit off is never a downgrade");
+  }
+});
+
+test("--analytics turns it on where the deployment does not have it", () => {
+  // The CI first-enable path: one dispatch with analytics=on, and from then on `live` carries it.
+  const r = resolveAnalytics({ flag: true, declared: false, live: false });
+  assert.equal(r.value, true);
+  assert.equal(r.source, "flag");
+});
+
+test("🔴 an unreadable deployment can never strip a capability", () => {
+  // live=null is a first-ever deploy, a token that cannot read script settings, or a network blip.
+  // Every one of those must degrade to the old behaviour — undefined, for the caller to prompt or
+  // default — and none of them may produce a downgrade, which would strip the binding on a bad
+  // connection. That is a worse bug than the one being fixed.
+  for (const declared of [undefined, true, false]) {
+    const r = resolveAnalytics({ flag: undefined, declared, live: null });
+    assert.equal(r.downgrade, false, `declared=${declared}`);
+    assert.equal(r.value, declared, "falls back to declared intent, or to nothing");
+  }
+  assert.equal(resolveAnalytics({ flag: undefined, declared: undefined, live: null }).source, "unset");
+});
+
+test("declared intent still beats the live binding", () => {
+  // Intent on, Worker without it — a deployment being turned on for the first time. Nothing to
+  // refuse: adding a capability is not the direction that loses data.
+  const r = resolveAnalytics({ flag: undefined, declared: true, live: false });
+  assert.equal(r.value, true);
+  assert.equal(r.source, "declared");
+  assert.equal(r.downgrade, false);
+});
+
+test("view tracking can be set by flag or by environment, and the flag wins", () => {
+  assert.equal(analyticsChoice({ analytics: true }, {}), true);
+  assert.equal(analyticsChoice({ "no-analytics": true }, {}), false);
+  // `--analytics off` too: parseArgs takes the next token as a value, so both spellings arrive.
+  assert.equal(analyticsChoice({ analytics: "off" }, {}), false);
+  assert.equal(analyticsChoice({ analytics: "ON" }, {}), true);
+
+  // The environment is what a CI-deployed production has — there is no prompt to answer there.
+  assert.equal(analyticsChoice({}, { PAGEVAULT_ANALYTICS: "on" }), true);
+  assert.equal(analyticsChoice({}, { PAGEVAULT_ANALYTICS: "off" }), false);
+  assert.equal(analyticsChoice({ "no-analytics": true }, { PAGEVAULT_ANALYTICS: "on" }), false);
+
+  // "Didn't say" has to survive the round trip: the workflow emits an empty string on `unchanged`.
+  assert.equal(analyticsChoice({}, {}), undefined);
+  assert.equal(analyticsChoice({}, { PAGEVAULT_ANALYTICS: "" }), undefined);
+  assert.equal(analyticsChoice({}, { PAGEVAULT_ANALYTICS: "  " }), undefined);
+});
+
+test("🔴 a typo'd view-tracking value is fatal, not ignored", () => {
+  // Silently reading as "didn't say" is the same failure the whole issue is about: a setting that
+  // reads as applied and isn't. Run out-of-process because the real path calls die().
+  // A file:// URL, not a path. On Windows `C:\…` is not a valid ESM specifier — Node reads the
+  // drive letter as a URL scheme and throws ERR_UNSUPPORTED_ESM_URL_SCHEME, which still exits
+  // non-zero and so still looked like a pass on the exit code alone.
+  const mod = new URL("./lib/provision/context.mjs", import.meta.url).href;
+  const r = spawnSync(
+    process.execPath,
+    ["--input-type=module", "-e", `import {analyticsChoice} from ${JSON.stringify(mod)}; analyticsChoice({}, {PAGEVAULT_ANALYTICS: "yes-please"})`],
+    { encoding: "utf8" },
+  );
+  assert.notEqual(r.status, 0);
+  assert.match(`${r.stdout}${r.stderr}`, /Unrecognised PAGEVAULT_ANALYTICS value: yes-please/);
+});
+
+test("upgrade documents both directions, and says which one is the accident", () => {
+  const help = run("help", "upgrade").text;
+  assert.match(help, /--analytics/);
+  assert.match(help, /--no-analytics/);
+  assert.match(help, /keeps view tracking exactly as the/);
 });

@@ -14,8 +14,9 @@ import { pathToFileURL } from "node:url";
 import {
   c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, isInteractive, cfApi, cfAccounts, cfErr, slug,
   writeEnvLocalVar, fromEnv, acct, shortId, banner, chooseBearer, generatedConfigPath, RUNNING_FROM_REPO, runHint,
-  statePath, CONTEXT_FILE, restoreHint,
+  statePath, CONTEXT_FILE, restoreHint, analyticsChoice,
 } from "./context.mjs";
+import { parseArgs } from "../format.mjs";
 import { provisionAccess } from "./provision.mjs";
 import { writeTier0Config } from "./tier0.mjs";
 import { saveLoginConfig, loadConfig, sameDeployment, CONFIG_PATH } from "../client.mjs";
@@ -165,12 +166,28 @@ export async function deploy(opts = {}) {
   // bundles from src, unchanged.
   const bundle = opts.bundle ?? process.env.PAGEVAULT_BUNDLE === "1";
 
+  // View tracking as asked for on this run — a flag, or PAGEVAULT_ANALYTICS, which is the one a
+  // CI-deployed production can set (#187). Undefined means "didn't say", and provisioning falls back
+  // to the declared intent and then to what the live Worker already has.
+  //
+  // Resolved OUTSIDE the try below on purpose: a typo'd value dies with its own message, and the
+  // catch there rewrites everything into "Config generation failed", which would bury it.
+  const analytics = analyticsChoice(opts.flags ?? {});
+
+  // Only rung 3 generates the config through provisioning, so below it the answer has nowhere to
+  // go. Say that rather than accepting the flag and doing nothing with it — a setting that reads as
+  // applied and isn't is the entire complaint behind #187, and it would be a poor look to introduce
+  // a fresh instance of it in the same change. (Rung 1–2 binding it regardless is #190.)
+  if (ctx.rung < 3 && analytics !== undefined) {
+    warn(`View tracking is not configurable below rung 3 — a rung-${ctx.rung} deploy binds it regardless.`);
+  }
+
   info(ctx.rung >= 3 ? "Provisioning Access (rung 3)…" : "Writing the Tier-0 config…");
   if (bundle) info("Bundle mode: deploying the prebuilt Worker (no_bundle).");
   try {
     // In-process (was `execSync node scripts/{provision,tier0}.mjs`): same cwd and same
     // process.env — CLOUDFLARE_API_TOKEN is already loaded — so the generated config is identical.
-    if (ctx.rung >= 3) await provisionAccess({ bundle });
+    if (ctx.rung >= 3) await provisionAccess({ bundle, analytics });
     else await writeTier0Config({ bundle });
   } catch (err) {
     die("Config generation failed — see the output above.");
@@ -447,5 +464,7 @@ async function reportPublicDocuments(url, bearer) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  await deploy();
+  // `make deploy` lands here. Flags are parsed rather than ignored so `ANALYTICS=on|off` on the
+  // make target has somewhere to go, and so prod CI can pass the same thing as an env var.
+  await deploy({ flags: parseArgs(process.argv.slice(2)).flags });
 }
