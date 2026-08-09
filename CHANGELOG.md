@@ -30,6 +30,13 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
   column of numbers. ([#162](../../issues/162))
 - **`make sync-views`.** The write half was reachable from the CLI and not from `make`, so one front
   door could not reach half the feature. ([#166](../../issues/166))
+- **A traffic panel in the console.** Deployment total, a daily sparkline, per-portal bars and top
+  referrers, from the same rollup — read through the owner session the console already holds, so no
+  Cloudflare credential reaches the page. This panel *is* the dashboard: Analytics Engine has no
+  console of its own, is absent from the GraphQL API, and so cannot feed Cloudflare's Custom
+  Dashboards either. Sync **status**, never a sync button — the Worker cannot read Analytics Engine,
+  so a button would have nothing to call; it shows when the summary was taken, how much history is
+  at risk, and the command that fixes it. ([#164](../../issues/164))
 
 ### Removed
 - **`scripts/views.mjs`** — a second implementation of `views` that queried Analytics Engine

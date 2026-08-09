@@ -333,6 +333,27 @@ function page(session: string, nonce: string, owner: string, version: string, de
               background:var(--pv-code-bg); border:1px solid var(--pv-code-bd); border-radius:7px;
               padding:.4rem .55rem; margin:10px 0; }
   .warnline .icon { flex:none; }
+
+  /* Traffic (#164). Plain elements sized by percentage — no chart library, no build step, and
+     nothing that needs a second request. A sparkline is a row of divs. */
+  .tgrid { display:flex; gap:28px; flex-wrap:wrap; margin:14px 0 18px; }
+  .tstat { display:flex; flex-direction:column; }
+  .tstat b { font-size:26px; line-height:1.1; font-weight:600; }
+  .tstat span { color:var(--pv-muted); font-size:12px; }
+  .tsec { margin:18px 0; }
+  .tsec .ulabel { display:block; margin-bottom:8px; }
+  .spark { display:block; width:100%; height:64px;
+           border-bottom:1px solid var(--pv-border-2); }
+  .spark rect { fill:var(--pv-accent); opacity:.85; }
+  .spark rect:hover { opacity:1; }
+  .srange { display:flex; justify-content:space-between; color:var(--pv-faint); font-size:11.5px; margin-top:4px; }
+  .trow { display:flex; align-items:center; gap:10px; padding:3px 0; font-size:13px; }
+  .tname { flex:0 0 168px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tnum { flex:none; min-width:40px; text-align:right; font-variant-numeric:tabular-nums; color:var(--pv-muted); }
+  .tbar { flex:1 1 auto; height:9px; background:var(--pv-code-bg); border-radius:3px; }
+  .tbar rect { fill:var(--pv-accent); opacity:.7; }
+  .cmd { font-family:ui-monospace,"SF Mono",Menlo,monospace; font-size:12.5px;
+         background:var(--pv-code-bg); border:1px solid var(--pv-code-bd); border-radius:5px; padding:1px 5px; }
   .sharebar { display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; margin-top:14px;
               background:var(--pv-surface); border:1px solid var(--pv-border); border-radius:9px;
               padding:.55rem .7rem; }
@@ -517,6 +538,8 @@ ${ICON_DEFS}
       <button class="btn ghost" id="new-portal"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg>New</button>
     </div>
     <nav id="nav" aria-label="Portals"></nav>
+    <div class="side-div"></div>
+    <button class="prow" id="nav-traffic"><svg class="icon" aria-hidden="true"><use href="#i-chart"/></svg><span class="nm"><b>Traffic</b><span class="mono">how much was read</span></span></button>
     <div class="side-div"></div>
     <div class="legend">
       <span class="ulabel">Reach</span>
@@ -731,6 +754,15 @@ ${ICON_DEFS}
   const DOCS = {};         // slug -> docs[] (lazy, cached after first view)
   const FETCHED = {};      // slug -> ms when DOCS[slug] was filled, for the staleness check below
   let selected = null;     // selected portal slug — mirrored into location.hash (#92)
+  // The traffic panel is a view, not a portal, and it shares the "selected" variable so there is
+  // one selection rather than two that can disagree. (No backticks in this comment — it lives
+  // inside the template literal page() returns, where a bare one ends the string.)
+  //
+  // The sentinel starts with "!" because a portal slug cannot —
+  // slugs are alphanumerics and hyphens — so no real portal can ever collide with it. A deployment
+  // with a portal literally called "traffic" is not hypothetical; this one has "traffic-check".
+  const TRAFFIC_VIEW = "!traffic";
+  let TRAFFIC = null;      // the rollup, cached until Refresh
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const ico = (id, cls) => '<svg class="icon' + (cls ? ' ' + cls : '') + '" aria-hidden="true"><use href="#i-' + id + '"/></svg>';
 
@@ -965,6 +997,11 @@ ${ICON_DEFS}
 
   // ── Render ─────────────────────────────────────────────────────────────────
   function renderNav() {
+    const tnav = document.getElementById("nav-traffic");
+    if (tnav) {
+      if (selected === TRAFFIC_VIEW) tnav.setAttribute("aria-current", "true");
+      else tnav.removeAttribute("aria-current");
+    }
     nav.innerHTML = Object.values(PORTALS).map((p) => {
       const r = reach({ }, p.kind); // base level of the portal, icon-only
       const cur = p.slug === selected;
@@ -989,7 +1026,119 @@ ${ICON_DEFS}
     return "";
   }
 
+  // ── Traffic (#164) ─────────────────────────────────────────────────────────
+  //
+  // 🔴 This panel IS the dashboard. Analytics Engine has no console of its own, is absent from the
+  // GraphQL API, and therefore cannot feed Cloudflare's Custom Dashboards either — the Worker's
+  // Metrics tab will only ever show deployment-level request counts. The surface-parity principle
+  // lets the console lag the CLI, but traffic is the thing you glance at rather than query.
+  //
+  // It costs nothing to serve: the rollup reads a KV value through the owner session the console
+  // already holds. No Cloudflare credential reaches this page, and the Worker still never reads
+  // Analytics Engine (ADR-019 decision 1).
+  // 🔴 SVG, not a div sized by an inline style attribute. The console's CSP is nonced and drops
+  // those (there is a test, and it caught this), so a bar sized that way renders at zero width and
+  // the whole panel silently looks empty. x/y/width/height on a rect are ATTRIBUTES, so they
+  // survive. preserveAspectRatio none lets a 0-100 viewBox stretch to whatever the row gives it.
+  //
+  // Note this comment ships to the browser inside the script, so it cannot contain the attribute
+  // it is describing — the guard matches page content, and does not care that this is a comment.
+  function trafficBar(n, peak) {
+    const pct = peak > 0 ? Math.max(1, Math.round((n / peak) * 100)) : 0;
+    return '<svg class="tbar" viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true">' +
+      '<rect width="' + pct + '" height="8" rx="1.5"/></svg>';
+  }
+
+  function renderTraffic() {
+    if (!TRAFFIC) { app.innerHTML = '<p class="empty">Loading traffic&hellip;</p>'; return; }
+    const r = TRAFFIC;
+    const sync = '<code class="cmd">pagevault sync-views</code>';
+
+    // 🔴 Sync STATUS, not a sync button. The console cannot perform a sync — the Worker cannot read
+    // Analytics Engine at all, so a button here would have nothing to call. The honest surface is
+    // the command, copyable. And no "paste your Cloudflare token" flow to make a real button
+    // possible: that puts an account-scoped credential in a web page, where any console XSS
+    // inherits it. Considered and refused; ADR-025 does not reopen it.
+    if (r.state === "never-synced") {
+      app.innerHTML = '<div class="card"><div class="chead"><h2>Traffic</h2></div>' +
+        '<p class="empty">No history captured yet.</p>' +
+        '<p class="dhint">Views reach Analytics Engine the moment a page opens, but nothing moves them ' +
+        'into this deployment until you ask. Analytics Engine keeps about 90 days; what you sync here is kept ' +
+        'for good.</p><p class="dhint">Run ' + sync + ' on the machine that provisioned this deployment.</p></div>';
+      return;
+    }
+    if (r.state === "not-recording") {
+      // Zero here would be a measurement. There is no binding, so there is no measurement (#185).
+      app.innerHTML = '<div class="card"><div class="chead"><h2>Traffic</h2></div>' +
+        '<p class="empty">This deployment is not recording views.</p>' +
+        '<p class="dhint">The Worker has no Analytics Engine binding, so nothing is being counted and nothing ' +
+        'will be.' + (r.total.views ? ' The ' + r.total.views + ' views below were measured before it was turned off, and are still true.' : '') +
+        '</p><p class="dhint">Turn it on with <code class="cmd">pagevault upgrade --analytics</code>.</p></div>';
+      return;
+    }
+
+    const when = r.syncedAt ? new Date(r.syncedAt).toLocaleString() : "never";
+    const risky = r.risk && (r.risk.state === "warn" || r.risk.state === "urgent" || r.risk.state === "losing");
+    const banner = risky
+      ? '<div class="warnline">' + ico("alert") +
+        (r.risk.state === "losing"
+          ? '<span>' + r.risk.lostDays + ' days of history is already unrecoverable, and more goes each day. Run ' + sync + '.</span>'
+          : '<span>' + r.risk.uncapturedDays + ' days of history becomes unrecoverable in ' + r.risk.daysUntilLoss + ' days. Run ' + sync + '.</span>') +
+        '</div>'
+      : "";
+
+    const peakDay = Math.max.apply(null, [1].concat(r.byDay.map((d) => d.views)));
+    const peakPortal = Math.max.apply(null, [1].concat(r.byPortal.map((p) => p.views)));
+
+    // Same reason as trafficBar: rect attributes, never inline style. One column per day, drawn in
+    // a 100-unit-tall viewBox and stretched to the panel width.
+    const step = r.byDay.length ? 100 / r.byDay.length : 100;
+    const days = r.byDay.length
+      ? '<svg class="spark" viewBox="0 0 100 100" preserveAspectRatio="none">' +
+        r.byDay.map((d, i) => {
+          const h = Math.max(2, Math.round((d.views / peakDay) * 100));
+          return '<rect x="' + (i * step + step * 0.15).toFixed(2) + '" y="' + (100 - h) +
+            '" width="' + (step * 0.7).toFixed(2) + '" height="' + h + '">' +
+            '<title>' + esc(d.key) + ': ' + d.views + (d.granularity === "month" ? " (month)" : "") + '</title></rect>';
+        }).join("") + '</svg>' +
+        '<div class="srange"><span>' + esc(r.byDay[0].key) + '</span><span>' + esc(r.byDay[r.byDay.length - 1].key) + '</span></div>'
+      : '<p class="dhint">No day in this window recorded a view.</p>';
+
+    const portalRows = r.byPortal.length
+      ? r.byPortal.map((p) =>
+          '<div class="trow"><span class="tname">' + esc(p.portal) + '</span>' + trafficBar(p.views, peakPortal) +
+          '<span class="tnum">' + p.views + '</span></div>').join("")
+      : '<p class="dhint">No portal recorded traffic in this window.</p>';
+
+    const refRows = r.byReferrer.length
+      ? r.byReferrer.slice(0, 8).map((s) =>
+          '<div class="trow"><span class="tname">' + (s.host ? esc(s.host) : '<em>direct</em>') + '</span>' +
+          '<span class="tnum">' + s.views + '</span></div>').join("")
+      : '<p class="dhint">Nothing recorded a referrer.</p>';
+
+    app.innerHTML =
+      '<div class="card"><div class="chead"><h2>Traffic</h2>' +
+      '<span class="fresh" title="These numbers come from the last sync, not from live traffic">As of ' + esc(when) + '</span></div>' +
+      banner +
+      '<div class="tgrid">' +
+        '<div class="tstat"><b>' + r.total.views + '</b><span>views</span></div>' +
+        '<div class="tstat"><b>' + r.byDoc.filter((d) => d.views > 0).length + '</b><span>documents opened</span></div>' +
+        '<div class="tstat"><b>' + r.byPortal.length + '</b><span>portals</span></div>' +
+      '</div>' +
+      '<div class="tsec"><span class="ulabel">By day</span>' + days + '</div>' +
+      '<div class="tsec"><span class="ulabel">By portal</span>' + portalRows + '</div>' +
+      // All-time, and it has to say so: referrers carry no date (ADR-023), so labelling them with
+      // the window above would be a wrong number rather than a narrow one.
+      '<div class="tsec"><span class="ulabel">Sources</span>' + refRows +
+        '<p class="dhint">All-time per portal &mdash; referrers carry no date, so the window above does not apply. ' +
+        'The linking host only, never the page it linked from.</p></div>' +
+      '<p class="dhint">Not live. These are the numbers from your last ' + sync + ' &mdash; the Worker cannot read ' +
+      'Analytics Engine itself, so nothing here updates on its own.</p>' +
+      '</div>';
+  }
+
   function renderMain() {
+    if (selected === TRAFFIC_VIEW) return renderTraffic();
     const p = PORTALS[selected];
     if (!p) { app.innerHTML = '<p class="empty">No portals yet. Publish a document to create one.</p>'; return; }
     const r = reach({ }, p.kind);
@@ -1057,6 +1206,32 @@ ${ICON_DEFS}
     } catch (e) { return ""; }
   }
 
+  /**
+   * Show the traffic panel. One GET /api/views/summary, cached until Refresh.
+   *
+   * Deliberately NOT a KV list() — that quota is separate and small (1000/day), and a panel that
+   * polled it would spend the operator's budget on a page they left open.
+   */
+  async function selectTraffic() {
+    selected = TRAFFIC_VIEW;
+    try { history.replaceState(null, "", "#" + encodeURIComponent(TRAFFIC_VIEW)); } catch (e) {}
+    renderNav();
+    renderMain();
+    if (TRAFFIC) return;
+    try {
+      TRAFFIC = await api("/api/views/summary?days=30");
+    } catch (e) {
+      // A deployment older than this console has no such route. Say which it is — "failed to load"
+      // sends someone looking at their network tab for a problem that is a version number.
+      app.innerHTML = '<div class="card"><div class="chead"><h2>Traffic</h2></div>' +
+        '<p class="empty">This deployment cannot serve view history yet.</p>' +
+        '<p class="dhint">Reading the stored summary arrived in 0.36.0. Upgrade with ' +
+        '<code class="cmd">pagevault upgrade</code>.</p></div>';
+      return;
+    }
+    if (selected === TRAFFIC_VIEW) renderMain();
+  }
+
   async function selectPortal(slug) {
     selected = slug;
     // Mirror the selection into the URL so a reload lands where you were, and a portal view can
@@ -1088,6 +1263,9 @@ ${ICON_DEFS}
   // one list per portal. It is wired to the explicit Refresh button only.
   async function refresh() {
     if (selected) delete DOCS[selected];
+    // Refresh is the ONLY thing that re-reads traffic. It is cached rather than polled: a console
+    // left open on this panel must not spend the operator's quota on a page nobody is watching.
+    TRAFFIC = null;
     await load();
   }
 
@@ -1117,6 +1295,13 @@ ${ICON_DEFS}
       // fragment (a reload or a pasted link), then today's default-portal fallback. An unknown
       // slug in the hash falls through rather than showing an empty portal.
       const fromHash = hashPortal();
+      // The traffic view is a legitimate place to have been and to link to, so it beats the
+      // portal fallbacks — a reload on #!traffic must not silently land you on a portal.
+      if (selected === TRAFFIC_VIEW || fromHash === TRAFFIC_VIEW) {
+        renderNav();
+        await selectTraffic();
+        return;
+      }
       const want = (selected && PORTALS[selected]) ? selected
         : (fromHash && PORTALS[fromHash]) ? fromHash
         : (PORTALS["default"] ? "default" : Object.keys(PORTALS)[0]);
@@ -1131,9 +1316,12 @@ ${ICON_DEFS}
     if (b) selectPortal(b.dataset.nav);
   });
 
+  document.getElementById("nav-traffic").addEventListener("click", () => { selectTraffic(); });
+
   // Someone edited the fragment, or followed a link to another portal in this same console.
   addEventListener("hashchange", () => {
     const s = hashPortal();
+    if (s === TRAFFIC_VIEW) { if (selected !== TRAFFIC_VIEW) selectTraffic(); return; }
     if (s && PORTALS[s] && s !== selected) selectPortal(s);
   });
 
@@ -1690,6 +1878,7 @@ const ICON_DEFS = `<svg class="sprite" aria-hidden="true"><defs>
   <symbol id="i-x" viewBox="0 0 24 24"><line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></symbol>
   <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
   <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
   <symbol id="i-signout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></symbol>
