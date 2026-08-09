@@ -96,7 +96,11 @@ and reaching those surfaces is the entire differentiator. See ADR-006.
 ## Conventions
 
 - TypeScript throughout. `vitest` + `@cloudflare/vitest-pool-workers`.
-- Node 22 (Wrangler 4 requires it).
+- Node 22 (Wrangler 4 requires it). **Run the node suites through `make`**, which
+  selects it. Under Node 20 the e2e file is silently *cancelled* — its ~37 tests
+  vanish from the count and the run still exits 0. That is not a hypothetical: a
+  green local run on a suite that never executed has shipped a broken command to
+  CI twice.
 - Tests earn their place. The security tests in `worker/test/auth.test.ts` are
   not optional — a bug there is an incident, not a bug.
 - No secrets committed. `.dev.vars` is gitignored; `.dev.vars.example` is not.
