@@ -539,7 +539,7 @@ export function formatReferrers({ days, sources }, c) {
  * rendering of "no sync has run": it reads as "nobody visited", which is the precise lie the
  * zero-versus-null rule exists to stop.
  */
-export function formatRollup(r, c) {
+export function formatRollup(r, c, { by = "doc" } = {}) {
   const dim = c?.dim ?? ((s) => s);
   const bold = c?.bold ?? ((s) => s);
 
@@ -570,36 +570,84 @@ export function formatRollup(r, c) {
     ].join("\n");
   }
 
-  const head = ["VIEWS", "DOCUMENT", "PORTAL", "LINK", "PUBLIC", "PORTAL", "LAST"];
-  const body = r.byDoc.map((d) => [
-    String(d.views),
-    truncate(d.title, 38),
-    d.portal,
-    String(d.surfaces.link),
-    String(d.surfaces.public),
-    String(d.surfaces.portal),
-    d.lastViewedAt ? String(d.lastViewedAt).slice(0, 16).replace("T", " ") : dim("—"),
-  ]);
+  // One table per breakdown (#162). `doc` is the default because "which document did they read" is
+  // the question people arrive with; the other three are the ones the old shape could not answer at
+  // all — it grouped by `(portal, doc, title, surface, viewer)`, so a document was many rows and
+  // there was no time axis anywhere.
+  const HEADS = {
+    doc: ["VIEWS", "DOCUMENT", "PORTAL", "LINK", "PUBLIC", "PORTAL", "LAST"],
+    portal: ["VIEWS", "PORTAL", "DOCS", "LINK", "PUBLIC", "PORTAL"],
+    day: ["DAY", "VIEWS", ""],
+    referrer: ["VIEWS", "SOURCE"],
+  };
+  const peak = Math.max(1, ...r.byDay.map((d) => d.views));
+  const ROWS = {
+    doc: () =>
+      r.byDoc.map((d) => [
+        String(d.views),
+        truncate(d.title, 38),
+        d.portal,
+        String(d.surfaces.link),
+        String(d.surfaces.public),
+        String(d.surfaces.portal),
+        d.lastViewedAt ? String(d.lastViewedAt).slice(0, 16).replace("T", " ") : dim("—"),
+      ]),
+    portal: () =>
+      r.byPortal.map((p) => [
+        String(p.views),
+        p.portal,
+        String(p.docs),
+        String(p.surfaces.link),
+        String(p.surfaces.public),
+        String(p.surfaces.portal),
+      ]),
+    // A bar per day, scaled to the busiest one. The point of `--by day` is the SHAPE — whether
+    // traffic is rising, or all of it landed the afternoon you sent the link — and a column of
+    // numbers makes the reader do that work themselves.
+    day: () =>
+      r.byDay.map((d) => [
+        d.granularity === "month" ? `${d.key}    ${dim("(month)")}` : d.key,
+        String(d.views),
+        dim("▇".repeat(Math.max(1, Math.round((d.views / peak) * 24)))),
+      ]),
+    referrer: () => r.byReferrer.map((s) => [String(s.views), s.host || dim("direct")]),
+  };
+
+  const head = HEADS[by];
+  const body = ROWS[by]();
 
   const widths = head.map((h, i) => Math.max(visible(h).length, ...body.map((row) => visible(row[i]).length)));
   const line = (cells) => cells.map((cell, i) => pad(cell, widths[i])).join("  ").trimEnd();
 
-  const referrers = r.byReferrer.length
-    ? [
-        "",
-        bold("SOURCES"),
-        // All-time, and it has to say so: referrers are stored per portal without a date
-        // (ADR-023 §5), so labelling them with the window above would be a wrong number.
-        ...r.byReferrer.slice(0, 8).map((s) => `  ${String(s.views).padStart(5)}  ${s.host || dim("direct")}`),
-        dim("  All-time per portal — referrers carry no date, so the window above does not apply."),
-      ]
-    : [];
+  // Under `--by doc` the sources ride along as a second block, because "what did they read" and
+  // "where did they come from" are usually one question. Every other breakdown gets one table.
+  const referrers =
+    by === "doc" && r.byReferrer.length
+      ? [
+          "",
+          bold("SOURCES"),
+          ...r.byReferrer.slice(0, 8).map((s) => `  ${String(s.views).padStart(5)}  ${s.host || dim("direct")}`),
+          dim("  All-time per portal — referrers carry no date, so the window above does not apply."),
+        ]
+      : [];
+
+  const emptyLine = {
+    doc: `Nothing was opened between ${window}.`,
+    portal: `No portal recorded traffic between ${window}.`,
+    day: `No day between ${window} recorded a view.`,
+    referrer: "No referrers recorded. Every visit arrived without one, or nothing has been opened.",
+  }[by];
 
   return [
-    ...(body.length ? [bold(line(head)), ...body.map(line)] : [dim(`Nothing was opened between ${window}.`)]),
+    ...(body.length ? [bold(line(head)), ...body.map(line)] : [dim(emptyLine)]),
     ...referrers,
     "",
-    dim(`${plural(r.total.views, "view")} across ${plural(r.byDoc.filter((d) => d.views > 0).length, "document")}, ${window}.`),
+    // 🔴 All-time, and it must say so even here: referrers are stored per portal with no date
+    // (ADR-023 §5), so a windowed heading over them would be a wrong number rather than a narrow
+    // one. This is the breakdown where the mistake would be easiest to make.
+    ...(by === "referrer"
+      ? [dim(`${plural(r.total.views, "view")} in the window; the sources above are ALL-TIME and ignore it.`)]
+      : [dim(`${plural(r.total.views, "view")} across ${plural(r.byDoc.filter((d) => d.views > 0).length, "document")}, ${window}.`)]),
     // Provenance, every time. A number whose source and staleness are unstated is the ADR-024
     // failure mode one domain over — it reads as current at exactly the moment it is not.
     dim(`Source: the stored summary, synced ${asOf}. Not live — run \`pagevault sync-views\` to refresh.`),

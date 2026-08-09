@@ -329,7 +329,7 @@ reports that there is no group, which is expected.
   ),
 
   views: H(
-    "Usage: pagevault views [--days 30] [--portal s] [--doc id] [--live] [--who] [--account id] [--json]",
+    "Usage: pagevault views [--by doc|portal|day|referrer] [--days 30] [--portal s] [--doc id] [--live] [--who] [--json]",
     `
 How much your documents were read. Reads the summary stored in your deployment — so it needs only
 your PageVault bearer, no Cloudflare token and no account id, and it works from any machine that
@@ -339,6 +339,8 @@ The summary ACCUMULATES. Analytics Engine keeps ~90 days; the summary keeps ever
 ever been synced into it, so this reaches further back than a live query can see. It is only as
 current as your last \`pagevault sync-views\` — the output says when that was, every time.
 
+  --by <what>      doc (default) · portal · day · referrer. One table each. \`day\` draws the shape,
+                   which is the question a column of numbers makes you answer yourself.
   --days <n>       window for the document counts. Default 30.
   --portal <slug>  one client.
   --doc <id>       one document. Referrers are dropped, not narrowed: they aggregate per portal

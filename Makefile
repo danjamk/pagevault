@@ -157,8 +157,18 @@ backup: ## Snapshot the KV namespace to a JSON file (OUT=path, KV=id optional)
 restore: ## Restore a backup into the KV namespace (make restore FILE=backup.json [KV=id] [FORCE=1])
 	@$(NVM) && node cli/bin/pagevault.mjs restore --file "$(FILE)" $(if $(KV),--kv $(KV),) $(if $(FORCE),--force,)
 
-views: ## Which documents your clients actually opened (DAYS=30 PORTAL=slug DOC=id)
-	@$(NVM) && node scripts/views.mjs $(if $(DAYS),--days $(DAYS),) $(if $(PORTAL),--portal $(PORTAL),) $(if $(DOC),--doc $(DOC),)
+views: ## How much your documents were read (DAYS=30 PORTAL=slug DOC=id BY=doc|portal|day|referrer LIVE=1 WHO=1)
+# 🔴 One engine, two front doors. This used to run `scripts/views.mjs`, a SECOND implementation
+# that queried Analytics Engine directly — so the two doors answered different questions from
+# different sources and could not both grow a flag (#166). The CLI auto-resolves this checkout's
+# deployment from the marker beside this Makefile, so calling it here is still zero-config.
+	@$(NVM) && node cli/bin/pagevault.mjs views $(if $(DAYS),--days $(DAYS),) $(if $(PORTAL),--portal $(PORTAL),) \
+		$(if $(DOC),--doc $(DOC),) $(if $(BY),--by $(BY),) $(if $(LIVE),--live,) $(if $(WHO),--who,)
+
+sync-views: ## Promote view counts into the deployment, where they last (DAYS=90 RESET=1)
+# The write half, and the reason `make views` alone is not enough: Analytics Engine is a ~90-day
+# belt and nothing moves data off it but this. Schedule it (ADR-023).
+	@$(NVM) && node cli/bin/pagevault.mjs sync-views $(if $(DAYS),--days $(DAYS),) $(if $(RESET),--reset,) $(if $(YES),--yes,)
 
 export: ## Walk away with everything: a zipped, browsable dump of your deployment (PORTAL=slug DRAFTS=1 NOZIP=1 OUT=dir)
 # Auto-targets THIS clone's deployment — URL from .pagevault.json, bearer from .env.local — so

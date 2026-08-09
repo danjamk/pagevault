@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatReferrers, formatViews, summarizeReferrers, summarizeViews } from "./lib/views.mjs";
+import { formatReferrers, formatRollup, formatViews, summarizeReferrers, summarizeViews } from "./lib/views.mjs";
 
 /**
  * The rendering half of `views`. The query half needs the network and is exercised by running
@@ -303,4 +303,120 @@ test("columns line up in the sources table when a cell carries ANSI", () => {
   const strip = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
   assert.equal(strip(first).indexOf("acme"), strip(head).indexOf("PORTAL"));
   assert.equal(strip(second).indexOf("acme"), strip(head).indexOf("PORTAL"));
+});
+
+// ---------------------------------------------------------------------------
+// The stored-summary rollup — the DEFAULT read since ADR-025 (#168, #162)
+// ---------------------------------------------------------------------------
+//
+// A formatter over a shape the Worker computes, so what is worth pinning here is what the shape
+// CANNOT honour. Each of these is a number that would be wrong if rendered without its caveat, and
+// wrong in the direction that reads as fact.
+
+const OK_RISK = { state: "ok", capturedThrough: "2026-08-09", uncapturedDays: 0, daysUntilLoss: null, lostDays: 0 };
+
+const rollupFixture = (over = {}) => ({
+  window: { from: "2026-08-01", to: "2026-08-09" },
+  syncedAt: "2026-08-09T12:00:00.000Z",
+  coverage: { from: "2026-05-11", to: "2026-08-09" },
+  risk: OK_RISK,
+  recording: true,
+  state: "ok",
+  total: { views: 12, surfaces: { link: 8, public: 1, portal: 3 }, owner: 1 },
+  byDoc: [
+    { id: "a", portal: "acme", title: "Q3 Review", views: 9, surfaces: { link: 8, public: 1, portal: 0 }, owner: null, lastViewedAt: "2026-08-08T14:02:00.000Z" },
+    { id: "b", portal: "globex", title: "Brief", views: 3, surfaces: { link: 0, public: 0, portal: 3 }, owner: 1, lastViewedAt: "2026-08-09T08:00:00.000Z" },
+    { id: "c", portal: "acme", title: "Never Opened", views: 0, surfaces: { link: 0, public: 0, portal: 0 }, owner: null, lastViewedAt: null },
+  ],
+  byPortal: [
+    { portal: "acme", views: 9, surfaces: { link: 8, public: 1, portal: 0 }, docs: 1 },
+    { portal: "globex", views: 3, surfaces: { link: 0, public: 0, portal: 3 }, docs: 1 },
+  ],
+  byDay: [
+    { key: "2026-04", granularity: "month", views: 30 },
+    { key: "2026-08-08", granularity: "day", views: 9 },
+    { key: "2026-08-09", granularity: "day", views: 3 },
+  ],
+  byReferrer: [{ host: "", views: 6 }, { host: "news.ycombinator.com", views: 4 }],
+  scope: { referrers: "all-time", monthlyBuckets: 1, portalIndex: "not-stored" },
+  ...over,
+});
+
+test("🔴 never-synced says no history captured, never an empty table", () => {
+  // An empty table reads as "nobody visited". Nothing has been measured at all.
+  const out = formatRollup(rollupFixture({ state: "never-synced", syncedAt: null, byDoc: [], byPortal: [], byDay: [], byReferrer: [] }), null);
+  assert.match(out, /No history captured yet/);
+  assert.match(out, /pagevault sync-views/);
+  assert.doesNotMatch(out, /VIEWS/, "no table at all — there is nothing to tabulate");
+});
+
+test("🔴 not recording is not zero views — and stored history stays true", () => {
+  const out = formatRollup(rollupFixture({ state: "not-recording" }), null);
+  assert.match(out, /not recording views/);
+  assert.match(out, /measured before it was turned off/);
+  assert.match(out, /upgrade --analytics/);
+});
+
+test("every breakdown states the source and when it was synced", () => {
+  // A number whose provenance is unstated reads as current at exactly the moment it is not.
+  for (const by of ["doc", "portal", "day", "referrer"]) {
+    const out = formatRollup(rollupFixture(), null, { by });
+    assert.match(out, /Source: the stored summary, synced 2026-08-09 12:00/, `--by ${by}`);
+    assert.match(out, /Not live/, `--by ${by}`);
+  }
+});
+
+test("--by doc is one row per document, with a measured zero kept visible", () => {
+  const out = formatRollup(rollupFixture(), null, { by: "doc" });
+  assert.match(out, /9 +Q3 Review +acme/);
+  // "They had the chance and never opened it" is the useful answer, not a row to hide.
+  assert.match(out, /0 +Never Opened/);
+});
+
+test("--by portal totals the client, not the document", () => {
+  const out = formatRollup(rollupFixture(), null, { by: "portal" });
+  assert.match(out, /^VIEWS +PORTAL +DOCS/m);
+  assert.match(out, /9 +acme +1/);
+  assert.doesNotMatch(out, /Q3 Review/, "the document table is a different question");
+});
+
+test("--by day draws the shape, and labels a compacted bucket as a month", () => {
+  const out = formatRollup(rollupFixture(), null, { by: "day" });
+  assert.match(out, /2026-08-08 +9 +▇/);
+  // A monthly bucket cannot be attributed to a day, and must not silently look like one.
+  assert.match(out, /2026-04 .*\(month\)/);
+  // Scaled to the busiest bar, so the biggest day is the longest.
+  const bars = out.split("\n").filter((l) => l.includes("▇")).map((l) => (l.match(/▇/g) ?? []).length);
+  assert.equal(Math.max(...bars), bars[0], "the month at 30 views is the peak");
+});
+
+test("🔴 --by referrer refuses to imply the window applies to it", () => {
+  // Referrers are stored per portal with no date (ADR-023 §5). A windowed heading over them would
+  // be a wrong number rather than a narrow one — and this is the breakdown where that is easiest.
+  const out = formatRollup(rollupFixture(), null, { by: "referrer" });
+  assert.match(out, /ALL-TIME and ignore it/);
+  assert.doesNotMatch(out, /2026-08-01 to 2026-08-09\./, "no windowed total beside all-time sources");
+  assert.match(out, /6 +direct/, "an absent referrer is 'direct' — measured, not missing");
+});
+
+test("the sources block rides along under --by doc only", () => {
+  assert.match(formatRollup(rollupFixture(), null, { by: "doc" }), /SOURCES/);
+  assert.doesNotMatch(formatRollup(rollupFixture(), null, { by: "portal" }), /SOURCES/);
+});
+
+test("monthly buckets are declared, so a missing day is not read as a gap", () => {
+  assert.match(formatRollup(rollupFixture(), null), /1 bucket older than 90 days are monthly/);
+});
+
+test("a sync-risk verdict is surfaced with the command that fixes it", () => {
+  const risk = { state: "urgent", capturedThrough: "2026-05-01", uncapturedDays: 12, daysUntilLoss: 3, lostDays: 0 };
+  const out = formatRollup(rollupFixture({ risk }), null);
+  assert.match(out, /12 days of history becomes unrecoverable in 3 days/);
+  assert.match(out, /pagevault sync-views/);
+});
+
+test("an empty breakdown says which one was empty, in its own words", () => {
+  const bare = rollupFixture({ state: "empty", total: { views: 0, surfaces: { link: 0, public: 0, portal: 0 }, owner: null }, byDoc: [], byPortal: [], byDay: [], byReferrer: [] });
+  assert.match(formatRollup(bare, null, { by: "day" }), /No day between .* recorded a view/);
+  assert.match(formatRollup(bare, null, { by: "referrer" }), /No referrers recorded/);
 });

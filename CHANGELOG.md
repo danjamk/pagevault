@@ -23,6 +23,19 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 - **`--live` and `--who` on `views`.** `--live` keeps the Analytics Engine query — what has happened
   since the last sync, and who opened it. `--who` implies it: the summary has never held an identity
   (ADR-019 §4), so there is nowhere else to get one.
+- **`views --by doc|portal|day|referrer`.** The old shape grouped by
+  `(portal, doc, title, surface, viewer)`, so one document was many rows, `VIEWS` was a per-row
+  number, and there was no time axis anywhere. Now a document is one row with one number, portals
+  and days total properly, and `--by day` draws the shape rather than making you read it out of a
+  column of numbers. ([#162](../../issues/162))
+- **`make sync-views`.** The write half was reachable from the CLI and not from `make`, so one front
+  door could not reach half the feature. ([#166](../../issues/166))
+
+### Removed
+- **`scripts/views.mjs`** — a second implementation of `views` that queried Analytics Engine
+  directly. `make views` now calls the CLI, so both front doors reach one engine and a flag added to
+  either reaches both. It stays zero-config: the CLI resolves this checkout's deployment from the
+  marker beside the Makefile. ([#166](../../issues/166))
 
 ### Changed
 - **The Worker still cannot read Analytics Engine, and gains no capability here.** ADR-019 decision

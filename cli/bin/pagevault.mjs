@@ -1036,6 +1036,15 @@ async function views(flags) {
   // has never held one (ADR-019 §4).
   const live = flags.live === true || flags.who === true;
   if (!live) {
+    // `--by` is summary-only. `--live` answers a different question — did THIS person open it — and
+    // breakdowns over it were deliberately left out (ADR-025 §3): `queryBuckets` exists, but nobody
+    // has asked for them, and offering the flag on both paths would imply the two produce the same
+    // numbers over the same history. They do not; the summary reaches further back.
+    const BY = ["doc", "portal", "day", "referrer"];
+    const by = flags.by ?? "doc";
+    if (!BY.includes(by)) {
+      throw new PvError(`--by ${by} is not a breakdown. Use one of: ${BY.join(", ")}.`);
+    }
     if (flags.account) {
       throw new PvError(
         "--account applies to the live Analytics Engine query, which is not what this reads.\n\n" +
@@ -1067,8 +1076,11 @@ async function views(flags) {
       }
       throw err;
     }
+    // `--json` carries the WHOLE rollup, not just the requested breakdown: every breakdown is
+    // already computed, and a consumer that has to re-request for a second view of the same window
+    // would be paying twice for one aggregation.
     if (flags.json) return out(JSON.stringify(rolled, null, 2));
-    return note(formatRollup(rolled, null));
+    return note(formatRollup(rolled, null, { by }));
   }
 
   const { loadContext, loadCloudToken } = await import("../lib/provision/context.mjs");
