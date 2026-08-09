@@ -34,7 +34,7 @@ documents carry across keeping their ids and filenames.
   --email you@example.com   the owner — the identity that can always see everything
   --rung 1|2|3            the escape hatch: 1 = workers.dev, 2 = your domain, 3 = Secured
   --cf-token <token>      your CLOUDFLARE API token, instead of saving it to .env.local first
-  --analytics             turn view tracking on (asked for interactively; off by default with --yes)
+  --analytics             turn view tracking on — rung 3 asks, rungs 1–2 default off
   --yes                   never prompt; flags and the environment supply every answer
 
 ⚠ --cf-token is the CLOUDFLARE credential — the one that provisions. \`login --token\` is the

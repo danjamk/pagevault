@@ -21,7 +21,8 @@ import {
   c, ok, info, warn, die, loadCloudToken, loadContext, saveContext, cfApi, cfErr, acct, shortId,
   fromEnv, writeEnvLocalVar, isInteractive, banner, releaseTag, BUNDLE_PATH, applyBundleMode,
   generatedConfigPath, templatePath, runHint, RUNNING_FROM_REPO, deployedBindings, analyticsChoice,
-  CONTEXT_FILE,
+  resolveAnalytics, stripAnalyticsBinding, bindsAnalytics, analyticsBecause, refuseAnalyticsDowngrade,
+  analyticsDashboard,
 } from "./context.mjs";
 import { parseArgs } from "../format.mjs";
 
@@ -30,37 +31,10 @@ const CONFIG_OUT = generatedConfigPath();
 const LEGACY_STATE = ".pagevault-provision.json";
 const GROUP_NAME = "pagevault-viewers";
 
-/**
- * Which way view tracking resolves on this run, where that came from, and whether it is a downgrade.
- *
- * Pure, and separated from the provisioning it drives so both directions of the transition can be
- * tested without a Cloudflare account (#187).
- *
- * @param {object} a
- * @param {boolean|undefined} a.flag      what the operator asked for on THIS run (--analytics, PAGEVAULT_ANALYTICS)
- * @param {boolean|undefined} a.declared  what `.pagevault.json` records
- * @param {boolean|null|undefined} a.live whether the deployed Worker binds ANALYTICS; null = unknown
- *
- * 🔴 `live` sits in the precedence chain, not merely in an assertion. That is the actual fix. The
- * bug was a re-deploy re-deciding an optional capability from silence every time, and no amount of
- * shouting about it later helps a schedule nobody is watching — whereas a deployment that already
- * answered the question keeps its answer for free, including in CI, without anyone editing a secret.
- *
- * The refusal is then only for a genuine contradiction: something here says off while the Worker
- * says on. That case cannot be resolved by guessing, so it stops. Note `value === undefined` implies
- * `live` was unknown — with a live reading there is always an answer — which is why the caller's
- * prompt-or-default can never itself become a downgrade.
- */
-export function resolveAnalytics({ flag, declared, live }) {
-  const known = live === true || live === false ? live : undefined;
-  const value = flag ?? declared ?? known;
-  const source =
-    flag !== undefined ? "flag" : declared !== undefined ? "declared" : known !== undefined ? "live" : "unset";
-  // Off is allowed to happen on purpose and no other way. `flag !== false` is the override: saying
-  // it out loud on this run is what distinguishes "stop recording" from "never mentioned it".
-  const downgrade = live === true && value === false && flag !== false;
-  return { value, source, downgrade };
-}
+// `resolveAnalytics` moved to context.mjs in #190 so rung 1–2 can reach it without importing this
+// module. Re-exported because it is part of this module's tested surface and the ADR-024 work
+// (#187) refers to it here.
+export { resolveAnalytics };
 
 export async function provisionAccess(opts = {}) {
   console.log(banner("provision Access", "(Secured)"));
@@ -215,7 +189,7 @@ export async function provisionAccess(opts = {}) {
   // lacks `Account Analytics Read`. Deploy-token scopes vary between accounts and forks, so
   // reading 403 as "off" would silently strip view tracking from a deployment where it works.
   // An answer we store beats a signal we cannot disambiguate.
-  const analyticsUrl = `https://dash.cloudflare.com/${account.id}/workers/analytics-engine`;
+  const analyticsUrl = analyticsDashboard(account.id);
 
   // What the LIVE Worker holds, which is a different question from what this checkout intends.
   // Production ran for eight releases with the binding absent because CI rebuilt an intent file
@@ -228,21 +202,7 @@ export async function provisionAccess(opts = {}) {
     live: liveAnalytics,
   });
 
-  if (downgrade) {
-    die("This deploy would turn view tracking OFF, and the live Worker currently has it on.", [
-      source === "declared"
-        ? `  ${CONTEXT_FILE} says off; the deployed Worker binds ANALYTICS. They disagree.`
-        : `  Nothing here asked for view tracking; the deployed Worker binds ANALYTICS.`,
-      "",
-      "  Dropping it is silent and one-way. The Worker stops recording, no error is raised, and the",
-      "  days between now and whenever someone notices are simply never in the data. Analytics Engine",
-      "  keeps ~90 days, so there is nothing to backfill from either.",
-      "",
-      "  Say which you mean:",
-      `    ${c.bold(runHint("deploy ANALYTICS=on", "upgrade --analytics"))}     keep recording`,
-      `    ${c.bold(runHint("deploy ANALYTICS=off", "upgrade --no-analytics"))}    stop recording, deliberately`,
-    ]);
-  }
+  if (downgrade) refuseAnalyticsDowngrade(source);
 
   if (analytics === undefined) {
     if (isInteractive()) {
@@ -282,13 +242,7 @@ export async function provisionAccess(opts = {}) {
 
   // Say where the answer came from. "off" printed with no provenance is what made the production
   // incident invisible: it read as a decision, and it was a silence.
-  const because = {
-    flag: "you asked for it on this run",
-    declared: `declared in ${CONTEXT_FILE}`,
-    live: "the deployed Worker already has it",
-    answer: "you just answered",
-    default: "nothing asked for it, and there is no deployment to ask",
-  }[source];
+  const because = analyticsBecause(source);
 
   if (analytics) {
     ok(`View tracking: on (Analytics Engine) ${c.dim(`— ${because}`)}`);
@@ -451,16 +405,11 @@ export async function provisionAccess(opts = {}) {
   // View tracking off → drop the binding entirely, so wrangler never asks the account for a
   // product it does not have. Matches the "a fork can delete this block" comment in the
   // template; this just does it for you.
-  if (!analytics) {
-    generated = generated.replace(
-      /\n *\/\/ View tracking \(#91\)[\s\S]*?"analytics_engine_datasets": \[[\s\S]*?\n *\],\n/,
-      "\n",
-    );
-  }
-  if (generated.includes("analytics_engine_datasets") !== !!analytics) {
+  if (!analytics) generated = stripAnalyticsBinding(generated);
+  if (bindsAnalytics(generated) !== !!analytics) {
     die(
       `Failed to ${analytics ? "keep" : "strip"} the Analytics Engine binding in ${CONFIG_OUT}.`,
-      "The template's view-tracking block changed shape — see provision.mjs.",
+      "The template's view-tracking block changed shape — see context.mjs.",
     );
   }
 

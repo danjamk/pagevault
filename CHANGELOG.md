@@ -7,6 +7,27 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **A first deploy no longer binds a capability nobody chose.** Rungs 1 and 2 wrote their Worker
+  config from the committed template and never touched the Analytics Engine block, so every
+  publish-only deploy bound `ANALYTICS` whether or not the account had Analytics Engine enabled.
+  Wrangler refuses the *whole* deploy with error 10089 when the binding is present and the product
+  is off — and rung 1 is the fork's on-ramp, so `pagevault init` on a fresh account is exactly where
+  that landed. All three rungs now resolve view tracking through one function and strip the binding
+  through one more. ([#190](../../issues/190))
+- **The 10089 hint names a command that exists at the rung you are on.** It pointed at
+  `provision ANALYTICS=off` / `init`, which is rung 3 only — so where the error actually fired there
+  was nothing to run. It now names `deploy ANALYTICS=off` / `upgrade --no-analytics`, which reach
+  every rung.
+
+### Added
+- **`--analytics` / `--no-analytics` reach rungs 1 and 2.** They previously warned that the answer
+  had nowhere to go and bound it regardless. `PAGEVAULT_ANALYTICS` and `ANALYTICS=on|off` reach them
+  too, so a publish-only deployment can turn view tracking on without climbing to rung 3.
+- **ADR-024's protection extends to every rung.** A rung 1–2 deployment that already binds
+  `ANALYTICS` keeps it across a re-deploy that says nothing, and an unreadable deployment can never
+  strip it. The refusal on a genuine contradiction is the same one, shared rather than copied.
+
 ## [0.35.2] — 2026-08-09
 
 A deploy asks the deployment what it already has, instead of deciding from silence.

@@ -14,7 +14,7 @@ import { pathToFileURL } from "node:url";
 import {
   c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, isInteractive, cfApi, cfAccounts, cfErr, slug,
   writeEnvLocalVar, fromEnv, acct, shortId, banner, chooseBearer, generatedConfigPath, RUNNING_FROM_REPO, runHint,
-  statePath, CONTEXT_FILE, restoreHint, analyticsChoice,
+  statePath, CONTEXT_FILE, restoreHint, analyticsChoice, analyticsDashboard,
 } from "./context.mjs";
 import { parseArgs } from "../format.mjs";
 import { provisionAccess } from "./provision.mjs";
@@ -174,21 +174,15 @@ export async function deploy(opts = {}) {
   // catch there rewrites everything into "Config generation failed", which would bury it.
   const analytics = analyticsChoice(opts.flags ?? {});
 
-  // Only rung 3 generates the config through provisioning, so below it the answer has nowhere to
-  // go. Say that rather than accepting the flag and doing nothing with it — a setting that reads as
-  // applied and isn't is the entire complaint behind #187, and it would be a poor look to introduce
-  // a fresh instance of it in the same change. (Rung 1–2 binding it regardless is #190.)
-  if (ctx.rung < 3 && analytics !== undefined) {
-    warn(`View tracking is not configurable below rung 3 — a rung-${ctx.rung} deploy binds it regardless.`);
-  }
-
   info(ctx.rung >= 3 ? "Provisioning Access (rung 3)…" : "Writing the Tier-0 config…");
   if (bundle) info("Bundle mode: deploying the prebuilt Worker (no_bundle).");
   try {
     // In-process (was `execSync node scripts/{provision,tier0}.mjs`): same cwd and same
     // process.env — CLOUDFLARE_API_TOKEN is already loaded — so the generated config is identical.
+    // Every rung takes the answer now: rung 1–2 used to bind ANALYTICS regardless and warn that
+    // the flag had nowhere to go, which made a fresh account's first deploy fail (#190).
     if (ctx.rung >= 3) await provisionAccess({ bundle, analytics });
-    else await writeTier0Config({ bundle });
+    else await writeTier0Config({ bundle, analytics });
   } catch (err) {
     die("Config generation failed — see the output above.");
   }
@@ -208,14 +202,18 @@ export async function deploy(opts = {}) {
       die("This account still has no workers.dev subdomain.",
         `Odd — the step above should have registered one. Re-run \`${runHint("deploy", "upgrade")}\`.`);
     }
-    // 10089 — the ANALYTICS binding is in the config but Analytics Engine is off on the
-    // account. Provisioning asks before adding the binding, so reaching here means it was
-    // turned back off, or the config was hand-edited. Either way the fix is two options, not
-    // a Cloudflare error code.
+    // 10089 — the ANALYTICS binding is in the config but Analytics Engine is off on the account.
+    // Every rung now asks before adding the binding, so reaching here means the answer was on and
+    // the product is not, or the config was hand-edited. Either way the fix is two options, not a
+    // Cloudflare error code.
+    //
+    // 🔴 The hint must name a command that exists at the rung the operator is on. It used to say
+    // `provision ANALYTICS=off` / `init`, which is rung 3 only — so at rung 1–2, where this fired
+    // most (#190), it pointed at nothing runnable. `deploy` / `upgrade` reach every rung.
     if (/10089/.test(output) || /enable Analytics Engine/i.test(output)) {
       die(
         "Analytics Engine is not enabled on this account, but the Worker config binds it.",
-        `Enable it at https://dash.cloudflare.com/${ctx.accountId ?? ""}/workers/analytics-engine and re-run, or drop view tracking with \`${runHint("provision ANALYTICS=off", "init")}\`.`,
+        `Enable it at ${analyticsDashboard(ctx.accountId)} and re-run, or drop view tracking with \`${runHint("deploy ANALYTICS=off", "upgrade --no-analytics")}\`.`,
       );
     }
     die("Deploy failed — see wrangler's output above.");
