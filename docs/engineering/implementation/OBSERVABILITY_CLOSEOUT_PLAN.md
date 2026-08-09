@@ -17,6 +17,14 @@ So `views:summary` in KV now carries, per document, sparse daily buckets with a
 surface split, an owner/member split, and a last-view time — plus a coverage
 window and referrer hosts per portal.
 
+**Half the operating model is done too, and the open issues do not say so.** 0.35.0
+promoted the sync out of a flag into `pagevault sync-views`, rewrote the wording
+that read as advice against scheduling, and gave production a daily scheduled
+Action. #166 is still open and its task list still describes the world before
+that, because an issue body is written once and the work moves. Check the shipped
+CLI and the CHANGELOG before starting anything here — this plan's first draft did
+not, and proposed re-deciding a settled question.
+
 What remains is presentation and plumbing, not measurement.
 
 ## The decision that shapes the rest
@@ -46,20 +54,17 @@ pagevault sync-views           # the write that rescues history before it ages o
 `--who` implies `--live`, because identities exist nowhere else (ADR-019
 decision 4).
 
-**And `--sync` splits out.** #150 opened on the observation that `views` and
-`views --sync` "read as one command with a flag; they behave like two different
-things with different prerequisites." ADR-023 sharpened it: `views` is a
-read, `views --sync` is the write that rescues data before Analytics Engine's
-90-day retention takes it permanently. A flag makes the consequential act look
-optional. `sync-access` is the precedent — an operator command that reconciles
-against an external system on a schedule — and `pagevault sync-views` reads
-correctly in a crontab, which is where it belongs after ADR-023.
+**The command split already happened.** `pagevault sync-views` shipped in 0.35.0
+against #166 — the write half promoted out of a flag, symmetric with
+`sync-access`, and reading correctly in a crontab. `views --sync` keeps working,
+deliberately and permanently, so there is no deprecation to run. The "no cron,
+deliberately" wording is already rewritten too. Only the read side is still
+undecided, and this plan originally claimed otherwise — that was written from
+#166's body, which predates the work that closed half of it.
 
-The cost is a user-facing break on an installed command. It gets its own issue
-and its own deprecation window; it is not absorbed into #166.
-
-This wants an ADR — call it ADR-025, *the summary is the default read* — written
-before the code, because it decides #162, #166 and #168 together.
+So the decision is one thing, not two: **which source `views` reads by default.**
+It wants an ADR — call it ADR-025, *the summary is the default read* — written
+before the code, because it decides #162, #164, #163 and #168 together.
 
 ### What `--live` keeps
 
@@ -81,8 +86,6 @@ Independent of everything below. Ships on its own.
       10089 hint names a command that exists at the rung the operator is on.
       This is a stranger's `pagevault init`, so it outranks presentation work.
 - [ ] **ADR-025** — the decision above.
-- [ ] **A new issue for the command split** — `views --sync` → `sync-views`, with
-      the deprecation path. Blocks the `--sync` half of #166.
 
 ## Phase 1 — one rollup, three surfaces
 
@@ -138,13 +141,23 @@ Dashboards either. MCP's questions are answerable from the CLI in the meantime.
 
 ## Phase 2 — the operating model
 
-- [ ] **#166**, minus the command-shape decision now settled above and minus the
-      rename now living in its own issue. What is left: `make views` parity with
-      the CLI flags; rewriting the "there is no cron, deliberately" wording, which
-      reads as advice against scheduling when it actually describes why the
-      *Worker* cannot sync itself; documenting the cadence and the 90-day
-      invariant; and a short scheduling page in `docs/setup/` covering launchd,
-      cron/systemd, and a scheduled GitHub Action with one working snippet each.
+**#166's task list is stale — re-check it against the shipped CLI before working
+it.** 0.35.0 closed the command-shape decision, shipped `sync-views`, rewrote the
+"no cron, deliberately" wording, and documented the cadence and the 90-day
+invariant in `sync-views --help`. What is actually left, verified against the
+tree:
+
+- [ ] **`make` reaches the sync.** `make views` runs `scripts/views.mjs` with
+      `DAYS`/`PORTAL`/`DOC` and has no sync path at all, and no sync target exists
+      beside it. Both front doors are supposed to reach one engine, and here one of
+      them cannot reach half of it. (Shape is a call: a target of its own, matching
+      the CLI, or a variable on the existing one.)
+- [ ] **A scheduling page in `docs/setup/`** — launchd, cron/systemd timer, and a
+      scheduled GitHub Action, one working snippet each and a sentence on picking
+      between them. Recommendations, not a survey. Most operators install from npm
+      and have no CI, so the Action production uses cannot be the general answer.
+      `docs/setup/` has no such page today.
+- [ ] Fold in whatever `--by` flags #162 adds, so the two front doors stay level.
 
 ## Phase 3 — the landing page
 
