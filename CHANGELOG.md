@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.35.3] — 2026-08-09
+
+A first deploy on a fresh account stops failing on a feature nobody asked for.
+
 ### Fixed
 - **A first deploy no longer binds a capability nobody chose.** Rungs 1 and 2 wrote their Worker
   config from the committed template and never touched the Analytics Engine block, so every
@@ -1568,7 +1572,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.35.2...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.35.3...HEAD
+[0.35.3]: https://github.com/danjamk/pagevault/compare/v0.35.2...v0.35.3
 [0.35.2]: https://github.com/danjamk/pagevault/compare/v0.35.1...v0.35.2
 [0.35.1]: https://github.com/danjamk/pagevault/compare/v0.35.0...v0.35.1
 [0.35.0]: https://github.com/danjamk/pagevault/compare/v0.34.0...v0.35.0
