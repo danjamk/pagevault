@@ -84,21 +84,21 @@ describe("statsFor — the three answers that must not collapse into each other"
   const summary = parseViewSummary(payload("abc", { "2026-07-28": { link: 4, t: "09:00:00" } }));
 
   it("reports the counts for a measured document, summed over its buckets", () => {
-    expect(statsFor(summary, doc)).toMatchObject({ views: 4, surfaces: { link: 4, public: 0, portal: 0 } });
+    expect(statsFor(summary, doc, true)).toMatchObject({ views: 4, surfaces: { link: 4, public: 0, portal: 0 } });
   });
 
   it("reports null — never zero — when no sync has ever run", () => {
-    expect(statsFor(null, doc)).toBeNull();
+    expect(statsFor(null, doc, true)).toBeNull();
   });
 
   it("reports null — never zero — for a document published since the last sync", () => {
     // The costly bug: a document published this morning is not in a summary taken yesterday, so
     // a `0` here would tell the operator the client ignored something that did not yet exist.
-    expect(statsFor(summary, { id: "new", createdAt: "2026-07-30T00:00:00.000Z" })).toBeNull();
+    expect(statsFor(summary, { id: "new", createdAt: "2026-07-30T00:00:00.000Z" }, true)).toBeNull();
   });
 
   it("reports zero for a measured document nobody opened — the answer worth having", () => {
-    expect(statsFor(summary, { id: "quiet", createdAt: "2026-01-01T00:00:00.000Z" })).toEqual({
+    expect(statsFor(summary, { id: "quiet", createdAt: "2026-01-01T00:00:00.000Z" }, true)).toEqual({
       views: 0,
       lastViewedAt: null,
       surfaces: { link: 0, public: 0, portal: 0 },
@@ -108,14 +108,14 @@ describe("statsFor — the three answers that must not collapse into each other"
   it("does not mistake sub-second ISO formatting for a later publish", () => {
     // `2026-07-29T12:00:00.000Z` vs `2026-07-29T12:00:00Z` — the same instant, but "." < "Z", so
     // a raw string compare puts the millisecond form first and would drop the document's metrics.
-    expect(statsFor({ ...summary, syncedAt: "2026-07-29T12:00:00Z" }, { id: "abc", createdAt: SYNCED })).not.toBeNull();
+    expect(statsFor({ ...summary, syncedAt: "2026-07-29T12:00:00Z" }, { id: "abc", createdAt: SYNCED }, true)).not.toBeNull();
   });
 
   it("rebuilds lastViewedAt from the newest bucket's date and time", () => {
     const s = parseViewSummary(
       payload("abc", { "2026-06-01": { link: 1, t: "23:59:59" }, "2026-07-28": { link: 1, t: "09:11:40" } }),
     );
-    expect(statsFor(s, doc)?.lastViewedAt).toBe("2026-07-28T09:11:40.000Z");
+    expect(statsFor(s, doc, true)?.lastViewedAt).toBe("2026-07-28T09:11:40.000Z");
   });
 
   it("degrades a compacted bucket to the start of its month rather than guessing a day", () => {
@@ -123,7 +123,7 @@ describe("statsFor — the three answers that must not collapse into each other"
     // the same size of guess pointed the other way — and that one claims a document was read more
     // recently than it was.
     const s = parseViewSummary(payload("abc", { "2026-03": { link: 5 } }));
-    expect(statsFor(s, doc)?.lastViewedAt).toBe("2026-03-01T00:00:00.000Z");
+    expect(statsFor(s, doc, true)?.lastViewedAt).toBe("2026-03-01T00:00:00.000Z");
   });
 
   it("🔴 discards a v1 summary rather than reading its totals as a timeline", async () => {
@@ -159,7 +159,7 @@ describe("🔴 mergeSummary — a sync may add history; it may not remove it", (
     const second = mergeSummary(first, summaryOf(june, { a: { "2026-06-09": { pub: 5 } } }));
 
     expect(Object.keys(second.docs["a"]!).sort()).toEqual(["2026-05-04", "2026-06-09"]);
-    expect(statsFor(second, { id: "a", createdAt: "2026-01-01T00:00:00.000Z" })?.views).toBe(8);
+    expect(statsFor(second, { id: "a", createdAt: "2026-01-01T00:00:00.000Z" }, true)?.views).toBe(8);
   });
 
   it("🔴 a wider window does not erase a narrower one's tail outside it", () => {
@@ -302,7 +302,7 @@ describe("compact — daily past 90 days becomes monthly", () => {
   it("keeps totals identical across the boundary", () => {
     const doc = { id: "a", createdAt: "2020-01-01T00:00:00.000Z" };
     const s = summary({ a: { "2026-01-04": { link: 2 }, "2026-07-28": { link: 3 } } });
-    expect(statsFor(compact(s, now), doc)?.views).toBe(statsFor(s, doc)?.views);
+    expect(statsFor(compact(s, now), doc, true)?.views).toBe(statsFor(s, doc, true)?.views);
   });
 });
 
@@ -508,30 +508,30 @@ describe("🔴 syncRisk — alarm on risk, not on age (ADR-023 §9)", () => {
   it("says nothing has been captured, not that nothing is at risk", () => {
     // "0 days at risk" reads as "you are up to date", which is the opposite of true: everything is
     // uncaptured and none of it is safe.
-    expect(syncRisk(null, NOW)).toMatchObject({ state: "never", capturedThrough: null, daysUntilLoss: null });
+    expect(syncRisk(null, NOW, true)).toMatchObject({ state: "never", capturedThrough: null, daysUntilLoss: null });
   });
 
   it("is quiet when captured through today", () => {
-    expect(syncRisk(at("2026-08-07"), NOW)).toMatchObject({ state: "ok", uncapturedDays: 0, daysUntilLoss: null });
+    expect(syncRisk(at("2026-08-07"), NOW, true)).toMatchObject({ state: "ok", uncapturedDays: 0, daysUntilLoss: null });
   });
 
   it("counts the uncaptured days and the runway on the oldest of them", () => {
     // Captured through the 1st: the 2nd through the 7th are waiting — six days — and the 2nd is
     // the one with the least runway.
-    expect(syncRisk(at("2026-08-01"), NOW)).toMatchObject({ state: "ok", uncapturedDays: 6, daysUntilLoss: 85, lostDays: 0 });
+    expect(syncRisk(at("2026-08-01"), NOW, true)).toMatchObject({ state: "ok", uncapturedDays: 6, daysUntilLoss: 85, lostDays: 0 });
   });
 
   it("warns with a month of runway left, and escalates inside ten days", () => {
     // 90/3 and 90/9 — fractions of the horizon rather than fixed counts, so the thresholds move
     // with it instead of quietly meaning something different if retention ever changes.
-    expect(syncRisk(at("2026-05-28"), NOW)).toMatchObject({ state: "warn", daysUntilLoss: 20 });
-    expect(syncRisk(at("2026-05-13"), NOW)).toMatchObject({ state: "urgent", daysUntilLoss: 5 });
+    expect(syncRisk(at("2026-05-28"), NOW, true)).toMatchObject({ state: "warn", daysUntilLoss: 20 });
+    expect(syncRisk(at("2026-05-13"), NOW, true)).toMatchObject({ state: "urgent", daysUntilLoss: 5 });
   });
 
   it("🔴 reports what is already gone, and that it is still going", () => {
     // Captured through 2026-04-01, so 2026-04-02 is the oldest uncaptured day — 127 days before
     // today, 37 days past the horizon. Those 37 days are not coming back.
-    const risk = syncRisk(at("2026-04-01"), NOW);
+    const risk = syncRisk(at("2026-04-01"), NOW, true);
     expect(risk.state).toBe("losing");
     expect(risk.lostDays).toBe(37);
     expect(risk.daysUntilLoss).toBe(-37);
@@ -539,7 +539,7 @@ describe("🔴 syncRisk — alarm on risk, not on age (ADR-023 §9)", () => {
 
   it("treats the horizon itself as the last safe day, not the first lost one", () => {
     // Exactly 90 days of runway remaining is still zero days lost.
-    const risk = syncRisk(at("2026-05-08"), NOW);
+    const risk = syncRisk(at("2026-05-08"), NOW, true);
     expect(risk.lostDays).toBe(0);
     expect(risk.daysUntilLoss).toBe(0);
     expect(risk.state).toBe("urgent");
@@ -550,5 +550,83 @@ describe("🔴 syncRisk — alarm on risk, not on age (ADR-023 §9)", () => {
     // tool need one horizon calculation, not three that can disagree about when history goes.
     const list = await listDocs();
     expect((list as unknown as { viewsRisk: { state: string } }).viewsRisk.state).toBe("never");
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("🔴 a deployment that records nothing is not a deployment nobody visited (#185)", () => {
+  const NOW = "2026-08-07T12:00:00.000Z";
+  const doc = { id: "abc", createdAt: "2026-01-01T00:00:00.000Z" };
+  const synced = parseViewSummary(payload("abc", { "2026-07-28": { link: 4, t: "09:00:00" } }));
+
+  /**
+   * The four answers, as a table. Three of them existed; the fourth is why this suite is here.
+   *
+   * Production ran with no Analytics Engine binding and reported `views: 0` on twenty documents, a
+   * successful sync of nothing, and zero days of history at risk. Every surface agreed with every
+   * other, which is exactly what made it convincing.
+   */
+  it("🔴 reports nothing — never zero — for an unmeasured document when not recording", () => {
+    // `0 views` means "they had the chance and never opened it". A deployment with no binding
+    // cannot make that claim about anything.
+    expect(statsFor(synced, { id: "unseen", createdAt: "2026-01-01T00:00:00.000Z" }, false)).toBeNull();
+    // Recording, same document, same summary: the zeros are a measurement and stay.
+    expect(statsFor(synced, { id: "unseen", createdAt: "2026-01-01T00:00:00.000Z" }, true)).toEqual({
+      views: 0,
+      lastViewedAt: null,
+      surfaces: { link: 0, public: 0, portal: 0 },
+    });
+  });
+
+  it("🔴 keeps real history from when the binding WAS there", () => {
+    // Turning tracking off does not make what was already measured untrue — it stops it accruing.
+    // Dropping it would destroy data to fix a display bug.
+    expect(statsFor(synced, doc, false)).toMatchObject({ views: 4 });
+  });
+
+  it("🔴 the staleness alarm says off, not ok", () => {
+    // `ok` with zero days at risk is technically true and completely misleading: there is no
+    // history at risk because there is no history, and there will not be.
+    const risk = syncRisk(synced, NOW, false);
+    expect(risk.state).toBe("off");
+    expect(risk.lostDays).toBe(0);
+    expect(risk.daysUntilLoss).toBeNull();
+  });
+
+  it("still names what was captured before it was turned off", () => {
+    expect(syncRisk(synced, NOW, false).capturedThrough).toBe(synced.coverage.to);
+  });
+
+  it("says off even when no sync has ever run, because that is the more useful fact", () => {
+    // "never synced" invites you to run a sync. On a deployment that records nothing, a sync would
+    // succeed and find nothing — which is how this went unnoticed.
+    expect(syncRisk(null, NOW, false).state).toBe("off");
+  });
+
+  it("outranks every risk state, including one that would otherwise be losing", () => {
+    const ancient = parseViewSummary({
+      v: SUMMARY_VERSION,
+      syncedAt: NOW,
+      coverage: { from: "2026-01-01", to: "2026-04-01" },
+      docs: {},
+      portals: {},
+    });
+    expect(syncRisk(ancient, NOW, true).state).toBe("losing");
+    expect(syncRisk(ancient, NOW, false).state).toBe("off");
+  });
+
+  it("🔴 the listing says so, rather than serving twenty zeros", async () => {
+    // The end-to-end shape of the production incident: documents exist, a sync ran, and the
+    // deployment cannot record. `env` in this suite has the binding, so it is removed here.
+    const id = await publishOld("Looks Fine, Records Nothing");
+    await postSummary(payload(id, {}));
+
+    const { withStats: ws, syncRisk: risk } = await import("../src/views.js");
+    const summary = await env.PAGEVAULT.get<ViewSummary>("views:summary", "json");
+    const doc = { id, createdAt: "2026-01-01T00:00:00.000Z", title: "x" };
+
+    expect(ws(doc, summary, false)).not.toHaveProperty("views");
+    expect(risk(summary, NOW, false).state).toBe("off");
   });
 });
