@@ -150,10 +150,11 @@ const URGENT_AT = ANALYTICS_RETENTION_DAYS / 9; // 10
 
 export interface SyncRisk {
   /**
+   * `off` — this deployment records nothing, so there is no history and never will be ·
    * `never` — no sync has run · `ok` — plenty of runway · `warn`, `urgent` — the oldest uncaptured
    * day is approaching the horizon · `losing` — history has already gone and is still going.
    */
-  state: "never" | "ok" | "warn" | "urgent" | "losing";
+  state: "off" | "never" | "ok" | "warn" | "urgent" | "losing";
   /** The last day the summary has captured, or null when nothing has. */
   capturedThrough: string | null;
   /** Days of views sitting in Analytics Engine that no sync has promoted yet. */
@@ -182,8 +183,26 @@ export interface SyncRisk {
  * (ADR-019 decision 1) — a Worker cron is structurally impossible here, not merely unwired. Making
  * the miss loud is the only move available.
  */
-export function syncRisk(summary: ViewSummary | null, now: string): SyncRisk {
+export function syncRisk(summary: ViewSummary | null, now: string, recording: boolean): SyncRisk {
   const today = dayKey(Date.parse(now));
+
+  // 🔴 Not recording is its own answer, and it outranks every other one (#185).
+  //
+  // Without this the arithmetic below reports `ok` with zero days at risk — which is *technically*
+  // true and completely misleading: there is no history at risk because there is no history, and
+  // there will not be. A deployment with the binding absent reported twenty documents at `views: 0`,
+  // a successful sync of nothing, and a green alarm. Every surface agreed, which is what made it
+  // convincing. `capturedThrough` still comes from the summary: a deployment that recorded before
+  // and was later turned off has real history, and that history is not in question.
+  if (!recording) {
+    return {
+      state: "off",
+      capturedThrough: summary?.coverage?.to ?? null,
+      uncapturedDays: 0,
+      daysUntilLoss: null,
+      lostDays: 0,
+    };
+  }
 
   // Never synced is its own answer, not zero days at risk. Zero would read as "you are up to
   // date", which is the opposite of true — everything is uncaptured, and none of it is safe.
@@ -404,8 +423,13 @@ function dayKey(ms: number): string {
 /**
  * The metrics to report for one document, or `null` when there is nothing honest to say.
  *
- * Three answers, and collapsing any two of them is the bug this function exists to prevent:
+ * Four answers, and collapsing any two of them is the bug this function exists to prevent:
  *
+ * - **Not recording at all** → `null`. The deployment has no Analytics Engine binding, so it cannot
+ *   have measured anything. This one was missing until #185, and its absence was expensive: a
+ *   production deployment reported `views: 0` on twenty documents while recording nothing, and the
+ *   staleness alarm called it healthy. A document that DOES have stored history still reports it —
+ *   that data was measured when the binding was there, and it is still true.
  * - **No summary at all** → `null`. No sync has ever run.
  * - **Published since the sync** → `null`. The document was not in the measured window, so it was
  *   never counted. Reporting `0` here would say "the client never opened it" about a document
@@ -416,6 +440,10 @@ function dayKey(ms: number): string {
  * A `0` that means "not measured" fails the same way a seat count of `0` that means "could not
  * ask" does — it reads as fact at precisely the moment it is not one.
  *
+ * `recording` is required rather than defaulted, so adding a call site is a decision instead of an
+ * omission — a default of `true` would reintroduce exactly this bug the next time someone adds a
+ * reader.
+ *
  * v2 changed where the numbers come from, not what they say: totals are summed over the buckets
  * rather than stored. The trend the buckets now hold reaches its readers in #162 and #163, and this
  * function deliberately keeps returning what it always did until then.
@@ -423,6 +451,7 @@ function dayKey(ms: number): string {
 export function statsFor(
   summary: ViewSummary | null,
   doc: { id: string; createdAt: string },
+  recording: boolean,
 ): ViewStats | null {
   if (!summary) return null;
   // Parsed rather than compared as strings: both are ISO-8601, but `…:00.000Z` and `…:00Z` sort
@@ -430,7 +459,12 @@ export function statsFor(
   if (Date.parse(doc.createdAt) > Date.parse(summary.syncedAt)) return null;
 
   const history = summary.docs[doc.id];
-  if (!history) return { views: 0, lastViewedAt: null, surfaces: { link: 0, public: 0, portal: 0 } };
+  // The zeros are a measurement — "they had the chance and never opened it" — and a deployment that
+  // records nothing has not measured anything. Stored history is different: it was measured, and it
+  // is reported below whether or not the binding is there now.
+  if (!history) {
+    return recording ? { views: 0, lastViewedAt: null, surfaces: { link: 0, public: 0, portal: 0 } } : null;
+  }
 
   const surfaces = { link: 0, public: 0, portal: 0 };
   let lastKey = "";
@@ -471,8 +505,9 @@ function lastViewed(key: string, time: string): string | null {
 export function withStats<T extends { id: string; createdAt: string }>(
   doc: T,
   summary: ViewSummary | null,
+  recording: boolean,
 ): T | (T & ViewStats) {
-  const stats = statsFor(summary, doc);
+  const stats = statsFor(summary, doc, recording);
   return stats ? { ...doc, ...stats } : doc;
 }
 

@@ -174,6 +174,19 @@ function reportSyncRisk(risk) {
   const fix = "pagevault sync-views";
   const days = (n) => `${n} day${n === 1 ? "" : "s"}`;
 
+  // 🔴 Outranks every other state (#185). A deployment with no Analytics Engine binding records
+  // nothing, so there is no history at risk — and reporting that as "ok" is how a production
+  // deployment showed twenty documents at zero views with a green alarm for months.
+  if (risk.state === "off") {
+    warn("View tracking is OFF on this deployment — nothing is being recorded.");
+    console.log(`  ${c.dim("Documents report no view counts because none exist, not because nobody opened them.")}`);
+    console.log(`  ${c.dim("Enable Analytics Engine on the account, then redeploy with")} ${c.bold("ANALYTICS=on")}${c.dim(".")}`);
+    if (risk.capturedThrough) {
+      console.log(`  ${c.dim(`Existing history through ${risk.capturedThrough} is intact — it simply stops accruing.`)}`);
+    }
+    return;
+  }
+
   if (risk.state === "never") {
     // Not "0 days at risk" — that reads as "up to date", which is the opposite of true.
     warn("No view history captured yet.");

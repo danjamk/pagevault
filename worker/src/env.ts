@@ -128,3 +128,18 @@ export interface Env {
 export function accessEnabled(env: Env): boolean {
   return Boolean(env.CF_TEAM_NAME?.trim()) && Boolean(env.CF_ACCESS_AUD_DOCS?.trim());
 }
+
+/**
+ * Is this deployment recording views at all?
+ *
+ * The same condition `recordView` branches on, exported so every reader asks the binding rather
+ * than inferring from an empty result — because "nothing recorded" and "nothing to record with"
+ * produce identical data and mean opposite things (#185).
+ *
+ * A deployment with this off reported `views: 0` on twenty documents, synced successfully, and
+ * showed zero days of history at risk. Every number was a statement the deployment could not
+ * support, and every surface agreed with the others, which is what made it convincing.
+ */
+export function analyticsEnabled(env: Env): boolean {
+  return Boolean(env.ANALYTICS);
+}
