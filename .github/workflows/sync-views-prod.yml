@@ -20,6 +20,18 @@ name: Sync production view metrics
 # Worker would have nothing to call. The schedule has to live operator-side, and for a deployment
 # CI deploys, "operator-side" is here.
 #
+# WHY ITS OWN ENVIRONMENT
+#
+# `production` carries a required-reviewer gate, which is right for deploys — deploy-prod.yml says
+# "you click Run when you mean it" and means it. It is wrong for a job whose entire value is running
+# unattended: a scheduled run would sit waiting for an approval nobody is awake to give, every night.
+#
+# Splitting is better than loosening `production` anyway, because this job needs a strictly NARROWER
+# credential than a deploy. It reads counts. It does not deploy, destroy, or touch KV — so it gets a
+# Cloudflare token scoped to `Account Analytics · Read` and nothing else, under its own secret name
+# so the two can never be confused for each other. That is ADR-002's blast-radius argument about the
+# Worker, pointed at CI: an unattended nightly job should hold the least credential that works.
+#
 # WHY NOT ON A LAPTOP
 #
 # Same reason as deploy-prod.yml (#38): production's Cloudflare credential is not on a developer's
@@ -46,8 +58,9 @@ concurrency:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    # Scopes the secrets to THIS job only, exactly as deploy-prod.yml does.
-    environment: production
+    # `ops`, NOT `production` — see WHY ITS OWN ENVIRONMENT above. This one must have no reviewer
+    # gate, or the schedule silently stops being a schedule.
+    environment: ops
     env:
       # Job-level so the notify steps can test them in `if:` — a step cannot read env it sets
       # itself. Absent in a fork, which is the point: the `if` guards below make Slack entirely
@@ -83,9 +96,11 @@ jobs:
       # Cloudflare token reads Analytics Engine; the deployment bearer carries only the aggregate.
       # That is the whole of ADR-019 — the Worker gains data, never the capability to compute it.
       #
-      # CLOUDFLARE_API_TOKEN needs `Account · Account Analytics · Read`. It is the same secret
-      # deploy-prod.yml uses, so if this step fails with a 403 that permission is what is missing;
-      # the CLI's error names the exact dashboard path.
+      # 🔴 The secret is named for what it IS — an analytics-read token — and mapped to the variable
+      # the CLI reads. Naming it `CLOUDFLARE_API_TOKEN` in the `ops` environment would make it look
+      # interchangeable with the deploy credential of the same name in `production`, and the whole
+      # point of this split is that they are not. A 403 here means the token is missing
+      # `Account · Account Analytics · Read`; the CLI's error names the exact dashboard path.
       #
       # stdout is pure JSON (every human line goes to stderr), so it can be captured and parsed
       # without stripping anything. `tee` keeps it in the log too — a notification that says
@@ -93,7 +108,7 @@ jobs:
       - name: Sync view metrics
         run: node cli/bin/pagevault.mjs sync-views --json | tee sync-result.json
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_ANALYTICS_TOKEN }}
           PAGEVAULT_API_TOKEN: ${{ secrets.PAGEVAULT_API_TOKEN }}
 
       # A heartbeat on EVERY successful run, not only on change. A scheduled job that silently

@@ -7,6 +7,13 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Changed
+- **The scheduled view sync runs in its own `ops` environment**, not `production`. `production`
+  carries a required-reviewer gate — right for deploys, fatal for a nightly job that would sit
+  waiting for an approval nobody is awake to give. It also lets the sync hold a strictly narrower
+  credential: a Cloudflare token scoped to `Account Analytics · Read` and nothing else, under its own
+  secret name so it can never be confused with the deploy token. ([#186](../../issues/186))
+
 ## [0.35.0] — 2026-08-08
 
 The sync becomes its own command, and production finally has somewhere to run it.
