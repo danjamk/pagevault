@@ -12,8 +12,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "./lib/format.mjs";
 import { loadConfig } from "./lib/client.mjs";
+// Still imported from provision.mjs though it now lives in context.mjs (#190) — the re-export is
+// part of that module's surface, so this pins it too.
 import { resolveAnalytics } from "./lib/provision/provision.mjs";
-import { analyticsChoice } from "./lib/provision/context.mjs";
+import { analyticsChoice, stripAnalyticsBinding, bindsAnalytics } from "./lib/provision/context.mjs";
 
 const BIN = fileURLToPath(new URL("./bin/pagevault.mjs", import.meta.url));
 
@@ -728,6 +730,87 @@ test("declared intent still beats the live binding", () => {
   assert.equal(r.value, true);
   assert.equal(r.source, "declared");
   assert.equal(r.downgrade, false);
+});
+
+// --- The binding at rung 1 and 2 (#190) -------------------------------------
+//
+// Rung 3 stripped the Analytics Engine block when view tracking was off; rungs 1 and 2 filled the
+// template in and never touched it. So every rung 1–2 deploy bound ANALYTICS whether or not the
+// account had Analytics Engine — and wrangler refuses the whole deploy with error 10089 when the
+// binding is present and the product is off. Rung 1 is the fork's on-ramp, which made that a fresh
+// account's very first `pagevault init`.
+//
+// The fix is one strip function shared by both writers, so these pin the shared piece rather than
+// each caller: two copies of that regex is exactly how the gap appeared.
+
+test("🔴 rung 1–2 and rung 3 agree on the Analytics Engine binding (#190)", () => {
+  const template = readFileSync(new URL("../worker/wrangler.jsonc", import.meta.url), "utf8");
+
+  // The template ships WITH the binding — that is what made an unconditional fill-in bind it.
+  assert.equal(bindsAnalytics(template), true, "the template declares the block");
+
+  // Both writers call this one function, so "the two rungs agree" is a property of the strip, not
+  // of two code paths that happen to match today.
+  const stripped = stripAnalyticsBinding(template);
+  assert.equal(bindsAnalytics(stripped), false, "off strips the block");
+  assert.ok(!stripped.includes("ANALYTICS"), "and the binding name goes with it");
+  assert.ok(!stripped.includes("pagevault_views"), "and the dataset name too");
+
+  // Nothing else may go. The block sits between the browser binding and vars; a greedy match would
+  // take them with it, and the deploy would fail far away from here.
+  assert.ok(stripped.includes('"binding": "BROWSER"'), "the browser binding survives");
+  assert.ok(stripped.includes('"PAGEVAULT_VERSION"'), "vars survive");
+  assert.ok(stripped.includes("REPLACE_WITH_KV_NAMESPACE_ID"), "the KV placeholder survives");
+
+  // Idempotent: a config that never had the block is not corrupted by stripping it again.
+  assert.equal(stripAnalyticsBinding(stripped), stripped);
+
+  // Rung 2 inserts a `routes` line above "observability", which today sits well below the block.
+  // Pin that the strip is order-independent rather than trusting the two edits to stay apart —
+  // "these substitutions happen not to collide" is not a property anyone will re-check.
+  const rung2 = template.replace(
+    /"observability": \{/,
+    `"routes": [{ "pattern": "x.example.com", "custom_domain": true }],\n\n  "observability": {`,
+  );
+  const rung2Stripped = stripAnalyticsBinding(rung2);
+  assert.equal(bindsAnalytics(rung2Stripped), false, "off strips the block at rung 2 too");
+  assert.ok(rung2Stripped.includes('"pattern": "x.example.com"'), "and the rung-2 route survives");
+
+  // 🔴 CRLF. Windows checks out the template with `\r\n`, and the block is matched on newlines — so
+  // an `\n`-only pattern matched nothing there and the strip silently did nothing. Rung 3 with view
+  // tracking off was broken on Windows for as long as the regex existed; the Windows CI job caught
+  // it the first time a test touched this function. Keep this case.
+  const crlf = template.replace(/\r?\n/g, "\r\n");
+  const crlfStripped = stripAnalyticsBinding(crlf);
+  assert.equal(bindsAnalytics(crlfStripped), false, "a CRLF config strips too");
+  assert.ok(!/[^\r]\n/.test(crlfStripped), "and no lone LF is introduced into a CRLF file");
+});
+
+test("🔴 rung 1–2 defaults view tracking OFF when nothing has an opinion (#190)", () => {
+  // The fresh-account first deploy: no flag, no .pagevault.json answer, no Worker to read. Rung 3
+  // interviews the operator here; rungs 1–2 have no interview, so `undefined` has to become `false`
+  // rather than binding a product the account may not have enabled.
+  const r = resolveAnalytics({ flag: undefined, declared: undefined, live: null });
+  assert.equal(r.value, undefined, "resolution itself stays honest about knowing nothing");
+  assert.equal(r.downgrade, false, "and a first deploy is never a downgrade");
+
+  // What rung 1–2 does with that, mirrored from tier0.mjs.
+  assert.equal(r.value ?? false, false);
+
+  // And the default stays a default: rung 1–2 does not write it to .pagevault.json, so climbing to
+  // rung 3 still reaches the interview instead of inheriting a `declared: false` nobody chose.
+  const tier0 = readFileSync(new URL("./lib/provision/tier0.mjs", import.meta.url), "utf8");
+  assert.ok(!/saveContext\(\{[^}]*\banalytics\b/.test(tier0), "tier0 must not persist the analytics default");
+});
+
+test("rung 1–2 keeps a binding the live Worker already has (#190, ADR-024)", () => {
+  // The same protection rung 3 got in #187: a rung-1 deployment recording views does not lose them
+  // because a later deploy said nothing. `live` is in the chain at every rung now.
+  assert.equal(resolveAnalytics({ flag: undefined, declared: undefined, live: true }).value, true);
+  // And an explicit flag still reaches rung 1–2, which is the other half of the issue: the flag used
+  // to warn that it had nowhere to go.
+  assert.equal(resolveAnalytics({ flag: true, declared: undefined, live: null }).value, true);
+  assert.equal(resolveAnalytics({ flag: false, declared: undefined, live: true }).downgrade, false);
 });
 
 test("view tracking can be set by flag or by environment, and the flag wins", () => {

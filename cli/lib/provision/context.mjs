@@ -438,6 +438,105 @@ export function analyticsChoice(flags = {}, env = process.env) {
   die(`Unrecognised PAGEVAULT_ANALYTICS value: ${raw}`, "Use on or off. Unset it to leave view tracking as the deployment has it.");
 }
 
+/**
+ * Which way view tracking resolves on this run, where that came from, and whether it is a downgrade.
+ *
+ * Pure, and separated from the provisioning it drives so both directions of the transition can be
+ * tested without a Cloudflare account (#187).
+ *
+ * Lives here rather than in provision.mjs because rung 1–2 needs it too (#190), and the minimal
+ * config writer should not have to import the interactive rung-3 provisioner to answer one
+ * question. Sits next to `analyticsChoice`, which feeds its `flag`.
+ *
+ * @param {object} a
+ * @param {boolean|undefined} a.flag      what the operator asked for on THIS run (--analytics, PAGEVAULT_ANALYTICS)
+ * @param {boolean|undefined} a.declared  what `.pagevault.json` records
+ * @param {boolean|null|undefined} a.live whether the deployed Worker binds ANALYTICS; null = unknown
+ *
+ * 🔴 `live` sits in the precedence chain, not merely in an assertion. That is the actual fix. The
+ * bug was a re-deploy re-deciding an optional capability from silence every time, and no amount of
+ * shouting about it later helps a schedule nobody is watching — whereas a deployment that already
+ * answered the question keeps its answer for free, including in CI, without anyone editing a secret.
+ *
+ * The refusal is then only for a genuine contradiction: something here says off while the Worker
+ * says on. That case cannot be resolved by guessing, so it stops. Note `value === undefined` implies
+ * `live` was unknown — with a live reading there is always an answer — which is why the caller's
+ * prompt-or-default can never itself become a downgrade.
+ */
+export function resolveAnalytics({ flag, declared, live }) {
+  const known = live === true || live === false ? live : undefined;
+  const value = flag ?? declared ?? known;
+  const source =
+    flag !== undefined ? "flag" : declared !== undefined ? "declared" : known !== undefined ? "live" : "unset";
+  // Off is allowed to happen on purpose and no other way. `flag !== false` is the override: saying
+  // it out loud on this run is what distinguishes "stop recording" from "never mentioned it".
+  const downgrade = live === true && value === false && flag !== false;
+  return { value, source, downgrade };
+}
+
+/**
+ * The template's view-tracking block, and the one function that removes it.
+ *
+ * 🔴 Shared by rung 1–2 (`tier0.mjs`) and rung 3 (`provision.mjs`) on purpose. Rung 3 stripped the
+ * block and rung 1–2 never did, which is #190 — every rung 1–2 deploy bound ANALYTICS whether or not
+ * the account had Analytics Engine, and wrangler refuses the whole deploy with error 10089 when the
+ * binding is present and the product is off. Two copies of this regex is how that gap reappears, so
+ * there is one, and `bindsAnalytics` is how both callers assert they got what they asked for.
+ */
+// 🔴 `\r?\n`, not `\n`. Windows checks out CRLF, and this is anchored on newlines — with `\n` alone
+// the trailing `],` never matched, the block was silently left in place, and the caller's assertion
+// turned that into "Failed to strip the Analytics Engine binding". Rung 3 with view tracking off was
+// broken on Windows and nothing exercised it; the Windows CI job caught it the first time a test
+// touched this function. The capture group is what keeps the surrounding line endings consistent.
+const ANALYTICS_BLOCK =
+  /(\r?\n) *\/\/ View tracking \(#91\)[\s\S]*?"analytics_engine_datasets": \[[\s\S]*?\r?\n *\],\r?\n/;
+
+export const stripAnalyticsBinding = (config) => config.replace(ANALYTICS_BLOCK, "$1");
+
+export const bindsAnalytics = (config) => config.includes("analytics_engine_datasets");
+
+/** Where an operator turns Analytics Engine on. There is no API for it — it is a dashboard action. */
+export const analyticsDashboard = (accountId) =>
+  `https://dash.cloudflare.com/${accountId ?? ""}/workers/analytics-engine`;
+
+/**
+ * Where a resolved view-tracking answer came from, in words.
+ *
+ * Every rung says this out loud. `off` printed with no provenance is what made the #187 production
+ * incident invisible: it read as a decision, and it was a silence.
+ */
+export const analyticsBecause = (source) =>
+  ({
+    flag: "you asked for it on this run",
+    declared: `declared in ${CONTEXT_FILE}`,
+    live: "the deployed Worker already has it",
+    answer: "you just answered",
+    default: "nothing asked for it, and there is no deployment to ask",
+  })[source];
+
+/**
+ * Refuse a deploy that would drop view tracking the live Worker has (ADR-024).
+ *
+ * Shared by every rung. The refusal is the load-bearing half of #187 — dropping the binding is
+ * silent and one-way, so the one case that cannot be resolved by guessing has to stop rather than
+ * pick. Both commands named below reach every rung, so this needs no rung awareness.
+ */
+export function refuseAnalyticsDowngrade(source) {
+  die("This deploy would turn view tracking OFF, and the live Worker currently has it on.", [
+    source === "declared"
+      ? `  ${CONTEXT_FILE} says off; the deployed Worker binds ANALYTICS. They disagree.`
+      : `  Nothing here asked for view tracking; the deployed Worker binds ANALYTICS.`,
+    "",
+    "  Dropping it is silent and one-way. The Worker stops recording, no error is raised, and the",
+    "  days between now and whenever someone notices are simply never in the data. Analytics Engine",
+    "  keeps ~90 days, so there is nothing to backfill from either.",
+    "",
+    "  Say which you mean:",
+    `    ${c.bold(runHint("deploy ANALYTICS=on", "upgrade --analytics"))}     keep recording`,
+    `    ${c.bold(runHint("deploy ANALYTICS=off", "upgrade --no-analytics"))}    stop recording, deliberately`,
+  ]);
+}
+
 // --- MCP smoke helpers ------------------------------------------------------
 //
 // `verify` and `health` both drive the live `/mcp` endpoint, so the one JSON-RPC

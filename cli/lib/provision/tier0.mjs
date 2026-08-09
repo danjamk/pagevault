@@ -14,7 +14,7 @@
 //
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, releaseTag, BUNDLE_PATH, applyBundleMode, generatedConfigPath, templatePath, runHint, RUNNING_FROM_REPO } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, releaseTag, BUNDLE_PATH, applyBundleMode, generatedConfigPath, templatePath, runHint, RUNNING_FROM_REPO, deployedBindings, resolveAnalytics, stripAnalyticsBinding, bindsAnalytics, analyticsBecause, refuseAnalyticsDowngrade, analyticsDashboard } from "./context.mjs";
 
 const CONFIG_IN = templatePath();
 const CONFIG_OUT = generatedConfigPath();
@@ -105,6 +105,48 @@ export async function writeTier0Config(opts = {}) {
     saveContext({ ...loadContext(), oauthKvId }); // remember the reconciled id (merge, kvId already saved)
   }
 
+  // --- View tracking: rung 3's question, without the interview (#190) --------
+  //
+  // 🔴 Rungs 1 and 2 used to bind ANALYTICS unconditionally — this writer filled the template in
+  // and never touched the block. Wrangler refuses the WHOLE deploy with error 10089 when the
+  // binding is present and Analytics Engine is off on the account, and rung 1 is the fork's
+  // on-ramp, so `pagevault init` on a fresh account is exactly where that landed.
+  //
+  // The resolution is rung 3's, function for function, because a capability a deployment already
+  // has must survive a re-deploy that says nothing (ADR-024): a flag, then .pagevault.json, then
+  // what the live Worker actually binds. An unreadable deployment reads as unknown, never as off.
+  //
+  // Only the fallback differs. Rung 3 interviews the operator; here nothing-said means OFF and
+  // there is no prompt — the point of the lower rungs is that publishing works without a
+  // conversation about Analytics Engine, and a deploy that works beats a deploy that dies on an
+  // optional feature nobody asked for. `--analytics` / `PAGEVAULT_ANALYTICS` / `ANALYTICS=on`
+  // turns it on without the conversation too.
+  const live = await deployedBindings(ctx.accountId);
+  let { value: analytics, source, downgrade } = resolveAnalytics({
+    flag: opts.analytics,
+    declared: ctx.analytics,
+    live: live === null ? null : live.includes("ANALYTICS"),
+  });
+  if (downgrade) refuseAnalyticsDowngrade(source);
+  if (analytics === undefined) {
+    analytics = false;
+    source = "default";
+  }
+
+  if (analytics) {
+    ok(`View tracking: on (Analytics Engine) ${c.dim(`— ${analyticsBecause(source)}`)}`);
+    info(`  If the deploy fails with error 10089, it is not enabled yet — ${analyticsDashboard(ctx.accountId)}`);
+  } else {
+    ok(`View tracking: off — no Analytics Engine binding ${c.dim(`— ${analyticsBecause(source)}`)}`);
+    info(`  Turn it on later: enable it at ${c.dim(analyticsDashboard(ctx.accountId))}, then \`${runHint("deploy ANALYTICS=on", "upgrade --analytics")}\`.`);
+  }
+
+  // 🔴 Deliberately NOT saved to .pagevault.json, unlike rung 3. A default is not an answer, and
+  // writing one down turns it into `declared` — which beats rung 3's interview, so an operator who
+  // never thought about view tracking at rung 1 would climb to Secured and never be asked. It also
+  // buys nothing: a rung 1–2 deployment that HAS the binding is carried across re-deploys by `live`
+  // (ADR-024), which is the case the record would have covered.
+
   // --- Write the config ------------------------------------------------------
   //
   // The committed wrangler.jsonc is the Tier-1-shaped template; fill only what Tier 0 needs
@@ -145,6 +187,16 @@ export async function writeTier0Config(opts = {}) {
         /"observability": \{/,
         `"routes": [{ "pattern": "${host}", "custom_domain": true }],\n\n  "observability": {`,
       );
+  }
+
+  // Same strip, same assertion, same helper as rung 3 — see the note on ANALYTICS_BLOCK. Two copies
+  // of this is how #190 happened.
+  if (!analytics) generated = stripAnalyticsBinding(generated);
+  if (bindsAnalytics(generated) !== analytics) {
+    die(
+      `Failed to ${analytics ? "keep" : "strip"} the Analytics Engine binding in ${CONFIG_OUT}.`,
+      "The template's view-tracking block changed shape — see context.mjs.",
+    );
   }
 
   if (!generated.includes(kvId) || !generated.includes(oauthKvId) || !generated.includes(ownerEmail) || !generated.includes(`"workers_dev": ${workersDev}`)) {
