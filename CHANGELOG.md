@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.35.1] — 2026-08-09
+
+A deployment that records nothing stops pretending it measured nothing.
+
 ### Fixed
 - **A deployment that records nothing stops reporting zeros.** With no Analytics Engine binding, the
   Worker records no views — but every surface reported as though it had measured and found none:
@@ -1512,7 +1516,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.35.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.35.1...HEAD
+[0.35.1]: https://github.com/danjamk/pagevault/compare/v0.35.0...v0.35.1
 [0.35.0]: https://github.com/danjamk/pagevault/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/danjamk/pagevault/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/danjamk/pagevault/compare/v0.32.2...v0.33.0
