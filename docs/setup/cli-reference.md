@@ -306,11 +306,23 @@ because that endpoint is unauthenticated, and when you last synced is a fact abo
 Reconcile the Cloudflare Access viewer group with what KV authorizes. `--reap` also removes people KV
 no longer authorizes (reclaiming seats) — it confirms first.
 
-### `pagevault views [--days 30] [--portal s] [--doc id] [--json]`
-Which documents your clients actually opened, and where the traffic came from. Reads Analytics
-Engine directly rather than going through `/api`, so it needs a Cloudflare token in the
-environment — as `backup` and `restore` do, and for the same reason: the Worker deliberately holds
-no credential that wide.
+### `pagevault views [--days 30] [--portal s] [--doc id] [--live] [--who] [--json]`
+How much your documents were read. Reads the summary stored in your deployment through `/api`, so
+it needs only your PageVault bearer — **no Cloudflare token and no account id**
+([ADR-025](../adr/ADR-025-the-summary-is-the-default-read.md)). That is what makes it work from a
+machine that did not provision the deployment, which is the ordinary case for a production instance
+deployed by CI.
+
+The summary accumulates, so it reaches further back than a live query can: Analytics Engine keeps
+~90 days, the summary keeps everything ever synced into it. It is only as current as your last
+`pagevault sync-views`, and the output states that time every time it prints.
+
+`--live` asks Analytics Engine instead — what has happened since the last sync, and **who** opened
+it. That path needs a Cloudflare token with `Account Analytics: Read` and sees only 90 days.
+`--who` implies it, because the summary has never held an identity
+([ADR-019](../adr/ADR-019-view-metrics-reach-mcp-by-sync.md) §4) and there is nowhere else to get
+one. Portal-index landings are stored nowhere but Analytics Engine, so they appear only under
+`--live` too.
 
 Below the table, a **traffic sources** block: the hosts that linked to your documents, or `direct`
 where the browser sent no referrer. Only the linking host is ever recorded — never the page it

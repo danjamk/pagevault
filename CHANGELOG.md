@@ -7,6 +7,31 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **`pagevault views` needs no Cloudflare credential.** It reads the summary stored in your own
+  deployment, over `/api`, with the bearer every other command already uses — so it works from a
+  machine that did not provision the deployment, which is the ordinary case for a production
+  instance deployed by CI. It also reaches further back than it could before: Analytics Engine keeps
+  ~90 days, the accumulated summary keeps everything ever synced into it. ([#168](../../issues/168))
+- **`GET /api/views/summary`** — owner-scoped, returning totals and breakdowns by document, portal,
+  day and referrer for a requested window, alongside coverage, the sync time and the staleness
+  verdict. `?raw=true` returns the stored summary verbatim, for backup. The route was POST-only.
+- **`worker/src/rollup.ts`** — one aggregation, computed in the Worker and shared by every surface
+  that reports traffic. The CLI asks for it over HTTP; the console and MCP will call it in-process.
+  A client-side rollup would be a second implementation of the same arithmetic over a versioned wire
+  shape, and the copy nobody watches is the one that drifts.
+- **`--live` and `--who` on `views`.** `--live` keeps the Analytics Engine query — what has happened
+  since the last sync, and who opened it. `--who` implies it: the summary has never held an identity
+  (ADR-019 §4), so there is nowhere else to get one.
+
+### Changed
+- **The Worker still cannot read Analytics Engine, and gains no capability here.** ADR-019 decision
+  1 is unchanged by ADR-025 — this serves a KV value the operator synced in.
+- **A CLI newer than its deployment says so.** Asking an older Worker for view history returned a
+  raw `405 method_not_allowed`, which reads as a broken deployment rather than an out-of-date one.
+  Since the package ships on npm independently of any deploy (ADR-010), that is the ordinary state
+  after `npm update -g pagevault`, not an edge case.
+
 ## [0.35.4] — 2026-08-09
 
 A successful install stops being followed by a command that cannot authenticate.

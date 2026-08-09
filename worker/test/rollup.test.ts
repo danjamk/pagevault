@@ -1,0 +1,195 @@
+import { describe, expect, it } from "vitest";
+import { type DocIndexEntry, rollup } from "../src/rollup.js";
+import { SUMMARY_VERSION, type SyncRisk, type ViewSummary } from "../src/views.js";
+
+//
+// The rollup (#168) — the one aggregation every traffic surface reads (ADR-025).
+//
+// Pure over a fixture, with no Miniflare in the loop: that is the point of keeping `rollup.ts` free
+// of Worker types. What is worth pinning here is not the arithmetic but the four states `statsFor`
+// distinguishes, because collapsing any two of them reports a measured zero for something that was
+// never measured — which reads as "the client never opened it" and is the failure ADR-015's
+// zero-versus-null rule exists to prevent.
+//
+
+const OK_RISK: SyncRisk = {
+  state: "ok",
+  capturedThrough: "2026-08-09",
+  uncapturedDays: 0,
+  daysUntilLoss: null,
+  lostDays: 0,
+};
+
+/** Two portals, four documents, daily and monthly buckets, an owner split on exactly one day. */
+const SUMMARY: ViewSummary = {
+  v: SUMMARY_VERSION,
+  syncedAt: "2026-08-09T12:00:00.000Z",
+  coverage: { from: "2026-05-11", to: "2026-08-09" },
+  docs: {
+    "acme-roadmap": {
+      "2026-08-07": { portal: 4, owner: 1, t: "09:15:00" },
+      "2026-08-08": { link: 2, pub: 1, t: "14:02:00" },
+    },
+    "acme-primer": {
+      "2026-08-08": { pub: 5, t: "23:59:00" },
+      // Compacted past 90 days: a month, no time-of-day.
+      "2026-04": { pub: 30 },
+    },
+    // Measured and never opened — present in the index, absent from `docs`.
+    "acme-quiet": {},
+    "globex-brief": {
+      "2026-08-09": { portal: 3, t: "08:00:00" },
+    },
+  },
+  portals: {
+    acme: { "": 6, "news.ycombinator.com": 4, "linkedin.com": 1 },
+    globex: { "": 2 },
+  },
+};
+
+const DOCS: DocIndexEntry[] = [
+  { id: "acme-roadmap", portal: "acme", title: "2027 Platform Roadmap", createdAt: "2026-03-01T00:00:00.000Z" },
+  { id: "acme-primer", portal: "acme", title: "Technical Primer", createdAt: "2026-03-01T00:00:00.000Z" },
+  { id: "acme-quiet", portal: "acme", title: "Never Opened", createdAt: "2026-03-01T00:00:00.000Z" },
+  { id: "globex-brief", portal: "globex", title: "Globex Brief", createdAt: "2026-03-01T00:00:00.000Z" },
+];
+
+const WINDOW = { from: "2026-08-01", to: "2026-08-09" };
+const roll = (over = SUMMARY, docs = DOCS, opts = {}) =>
+  rollup(over, docs, { ...WINDOW, recording: true, risk: OK_RISK, ...opts });
+
+describe("the four states, kept apart", () => {
+  it("never synced is not zero views — it is no history", () => {
+    const r = rollup(null, DOCS, { ...WINDOW, recording: true, risk: OK_RISK });
+    expect(r.state).toBe("never-synced");
+    expect(r.syncedAt).toBeNull();
+    expect(r.coverage).toBeNull();
+    // Emphatically NOT an empty table with a zero total, which reads as "nobody visited".
+    expect(r.byDoc).toEqual([]);
+    expect(r.byPortal).toEqual([]);
+  });
+
+  it("not recording outranks the arithmetic, even with stored history", () => {
+    // A deployment that recorded before and was later turned off has real history, and that history
+    // is still true — but the report must not imply the numbers are still growing (#185).
+    const r = roll(SUMMARY, DOCS, { recording: false });
+    expect(r.state).toBe("not-recording");
+    expect(r.total.views).toBeGreaterThan(0);
+  });
+
+  it("measured with nothing in the window is `empty`, not `never-synced`", () => {
+    const r = roll(SUMMARY, DOCS, { from: "2026-06-01", to: "2026-06-30" });
+    expect(r.state).toBe("empty");
+    expect(r.total.views).toBe(0);
+    // Every measured document is still listed at zero — that IS the answer: they had the chance.
+    expect(r.byDoc).toHaveLength(4);
+  });
+
+  it("🔴 a document published since the sync is omitted, never reported at zero", () => {
+    const fresh: DocIndexEntry = {
+      id: "acme-new",
+      portal: "acme",
+      title: "Published Today",
+      createdAt: "2026-08-09T18:00:00.000Z", // after syncedAt
+    };
+    const r = roll(SUMMARY, [...DOCS, fresh]);
+    expect(r.byDoc.map((d) => d.id)).not.toContain("acme-new");
+    // A measured zero here would say "the client never opened it" about a document that did not
+    // exist when we last looked.
+    expect(r.byDoc).toHaveLength(4);
+  });
+});
+
+describe("totals and breakdowns", () => {
+  it("sums surfaces per document and orders by traffic", () => {
+    const r = roll();
+    const roadmap = r.byDoc.find((d) => d.id === "acme-roadmap")!;
+    expect(roadmap.views).toBe(7); // 4 portal + 2 link + 1 pub
+    expect(roadmap.surfaces).toEqual({ link: 2, public: 1, portal: 4 });
+    expect(roadmap.lastViewedAt).toBe("2026-08-08T14:02:00.000Z");
+    expect(r.byDoc[0]!.views).toBeGreaterThanOrEqual(r.byDoc[1]!.views);
+  });
+
+  it("a document with no buckets at all is a measured zero, not a gap", () => {
+    const quiet = roll().byDoc.find((d) => d.id === "acme-quiet")!;
+    expect(quiet.views).toBe(0);
+    expect(quiet.lastViewedAt).toBeNull();
+    expect(quiet.owner).toBeNull();
+  });
+
+  it("rolls up by portal, counting only documents that were actually opened", () => {
+    const r = roll();
+    const acme = r.byPortal.find((p) => p.portal === "acme")!;
+    expect(acme.views).toBe(12); // roadmap 7 + primer 5
+    expect(acme.docs).toBe(2); // `acme-quiet` had none, so it is not a document with traffic
+    expect(r.byPortal.find((p) => p.portal === "globex")!.views).toBe(3);
+    expect(r.total.views).toBe(15);
+  });
+
+  it("the daily series is chronological, because it is a series", () => {
+    // Sorted by magnitude it would be a bar chart with the x-axis thrown away.
+    const r = roll();
+    expect(r.byDay.map((d) => d.key)).toEqual(["2026-08-07", "2026-08-08", "2026-08-09"]);
+    expect(r.byDay.find((d) => d.key === "2026-08-08")!.views).toBe(8); // 3 roadmap + 5 primer
+  });
+});
+
+describe("what the shape cannot honour, stated rather than implied", () => {
+  it("🔴 owner is null when unknown and a number when known — never zero for unknown", () => {
+    const r = roll();
+    // Only 2026-08-07 carried the split, so the sum is a floor, not a claim about the rest.
+    expect(r.byDoc.find((d) => d.id === "acme-roadmap")!.owner).toBe(1);
+    // No bucket for this document ever carried it. Zero would assert the operator read none of it.
+    expect(r.byDoc.find((d) => d.id === "acme-primer")!.owner).toBeNull();
+  });
+
+  it("a monthly bucket intersecting the window counts, and says it cannot be a day", () => {
+    // Containment would silently drop the oldest history from every window starting mid-month.
+    const r = roll(SUMMARY, DOCS, { from: "2026-04-15", to: "2026-08-09" });
+    const primer = r.byDoc.find((d) => d.id === "acme-primer")!;
+    expect(primer.views).toBe(35); // 5 daily + 30 monthly
+    expect(r.scope.monthlyBuckets).toBe(1);
+    expect(r.byDay.find((d) => d.key === "2026-04")!.granularity).toBe("month");
+  });
+
+  it("a compacted bucket dates to the first of the month — the earliest instant still known", () => {
+    const r = roll({ ...SUMMARY, docs: { "acme-primer": { "2026-04": { pub: 30 } } } }, DOCS, {
+      from: "2026-04-01",
+      to: "2026-04-30",
+    });
+    expect(r.byDoc.find((d) => d.id === "acme-primer")!.lastViewedAt).toBe("2026-04-01T00:00:00.000Z");
+  });
+
+  it("🔴 referrers ignore the window, and the report says so", () => {
+    // Stored per portal, all-time (ADR-023 §5), so a date filter cannot narrow them. A caller that
+    // assumed otherwise would label an all-time figure "last 7 days".
+    const narrow = roll(SUMMARY, DOCS, { from: "2026-08-09", to: "2026-08-09" });
+    expect(narrow.scope.referrers).toBe("all-time");
+    expect(narrow.byReferrer.find((x) => x.host === "news.ycombinator.com")!.views).toBe(4);
+    expect(narrow.byReferrer[0]!.host).toBe(""); // direct leads, 6 + 2
+    expect(narrow.byReferrer[0]!.views).toBe(8);
+  });
+
+  it("portal index landings are absent by construction, and named as such", () => {
+    // The sync drops `kind === "index"` so landings never inflate a document's count, and the
+    // summary has nowhere else to put them. Only the live query has this.
+    expect(roll().scope.portalIndex).toBe("not-stored");
+  });
+});
+
+describe("filters", () => {
+  it("--portal narrows documents and referrers together", () => {
+    const r = roll(SUMMARY, DOCS, { portal: "globex" });
+    expect(r.byDoc.map((d) => d.id)).toEqual(["globex-brief"]);
+    expect(r.byPortal).toHaveLength(1);
+    expect(r.byReferrer).toEqual([{ host: "", views: 2 }]);
+  });
+
+  it("🔴 --doc reports no referrers rather than the portal's", () => {
+    // Referrers are a portal-level aggregate. Printed beside one document's numbers they would read
+    // as that document's — a wrong answer rather than a narrower one.
+    const r = roll(SUMMARY, DOCS, { doc: "acme-roadmap" });
+    expect(r.byDoc.map((d) => d.id)).toEqual(["acme-roadmap"]);
+    expect(r.byReferrer).toEqual([]);
+  });
+});

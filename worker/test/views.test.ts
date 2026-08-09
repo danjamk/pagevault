@@ -442,9 +442,74 @@ describe("POST /api/views/summary", () => {
     expect((await getDoc(id))["views"]).toBe(3);
   });
 
-  it("is write-only — there is no GET that hands the metrics back on their own", async () => {
-    const res = await SELF.fetch(`${HOST}/api/views/summary`, { headers: auth });
+  it("🔴 the route still refuses everything except GET and POST", async () => {
+    // This asserted `GET → 405` until ADR-025, when reading the stored summary became the DEFAULT
+    // for `pagevault views` (#168). What has not changed is the property the old test was really
+    // protecting: the Worker gains data, never the capability to produce it. There is still no way
+    // to make it query Analytics Engine (ADR-019 decision 1) — GET reads a KV value the operator
+    // synced there.
+    const res = await SELF.fetch(`${HOST}/api/views/summary`, { method: "DELETE", headers: auth });
     expect(res.status).toBe(405);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("GET /api/views/summary — history without a Cloudflare credential (#168)", () => {
+  it("needs the owner bearer, like every other /api route", async () => {
+    const res = await SELF.fetch(`${HOST}/api/views/summary`);
+    expect(res.status).toBe(401);
+  });
+
+  it("says no history captured rather than serving an empty table", async () => {
+    // An empty table reads as "nobody visited". Before any sync, nothing has been measured at all.
+    const res = await SELF.fetch(`${HOST}/api/views/summary`, { headers: auth });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body["state"]).toBe("never-synced");
+    expect(body["syncedAt"]).toBeNull();
+    expect(body["byDoc"]).toEqual([]);
+  });
+
+  it("rolls up what was synced, and carries the staleness verdict with it", async () => {
+    const id = await publishOld("Measured Doc");
+    await postSummary(payload(id));
+
+    const res = await SELF.fetch(`${HOST}/api/views/summary?days=3650`, { headers: auth });
+    const body = (await res.json()) as Record<string, unknown>;
+
+    expect(body["state"]).toBe("ok");
+    expect(body["syncedAt"]).toEqual(expect.any(String));
+    expect((body["total"] as Record<string, unknown>)["views"]).toBe(3);
+    expect((body["byDoc"] as Record<string, unknown>[])[0]).toMatchObject({ id, views: 3 });
+    // A number whose staleness is unstated is the ADR-024 failure mode one domain over.
+    expect(body["risk"]).toMatchObject({ state: expect.any(String) });
+  });
+
+  it("?raw=true hands back the stored summary verbatim, for backup", async () => {
+    const id = await publishOld("Raw Doc");
+    await postSummary(payload(id));
+
+    const res = await SELF.fetch(`${HOST}/api/views/summary?raw=true`, { headers: auth });
+    const body = (await res.json()) as Record<string, unknown>;
+    const summary = body["summary"] as Record<string, unknown>;
+
+    // The durable artifact, not a view of it — the rollup's opinions must not be baked into a backup.
+    expect(summary["v"]).toEqual(expect.any(Number));
+    expect(Object.keys(summary["docs"] as object)).toContain(id);
+    expect(body["byDoc"]).toBeUndefined();
+  });
+
+  it("a window that excludes the traffic reports a measured zero, not an absence", async () => {
+    const id = await publishOld("Windowed Doc");
+    await postSummary(payload(id));
+
+    const res = await SELF.fetch(`${HOST}/api/views/summary?from=2000-01-01&to=2000-01-31`, { headers: auth });
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body["state"]).toBe("empty");
+    // The document is still listed — it was measured, and it had no views in this window.
+    expect((body["byDoc"] as unknown[]).length).toBeGreaterThan(0);
+    expect((body["byDoc"] as Record<string, unknown>[])[0]).toMatchObject({ id, views: 0 });
   });
 });
 
