@@ -751,7 +751,10 @@ test("view tracking can be set by flag or by environment, and the flag wins", ()
 test("🔴 a typo'd view-tracking value is fatal, not ignored", () => {
   // Silently reading as "didn't say" is the same failure the whole issue is about: a setting that
   // reads as applied and isn't. Run out-of-process because the real path calls die().
-  const mod = fileURLToPath(new URL("./lib/provision/context.mjs", import.meta.url));
+  // A file:// URL, not a path. On Windows `C:\…` is not a valid ESM specifier — Node reads the
+  // drive letter as a URL scheme and throws ERR_UNSUPPORTED_ESM_URL_SCHEME, which still exits
+  // non-zero and so still looked like a pass on the exit code alone.
+  const mod = new URL("./lib/provision/context.mjs", import.meta.url).href;
   const r = spawnSync(
     process.execPath,
     ["--input-type=module", "-e", `import {analyticsChoice} from ${JSON.stringify(mod)}; analyticsChoice({}, {PAGEVAULT_ANALYTICS: "yes-please"})`],
