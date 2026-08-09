@@ -483,9 +483,15 @@ export function resolveAnalytics({ flag, declared, live }) {
  * binding is present and the product is off. Two copies of this regex is how that gap reappears, so
  * there is one, and `bindsAnalytics` is how both callers assert they got what they asked for.
  */
-const ANALYTICS_BLOCK = /\n *\/\/ View tracking \(#91\)[\s\S]*?"analytics_engine_datasets": \[[\s\S]*?\n *\],\n/;
+// 🔴 `\r?\n`, not `\n`. Windows checks out CRLF, and this is anchored on newlines — with `\n` alone
+// the trailing `],` never matched, the block was silently left in place, and the caller's assertion
+// turned that into "Failed to strip the Analytics Engine binding". Rung 3 with view tracking off was
+// broken on Windows and nothing exercised it; the Windows CI job caught it the first time a test
+// touched this function. The capture group is what keeps the surrounding line endings consistent.
+const ANALYTICS_BLOCK =
+  /(\r?\n) *\/\/ View tracking \(#91\)[\s\S]*?"analytics_engine_datasets": \[[\s\S]*?\r?\n *\],\r?\n/;
 
-export const stripAnalyticsBinding = (config) => config.replace(ANALYTICS_BLOCK, "\n");
+export const stripAnalyticsBinding = (config) => config.replace(ANALYTICS_BLOCK, "$1");
 
 export const bindsAnalytics = (config) => config.includes("analytics_engine_datasets");
 

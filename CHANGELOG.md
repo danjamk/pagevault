@@ -19,6 +19,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
   `provision ANALYTICS=off` / `init`, which is rung 3 only — so where the error actually fired there
   was nothing to run. It now names `deploy ANALYTICS=off` / `upgrade --no-analytics`, which reach
   every rung.
+- **Turning view tracking off worked on Windows.** The strip is matched on newlines and the pattern
+  assumed `\n`; Windows checks out the config template as CRLF, so it matched nothing, left the
+  binding in place, and failed the provision on its own assertion. Found by the Windows CI job the
+  first time a test exercised the strip directly.
 
 ### Added
 - **`--analytics` / `--no-analytics` reach rungs 1 and 2.** They previously warned that the answer

@@ -775,6 +775,15 @@ test("🔴 rung 1–2 and rung 3 agree on the Analytics Engine binding (#190)", 
   const rung2Stripped = stripAnalyticsBinding(rung2);
   assert.equal(bindsAnalytics(rung2Stripped), false, "off strips the block at rung 2 too");
   assert.ok(rung2Stripped.includes('"pattern": "x.example.com"'), "and the rung-2 route survives");
+
+  // 🔴 CRLF. Windows checks out the template with `\r\n`, and the block is matched on newlines — so
+  // an `\n`-only pattern matched nothing there and the strip silently did nothing. Rung 3 with view
+  // tracking off was broken on Windows for as long as the regex existed; the Windows CI job caught
+  // it the first time a test touched this function. Keep this case.
+  const crlf = template.replace(/\r?\n/g, "\r\n");
+  const crlfStripped = stripAnalyticsBinding(crlf);
+  assert.equal(bindsAnalytics(crlfStripped), false, "a CRLF config strips too");
+  assert.ok(!/[^\r]\n/.test(crlfStripped), "and no lone LF is introduced into a CRLF file");
 });
 
 test("🔴 rung 1–2 defaults view tracking OFF when nothing has an opinion (#190)", () => {
