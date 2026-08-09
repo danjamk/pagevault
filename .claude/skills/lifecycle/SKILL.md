@@ -82,12 +82,25 @@ Check automatically, and report each as pass/fail:
 - `health --json` version matches `node -p "require('./package.json').version"` plus the short SHA.
 - `seed-live --json` returns `ok: true` with 8 documents across 3 portals (`acme`, `globex`, `notes`).
 - Every `/p/` URL in the seed output returns **200 with no Authorization header**. Fetch them.
-- On rung 1 there is no Access, so a plain publish is public by nature (#111) — every document
-  should come back with a `/p/` link, not a `/v/` one.
+- On rung 1 there is no Access, so a plain publish is public by nature (#111) — documents come back
+  with `/p/` links. **Expect exactly one `/v/`**: the owner-only draft, which cannot have a
+  capability link without ceasing to be a draft. 7 × `/p/` + 1 × `/v/` is the pass, not 8 × `/p/`.
+- **`pagevault list` needs a bearer the deploy does not give it.** `init` sets
+  `PAGEVAULT_API_TOKEN` as the *Worker's* secret; the local registry is a separate store, so
+  document commands fail until you register the deployment (#195):
+
+  ```bash
+  set -a && source .env.local && set +a && \
+    node cli/bin/pagevault.mjs login --as lifecycle \
+      --url <the workers.dev URL> --token "$PAGEVAULT_API_TOKEN"
+  ```
+
+  Do this before Stage 2 — the corpus diff there depends on `list` working.
 
 > **CHECKPOINT 1** — give Dan the workers.dev base URL and ask him to open:
 > - `/v/acme` — at rung 1 this should be the *honest* page explaining it needs Access, not a broken
->   or empty portal.
+>   or empty portal. It is served with a **404 status** and the title "Nothing to see here"; that is
+>   correct, not a failure. Judge the copy, not the status code.
 > - the "Q3 Engineering Review" `/p/` link — the Chart.js chart must **render**. That proves the
 >   sandbox is permissive enough to be useful while still opaque-origin (ADR-007).
 > - the "Technical Primer" `/p/` link — long markdown, rendered server-side: headings, tables,
@@ -112,11 +125,15 @@ node cli/bin/pagevault.mjs list --json > /tmp/pv-after.json
   a failure.** Only a second failure is a finding.
 - `workers.dev` must now be **off** for the Worker — rung 2+ serves on the domain only. Confirm the
   old workers.dev URL no longer serves PageVault.
-- Links must now be built on the custom host. Re-run the seed and check the URLs changed:
+- Links must now be built on the custom host. **Do not re-run the seed for this** — it costs ~20 KV
+  writes against the 1000/day cap and proves nothing the free check does not:
 
   ```bash
-  node scripts/seed-live.mjs --json
+  node cli/bin/pagevault.mjs link <any id from pv-after.json>
   ```
+
+  The host must have changed and the capability token must **not** have — a climb rehosts links, it
+  does not reissue them. `verify` already exercised publishing at this rung.
 
 > **CHECKPOINT 2** — ask Dan to open `https://<host>/` and one `/p/` link, and confirm the padlock
 > (a valid certificate on the apex of the new hostname).
@@ -137,6 +154,8 @@ Check automatically:
 
 - `init` provisions **two** Access applications (`<host>/v` and `<host>/admin`) and the
   `pagevault-viewers` group. Two AUDs, never one — a shared AUD is privilege escalation (ADR-001).
+  Check the AUDs differ in the **live 302s** (`kid=` in the redirect URL), not only in
+  `worker/wrangler.generated.jsonc` — the config is what you meant, the redirect is what shipped.
 - `verify` exits 0, and root now **302s to `/admin`** (rung 3 behaviour, not the 200 landing).
 - Deploy reports `CF_API_TOKEN (scoped runtime secret) set`. A warning here means group sync is off.
 - **Fail-closed, unauthenticated** — fetch these with no cookie and no bearer:
@@ -144,15 +163,35 @@ Check automatically:
   - `https://<host>/admin` → likewise.
   - `https://<host>/p/<token>` → **200**. Capability links bypass Access on purpose, and burn no seat.
   - `https://<host>/pub/notes` → **200**. A public portal is served from a path Access never sees.
-- A plain publish is now members-only: seed output should show `/v/` URLs for everything except the
-  one document marked public.
+- A plain publish is now members-only. **Do not read this off the seed output** — after climbing
+  from rung 1 those documents already carry capability links minted there, and a climb does not
+  revoke them, so the seed still shows mostly `/p/`. That is correct behaviour and a useless test.
+  Publish a throwaway document instead and check what it gets:
+
+  ```bash
+  node cli/bin/pagevault.mjs publish <some file> --portal acme --title "Rung 3 default check"
+  # → must return /v/acme/<id>, and that URL must 302 unauthenticated
+  node cli/bin/pagevault.mjs rm <id> --yes     # tidy up before Checkpoint 3 counts documents
+  ```
+
 - `sync-access --json` reports the viewer group reconciled without error.
+- **Grant the client identity before Checkpoint 3.** The seeded portals have **no members**, so a
+  second identity cannot test anything until you do. `share` reaches the Access group through the
+  Worker's runtime token, so `sync-access` afterwards should report nothing to add — if it *does*
+  add, the runtime group sync is broken and that is a finding:
+
+  ```bash
+  node cli/bin/pagevault.mjs share acme <client-address>
+  node cli/bin/pagevault.mjs sync-access --json
+  ```
 
 > **CHECKPOINT 3 — the one that matters.** Everything above proves the doors are shut. Only Dan can
 > prove the right people get through. Give him the links and this list:
 >
 > 1. `https://<host>/v/acme` in a private window → an Access login wall.
 > 2. Log in as the **owner** → all 6 acme documents, with "2027 Platform Roadmap" badged as a draft.
+>    Confirm the count first with `pagevault list --portal acme --json`; a leftover test document
+>    makes this read as a failure when it is not.
 > 3. Log in as the **client test identity** — a second address that is not the owner; a `+tag` alias
 >     of your own works and costs nothing → 5 documents, **no draft**.
 > 4. As the client, paste the draft's direct URL → **denied**, not merely hidden from the list.
@@ -169,6 +208,33 @@ Check automatically:
 >
 > **Seat discipline:** every browser identity that logs in consumes one of the 50 free Zero Trust
 > seats, and they persist after teardown. Use the two identities above and no others.
+
+## Stage 3.5 — the optional-capability strip
+
+Run this whenever provisioning code changed. It is the one thing the three stages above cannot
+prove, because they all run with view tracking **on**.
+
+An optional binding that is present when the account does not have the product fails the *whole*
+deploy (Analytics Engine: wrangler error 10089). So "the deploy succeeded with the binding" and
+"the deploy succeeds without it" are two different code paths, and only the second is the one #190
+was about. There is no dry-run, so this needs a real deploy:
+
+```bash
+node cli/bin/pagevault.mjs init --yes --rung 1 --no-analytics --email <owner-email>
+grep -c analytics_engine_datasets worker/wrangler.generated.jsonc   # must be 0
+node cli/bin/pagevault.mjs health --json                            # views.state must be "off"
+```
+
+- The deploy log must say `View tracking: off … you asked for it on this run` — the provenance
+  matters as much as the outcome (ADR-024). `off` with no reason given is the bug that made the
+  production incident invisible.
+- `health` must report `views.state: "off"`, **not** zeros. A deployment that cannot measure must
+  not look like one nobody visited.
+- Then climb back: `init --yes --rung 3 --host <host> --email <owner-email>`. Access apps and the
+  group are reused, not recreated, so Checkpoint 3 still stands and no AUDs are orphaned.
+
+This drops the custom domain and flips `workers.dev` back on for a couple of minutes. Fine on test;
+never do it anywhere real.
 
 ## Stage 4 — teardown
 
@@ -197,6 +263,11 @@ consumed seats are deliberately left alone.
   `deployedUrl` behind at rung 3; verified during the 0.28.0 run that it no longer does — `kvId`,
   `oauthKvId`, both AUDs, `groupId` and `deployedUrl` are all cleared, leaving only the intent
   (`rung`, `ownerEmail`, `host`, `accountId`).
+- **`destroy` keeps the intent, including `analytics`.** It clears `kvId`, `oauthKvId`, the AUDs,
+  `groupId` and `deployedUrl`, but `rung`, `host`, `accountId`, `ownerEmail` and `analytics` stay.
+  So a "fresh account" run on a machine that has been to rung 3 is **not** the same as a stranger's:
+  view tracking resolves from `declared` and binds at rung 1, where a stranger would get the default
+  and no binding. Read `.pagevault.json` before Stage 1 and say which case you are actually testing.
 - **The Worker name is hardcoded `pagevault`**, as are the KV titles. One deployment per account.
 - **`destroy` is the only command that requires a TTY.** Everything else takes `--yes`.
 
