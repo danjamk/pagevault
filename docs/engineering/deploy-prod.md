@@ -67,8 +67,7 @@ Settings → Environments → **`production`** → add:
 | `CF_RUNTIME_TOKEN` | the scoped runtime token → becomes the Worker's `CF_API_TOKEN` (ADR-002 group sync) |
 | `PAGEVAULT_API_TOKEN` | the prod bearer for CLI/MCP. Used only to *set* the secret on a first-ever prod deploy; once the Worker has it, deploys reuse it and never rotate |
 | `PAGEVAULT_PROD_CONFIG` | prod's `.pagevault.json`, base64'd (see below) |
-| `SLACK_HEARTBEAT_WEBHOOK` | *optional* — where the daily sync reports success |
-| `SLACK_ALERT_WEBHOOK` | *optional* — where a failed sync goes |
+
 
 Scoping them to the `production` environment — not the repo — keeps them out of reach of `ci.yml`
 and any other workflow. On a **public** repo, environment secrets and the required-reviewer gate
@@ -92,6 +91,35 @@ your laptop by design, and `resolveWriteTarget` refuses a sync from a checkout w
 different deployment — it would read one account's analytics and write them to another. So the
 schedule lives in CI: **`.github/workflows/sync-views-prod.yml`**, daily at 03:17 UTC, plus a manual
 `workflow_dispatch`.
+
+### Two environments, on purpose
+
+The scheduled sync runs against an **`ops`** environment, not `production`. Two reasons, and the
+second is the better one:
+
+1. **`production` has a required-reviewer gate**, which is right for deploys — you click Run when you
+   mean it — and fatal for a nightly job. A scheduled run would wait for an approval nobody is awake
+   to give. `ops` must have **no reviewer gate**, or the schedule quietly stops being a schedule.
+2. **The sync needs a strictly narrower credential than a deploy.** It reads counts. It does not
+   deploy, destroy, or touch KV.
+
+| Secret | `production` | `ops` |
+|---|---|---|
+| `CLOUDFLARE_API_TOKEN` (broad, provisioning) | yes | **no** |
+| `CLOUDFLARE_ANALYTICS_TOKEN` (`Account Analytics · Read` only) | no | yes |
+| `CF_RUNTIME_TOKEN` | yes | no |
+| `PAGEVAULT_API_TOKEN` | yes | yes |
+| `PAGEVAULT_PROD_CONFIG` | yes | yes |
+| `SLACK_HEARTBEAT_WEBHOOK` / `SLACK_ALERT_WEBHOOK` | no | *optional* |
+
+The analytics token is deliberately a **different secret name** rather than the same name in a
+different environment. Same-name-different-scope is how the wrong credential ends up in the wrong
+job, and it reads as interchangeable in review when it is not. This is ADR-002's blast-radius
+argument about the Worker, pointed at CI: an unattended nightly job should hold the least credential
+that works.
+
+Create the analytics token at **My Profile → API Tokens → Create Token → Custom**, with exactly
+`Account · Account Analytics · Read` on the production account. It cannot deploy or destroy anything.
 
 ### Slack notifications (optional)
 
