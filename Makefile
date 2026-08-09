@@ -125,8 +125,9 @@ provision: ## Rung 3: create the KV namespace, Access group, and two Access apps
 	@$(NVM) && node cli/lib/provision/provision.mjs \
 		$(if $(filter on,$(ANALYTICS)),--analytics,) $(if $(filter off,$(ANALYTICS)),--no-analytics,)
 
-deploy: ## Deploy the Worker — rung-aware (Tier 0, or provision at rung 3)
-	@$(NVM) && node cli/lib/provision/deploy.mjs
+deploy: ## Deploy the Worker — rung-aware (Tier 0, or provision at rung 3; ANALYTICS=on|off toggles view tracking)
+	@$(NVM) && node cli/lib/provision/deploy.mjs \
+		$(if $(filter on,$(ANALYTICS)),--analytics,) $(if $(filter off,$(ANALYTICS)),--no-analytics,)
 
 seed: ## Publish a realistic document set to the LIVE deployment, through the CLI (asks first)
 	@$(NVM) && node scripts/seed-live.mjs

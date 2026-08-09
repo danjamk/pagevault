@@ -379,6 +379,65 @@ export async function cfAccounts() {
 /** Cloudflare's error list, flattened to a line. */
 export const cfErr = (errors = []) => errors.map((e) => `[${e.code}] ${e.message}`).join("; ");
 
+// --- What the deployment actually has ---------------------------------------
+
+/** The Worker script name. Fixed by the committed wrangler.jsonc; the API paths are built from it. */
+export const WORKER_NAME = "pagevault";
+
+/**
+ * The bindings the DEPLOYED Worker currently has, by name — or `null` when we could not find out.
+ *
+ * 🔴 The three-valued return is the whole point. `.pagevault.json` is *declared intent* and it can
+ * be stale, partial, or reconstructed from a CI secret written months ago; this is what the running
+ * Worker is actually holding. Where they disagree, a re-deploy is about to resolve the disagreement
+ * one way or the other, and it should not do that silently (#187).
+ *
+ * `null` means unknown, and unknown must never block a deploy. It is what you get from a first-ever
+ * deploy (no script yet — 404), from a token that can deploy but not read script settings, and from
+ * a network blip. Treating any of those as "the deployment has nothing" would strip capabilities on
+ * a bad connection, which is a worse bug than the one this exists to catch.
+ */
+export async function deployedBindings(accountId) {
+  if (!accountId) return null;
+  const r = await cfApi(`/accounts/${accountId}/workers/scripts/${WORKER_NAME}/settings`);
+  if (!r.ok) return null;
+  const bindings = r.result?.bindings;
+  return Array.isArray(bindings) ? bindings.map((b) => b.name) : null;
+}
+
+/**
+ * View tracking as the operator asked for it on THIS run — `true`, `false`, or undefined for
+ * "didn't say". Flags first, then the environment.
+ *
+ * `--analytics` / `--no-analytics` are the repo spellings; `--analytics off` works too because
+ * `parseArgs` takes the next token as a value. `PAGEVAULT_ANALYTICS` is the one that matters for a
+ * CI-deployed production, where there is no interactive prompt to answer and hand-editing a base64
+ * secret was previously the only way to change the answer (#187).
+ *
+ * An unrecognised value is fatal rather than ignored. `PAGEVAULT_ANALYTICS=yes-please` silently
+ * meaning "didn't say" is the same failure this whole issue is about: a setting that reads as
+ * applied and isn't.
+ */
+export function analyticsChoice(flags = {}, env = process.env) {
+  const word = (v) => String(v).trim().toLowerCase();
+  const ON = ["on", "true", "1", "yes"];
+  const OFF = ["off", "false", "0", "no"];
+
+  if (flags["no-analytics"] === true) return false;
+  if (flags.analytics === true) return true;
+  if (typeof flags.analytics === "string") {
+    if (ON.includes(word(flags.analytics))) return true;
+    if (OFF.includes(word(flags.analytics))) return false;
+    die(`Unrecognised --analytics value: ${flags.analytics}`, `Use ${c.bold("--analytics")} or ${c.bold("--no-analytics")} (or on/off).`);
+  }
+
+  const raw = env.PAGEVAULT_ANALYTICS;
+  if (raw === undefined || word(raw) === "") return undefined;
+  if (ON.includes(word(raw))) return true;
+  if (OFF.includes(word(raw))) return false;
+  die(`Unrecognised PAGEVAULT_ANALYTICS value: ${raw}`, "Use on or off. Unset it to leave view tracking as the deployment has it.");
+}
+
 // --- MCP smoke helpers ------------------------------------------------------
 //
 // `verify` and `health` both drive the live `/mcp` endpoint, so the one JSON-RPC

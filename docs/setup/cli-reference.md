@@ -53,9 +53,15 @@ pagevault init --yes --tier public --email you@example.com
 Re-running `--yes` against a deployment that already has a bearer is fine — it reuses it, and never
 rotates a live one.
 
-### `pagevault upgrade [--yes]`
+### `pagevault upgrade [--yes] [--analytics|--no-analytics]`
 Redeploy the Worker bundle that shipped with your installed package — after `npm update -g pagevault`.
 Keeps your KV, config, and secrets.
+
+`--analytics` / `--no-analytics` turn view tracking on or off. Neither is the normal case: left
+alone, an upgrade keeps view tracking exactly as the deployment already has it, so a redeploy can
+never quietly drop it. `--no-analytics` is the only way off, because doing that by accident costs
+data nothing can recover — Analytics Engine keeps about 90 days and there is no backfill.
+`PAGEVAULT_ANALYTICS=on|off` does the same thing for a non-interactive run.
 
 ### `pagevault login [--url <url>] [--token <token>] [--as <name>]`
 Point the CLI at a deployment: writes `~/.pagevault/config.json` (mode `600` — it holds a bearer) and

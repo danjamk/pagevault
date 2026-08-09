@@ -23,6 +23,21 @@ name: Deploy to production
 
 on:
   workflow_dispatch:
+    inputs:
+      # The only way to change production's view-tracking answer without a local checkout. It used
+      # to mean hand-editing a base64'd secret, so in practice it meant nobody ever changed it — and
+      # production ran for eight releases with view tracking off because the intent file CI rebuilds
+      # never mentioned it (#187).
+      #
+      # `unchanged` is not a third state. It sets nothing, and provisioning falls back the way it
+      # always does: declared intent, then what the deployed Worker actually binds. So flipping this
+      # to `on` once is permanent — the deployment itself carries the answer from then on, and every
+      # later run can leave this alone.
+      analytics:
+        description: "View tracking — leave 'unchanged' unless you mean to flip it"
+        type: choice
+        default: unchanged
+        options: [unchanged, "on", "off"]
 
 # Never let two prod deploys overlap. Don't cancel one in flight — a half-applied deploy is worse
 # than a queued one.
@@ -84,6 +99,11 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_RUNTIME_TOKEN: ${{ secrets.CF_RUNTIME_TOKEN }}
           PAGEVAULT_API_TOKEN: ${{ secrets.PAGEVAULT_API_TOKEN }}
+          # Empty on the default `unchanged`, which reads as "didn't say". Written this way round
+          # deliberately: `x == 'unchanged' && '' || x` looks equivalent and is not — an empty
+          # string is falsy in a GitHub expression, so that form falls through and always emits the
+          # input.
+          PAGEVAULT_ANALYTICS: ${{ inputs.analytics != 'unchanged' && inputs.analytics || '' }}
 
       # Close the loop: assert /health reports the exact <version>+<sha> we just shipped. Fails the
       # run if the rollout didn't take. No token needed — /health is public.
