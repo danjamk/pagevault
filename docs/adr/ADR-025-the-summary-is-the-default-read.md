@@ -1,7 +1,8 @@
 # ADR-025 — The summary is the default read; Analytics Engine is the opt-in
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-08-09
+**Accepted:** 2026-08-09
 **Extends:** ADR-023 (the summary is the history) · ADR-019 decisions 1, 4 (the Worker never reads Analytics Engine; counts and surfaces, never identities)
 **Governs:** #168, #162, #164, #163
 
@@ -25,7 +26,7 @@ Before any of them is built, one question decides all four: **what does `views` 
 
 ### What each source can actually answer
 
-| | Summary | Analytics Engine, live |
+| Question | Summary | Analytics Engine, live |
 |---|---|---|
 | Per-document, per-portal, deployment totals | yes | yes |
 | Daily series, trend | yes | yes (`queryBuckets` exists) |

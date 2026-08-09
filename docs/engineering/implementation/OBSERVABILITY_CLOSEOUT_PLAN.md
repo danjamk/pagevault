@@ -186,8 +186,15 @@ Safety and parity gaps, in order:
    flag that says be careful with this deployment. Latent only while production
    is CI-deployed.
 2. **#180** — no surface can delete a portal, though `DELETE /api/portals/{slug}`
-   is implemented and tested. Carries one real decision: whether MCP gets it at
-   all, given it deletes a client boundary and, with cascade, everything in it.
+   is implemented and tested. **Decided 2026-08-09: the CLI and the console get
+   it; MCP does not.** Deleting a portal removes a client boundary and, with
+   cascade, every document inside it — the one operation in the parity set that
+   is neither recoverable nor narrow. The surface-parity principle says CLI and
+   MCP are the maximum feature set; this is the deliberate exception to it, and
+   the reason is that an agent acting on an ambiguous instruction is exactly the
+   failure mode a client boundary exists to prevent. Record it as an ADR or as a
+   noted exception in `docs/architecture.md` when the work is done, so the gap
+   does not read as an oversight later.
 
 Then #142 (pin documents), #138 (subdomain docs plus the multi-label-TLD zone
 lookup bug), #95 (live MCP acceptance), #31.
