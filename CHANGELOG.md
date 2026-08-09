@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.35.4] — 2026-08-09
+
+A successful install stops being followed by a command that cannot authenticate.
+
 ### Fixed
 - **The bearer `init` just set is one the CLI can actually use.** `init` reported
   `PAGEVAULT_API_TOKEN set` and the very next `pagevault list` reported `No bearer` — four lines
@@ -1603,7 +1607,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.35.3...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.35.4...HEAD
+[0.35.4]: https://github.com/danjamk/pagevault/compare/v0.35.3...v0.35.4
 [0.35.3]: https://github.com/danjamk/pagevault/compare/v0.35.2...v0.35.3
 [0.35.2]: https://github.com/danjamk/pagevault/compare/v0.35.1...v0.35.2
 [0.35.1]: https://github.com/danjamk/pagevault/compare/v0.35.0...v0.35.1
