@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-08-10
+
+Your own traffic, readable from anywhere — and in the conversation you are already having.
+
 ### Added
 - **`pagevault views` needs no Cloudflare credential.** It reads the summary stored in your own
   deployment, over `/api`, with the bearer every other command already uses — so it works from a
@@ -1660,7 +1664,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.35.4...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.36.0...HEAD
+[0.36.0]: https://github.com/danjamk/pagevault/compare/v0.35.4...v0.36.0
 [0.35.4]: https://github.com/danjamk/pagevault/compare/v0.35.3...v0.35.4
 [0.35.3]: https://github.com/danjamk/pagevault/compare/v0.35.2...v0.35.3
 [0.35.2]: https://github.com/danjamk/pagevault/compare/v0.35.1...v0.35.2
