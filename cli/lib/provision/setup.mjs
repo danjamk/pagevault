@@ -15,7 +15,7 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout, versions } from "node:process";
 import { pathToFileURL } from "node:url";
-import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cloudTokenSource, writeEnvLocalVar, cfApi, cfAccounts, acct, tokenSetupFlow, banner, runHint, argValue, fromEnv } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractive, loadCloudToken, cloudTokenSource, writeEnvLocalVar, cfApi, cfAccounts, acct, tokenSetupFlow, banner, runHint, argValue, fromEnv, listZones } from "./context.mjs";
 
 /**
  * The active zones (domains) the pinned account owns — so the rung-2 hostname prompt can suggest
@@ -26,9 +26,12 @@ import { c, ok, info, warn, die, loadContext, saveContext, resolve, isInteractiv
 async function accountZones(ctx) {
   if (!isInteractive() || !loadCloudToken()) return [];
   try {
-    const z = await cfApi("/zones?per_page=50");
-    if (!z.ok) return [];
-    return (z.result ?? [])
+    // `listZones` pages; this used to stop at the first 50, so an operator with more domains than
+    // that could not be offered the one they wanted. Filtered to the pinned account here, which is
+    // what a suggestion list wants — unlike the provisioning checks, which need the wider view to
+    // tell "not a zone" apart from "not YOUR zone" (#138).
+    const zones = await listZones();
+    return (zones ?? [])
       .filter((x) => x.status === "active" && (!ctx.accountId || x.account?.id === ctx.accountId))
       .map((x) => x.name);
   } catch {
