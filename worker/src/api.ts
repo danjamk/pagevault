@@ -38,6 +38,7 @@ import {
   isValidSlug,
   listDocs,
   listPortals,
+  normalizePinned,
   putMembers,
   putPortal,
 } from "./store.js";
@@ -625,8 +626,24 @@ async function portalHandler(request: Request, env: Env, slug: string): Promise<
 
     // Portal metadata (optional, independent of membership).
     let updated: Portal = portal;
-    if (body["name"] !== undefined || body["kind"] !== undefined || body["description"] !== undefined) {
+    if (
+      body["name"] !== undefined ||
+      body["kind"] !== undefined ||
+      body["description"] !== undefined ||
+      body["pinned"] !== undefined
+    ) {
       updated = { ...portal, updatedAt: new Date().toISOString() };
+      // 🔴 The primitive is "set the whole order", not "move this one up". Up / down / to-top /
+      // to-bottom are computed against the current array by the caller, so this endpoint stays
+      // idempotent and costs exactly one write however far something moved. `normalizePinned`
+      // owns the cap, the de-duplication and the trim, so every surface gets the same answer.
+      // An explicit empty array clears the block; omitting the key leaves it alone.
+      if (body["pinned"] !== undefined) {
+        if (!Array.isArray(body["pinned"])) return fail(400, "bad_pinned", "pinned must be an array of filenames");
+        const pinned = normalizePinned(body["pinned"]);
+        if (pinned.length) updated.pinned = pinned;
+        else delete updated.pinned;
+      }
       if (body["name"] !== undefined) updated.name = parseTitle(body["name"]);
       if (body["kind"] !== undefined) updated.kind = parsePortalKind(body["kind"]);
       if (body["description"] !== undefined) {

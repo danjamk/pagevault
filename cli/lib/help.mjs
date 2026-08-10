@@ -278,6 +278,37 @@ quota. Use \`pagevault list --portal <slug>\` instead.`,
 Prints the slug to stdout, so a script can publish into it immediately.`,
   ),
 
+  pin: H(
+    "Usage: pagevault pin <filename> [--portal <slug>] [--top|--bottom|--up|--down|--to <n>]",
+    `
+Lift a document to the top of its portal index. Everything else stays newest-first, grouped by
+month — pinning is opt-in, and a portal with nothing pinned reads exactly as it always has.
+
+  --top       first (the default — you pinned it because it matters)
+  --bottom    last in the pinned block
+  --up        one place up          --down   one place down
+  --to <n>    an explicit 1-based position
+
+The filename, not the title — \`pagevault list\` shows both. It is checked against the deployment
+before anything is written, because a pin naming no document is skipped when the page renders: that
+is what lets a deleted document heal itself, and it would also make a typo silent forever.
+
+The portal is inferred from the document unless the same filename exists in more than one.
+
+Pinning is for the two or three documents a client should see first — the SOW, the "start here".
+A portal with twenty pinned documents has nothing pinned.`,
+  ),
+
+  unpin: H(
+    "Usage: pagevault unpin <filename> [--portal <slug>]",
+    `
+Remove a document from the pinned block. It returns to its place in the chronological list; nothing
+is deleted and no link changes.
+
+Works on a document that no longer exists, which is the case you actually want it for — clearing a
+stale entry left by a deletion. Pass --portal there, since there is no document left to infer from.`,
+  ),
+
   "portal-delete": H(
     "Usage: pagevault portal-delete <slug> [--cascade] [--yes]",
     `

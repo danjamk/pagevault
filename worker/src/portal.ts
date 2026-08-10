@@ -261,19 +261,37 @@ async function portalDocument(
  * SaaS product.
  */
 function renderPortalPage(env: Env, portal: Portal, docs: DocSummary[], isOwner: boolean): Response {
-  const months = groupByMonth(docs);
+  // Pinned first, in the operator's order; the rest stays the month-grouped engagement record.
+  // Zero pinned documents renders this page exactly as it always has — the empty state of the
+  // feature is the old behaviour, which is what makes it safe to ship on live portals.
+  const { pins, rest } = partitionPinned(docs, portal.pinned);
+  const months = groupByMonth(rest);
 
-  const sections = months
-    .map(
-      ([month, entries]) => `
+  // No <h2>. A heading would need a word, and every candidate word ("Featured", "Pinned",
+  // "Start here") is either marketing or an instruction to a client who did not ask for one. The
+  // block reads as "these come first" from position alone, and the row glyph carries the why.
+  const pinnedSection = pins.length
+    ? `
+      <section class="pinned">
+        <ul>
+          ${pins.map((doc) => renderRow(portal, doc, true)).join("")}
+        </ul>
+      </section>`
+    : "";
+
+  const sections =
+    pinnedSection +
+    months
+      .map(
+        ([month, entries]) => `
       <section>
         <h2>${esc(month)}</h2>
         <ul>
           ${entries.map((doc) => renderRow(portal, doc)).join("")}
         </ul>
       </section>`,
-    )
-    .join("");
+      )
+      .join("");
 
   const empty = docs.length === 0 ? `<p class="empty">Nothing here yet.</p>` : "";
 
@@ -334,6 +352,14 @@ function renderPortalPage(env: Env, portal: Portal, docs: DocSummary[], isOwner:
     color: var(--muted); padding: .35rem .45rem; cursor: pointer;
   }
   .share:hover { background: var(--surface); color: var(--accent); border-color: var(--accent); }
+  /* The pinned block. It carries no heading, so the boundary has to come from somewhere — a rule
+     under the last pinned row, which reads as "the list restarts here" and needs no word. First
+     child, so it also removes the top margin the first month heading would otherwise have had. */
+  section.pinned { margin-bottom: 1.75rem; border-bottom: 2px solid var(--border); }
+  section.pinned li:last-child { border-bottom: 0; }
+  /* The pin mark sits with the date, not the title: it explains the ordering, it does not label
+     the document. Muted, like every other mark on this page. */
+  .pin { color: var(--muted); flex: 0 0 auto; }
   /* Date + tags share one line, under the summary. */
   .row-meta {
     display: flex; align-items: center; flex-wrap: wrap; gap: .4rem;
@@ -435,7 +461,7 @@ function renderPortalPage(env: Env, portal: Portal, docs: DocSummary[], isOwner:
   });
 }
 
-function renderRow(portal: Portal, doc: DocSummary): string {
+function renderRow(portal: Portal, doc: DocSummary, pinned = false): string {
   // One helper, so a public portal can never emit a /v/ link — which would walk the reader
   // into an Access login wall and burn a seat on a page that is deliberately public.
   const href = documentPath(portal, doc.id);
@@ -458,7 +484,7 @@ function renderRow(portal: Portal, doc: DocSummary): string {
       <button type="button" class="share" data-share="${esc(href)}" title="Copy link" aria-label="Copy link">${ICON_SHARE}</button>
     </div>
     <div class="row-meta">
-      <span class="date">${esc(date)}</span>${tags}
+      ${pinned ? ICON_PIN : ""}<span class="date">${esc(date)}</span>${tags}
     </div>
   </li>`;
 }
@@ -485,12 +511,56 @@ const ICON_CHECK =
 const ICON_REFRESH =
   `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ` +
   `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 4v5h-5"/></svg>`;
+// The mark on a pinned row. It exists to explain why chronology broke — deliberately NOT a
+// "Featured" badge: a client seeing their own SOW labelled *Featured* reads as marketing, in the one
+// place that is supposed to be their work and not our product. Position is the signal; this is the
+// footnote. `aria-label`, not `aria-hidden`, because for a screen reader the position IS the
+// information and it is the only thing carrying it.
+const ICON_PIN =
+  `<svg class="pin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ` +
+  `stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Pinned"><path d="M12 17v5"/>` +
+  `<path d="M9 3h6l-1 6 3 3H7l3-3z"/></svg>`;
 const typeIcon = (kind?: string): string => (kind === "markdown" ? ICON_MD : ICON_HTML);
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
+
+/**
+ * Split the index into the pinned block and the chronological remainder.
+ *
+ * Pure, and exported so the rules are testable without rendering a page: order is the operator's
+ * and is never sorted; a pinned document appears once, never in both blocks; and an entry naming a
+ * document that is not here is **skipped silently**.
+ *
+ * 🔴 That skip is the self-healing property, not laxity. A pinned document that is deleted, or
+ * renamed without the pin list being patched, must not blank the page or render a dead row — and
+ * fixing it must not require a cleanup write on a read path. (`repinRenamed` in store.ts is what
+ * keeps a rename from needing the skip in the first place.)
+ *
+ * Called AFTER the `ownerOnly` filter, which is what makes a pinned draft invisible to a client for
+ * free rather than by a second rule that could disagree with the first.
+ */
+export function partitionPinned(
+  docs: DocSummary[],
+  pinned: string[] | undefined,
+): { pins: DocSummary[]; rest: DocSummary[] } {
+  if (!pinned?.length) return { pins: [], rest: docs };
+
+  const byName = new Map(docs.map((doc) => [doc.name.toLowerCase(), doc]));
+  const pins: DocSummary[] = [];
+  const taken = new Set<string>();
+
+  for (const name of pinned) {
+    const doc = byName.get(String(name ?? "").trim().toLowerCase());
+    if (!doc || taken.has(doc.id)) continue;
+    pins.push(doc);
+    taken.add(doc.id);
+  }
+
+  return { pins, rest: docs.filter((doc) => !taken.has(doc.id)) };
+}
 
 /** Newest first, grouped by month. The engagement, in order. */
 function groupByMonth(docs: DocSummary[]): [string, DocSummary[]][] {

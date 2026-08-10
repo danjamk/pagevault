@@ -15,6 +15,7 @@ import { resolveTarget, describeTarget, resolveBearerSource, stateEnvPath, state
 import { PROTECTED_COMMANDS, emptyRegistry, findByName, findByUrl, listDeployments, loadRegistry, protectedCommands, saveRegistry, shouldAdoptCurrent, upsert } from "../lib/registry.mjs";
 
 import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "../lib/format.mjs";
+import { applyPin, applyUnpin } from "../lib/pins.mjs";
 import { helpText, usageError } from "../lib/help.mjs";
 import { buildExport } from "../lib/export.mjs";
 import { formatReferrers, formatRollup, formatViews, plural, queryBuckets, queryReferrers, queryViews, summarizeReferrers, summarizeViews } from "../lib/views.mjs";
@@ -225,6 +226,10 @@ async function main() {
       return portalCreate(positional, flags);
     case "portal-delete":
       return portalDelete(positional, flags);
+    case "pin":
+      return pin(positional, flags);
+    case "unpin":
+      return unpin(positional, flags);
     case "share":
       return share(positional, flags);
     case "rm":
@@ -688,6 +693,121 @@ async function portalDelete(pos, flags) {
   note(`Deleted portal "${slug}"${res.deleted ? ` and ${res.deleted} document${res.deleted === 1 ? "" : "s"}` : ""}.`);
 }
 
+/**
+ * Pinning — the order the portal index leads with (#142).
+ *
+ * 🔴 The filename is RESOLVED against the deployment before anything is written, and that is not
+ * politeness. `partitionPinned` skips a pin naming no document, deliberately — it is what makes a
+ * deleted or renamed document heal itself instead of blanking the page. The cost of that design is
+ * that a typo pins nothing and says nothing, forever. So the one place that can still tell the
+ * difference between "not here yet" and "misspelled" — the moment the operator types it — has to.
+ *
+ * The portal is inferred from the document when it is unambiguous, because `--portal` on top of a
+ * filename is a thing to remember for no benefit in the ordinary case of a filename existing once.
+ */
+async function resolvePinTarget(cfg, name, flags) {
+  const portalFlag = typeof flags.portal === "string" ? flags.portal : undefined;
+  const qs = portalFlag ? `?portal=${encodeURIComponent(portalFlag)}` : "";
+  const { docs = [] } = await api(cfg, "GET", `/docs${qs}`);
+
+  const wanted = String(name).trim().toLowerCase();
+  const matches = docs.filter((d) => String(d.name ?? "").toLowerCase() === wanted);
+
+  if (!matches.length) {
+    throw new PvError(
+      `No document named "${name}"${portalFlag ? ` in portal "${portalFlag}"` : ""}.\n\n` +
+        "Pinning names a FILENAME, not a title — `pagevault list` shows both.\n" +
+        "A pin naming nothing is skipped when the page renders, so this would have been silent.",
+    );
+  }
+
+  // One filename, two portals. The pin lives on a portal, so guessing here would pin the wrong
+  // client's document — cheap to refuse, expensive to get wrong.
+  const portals = [...new Set(matches.map((d) => d.portal))];
+  if (portals.length > 1) {
+    throw new PvError(
+      `"${name}" exists in ${portals.length} portals: ${portals.join(", ")}.\n\n` +
+        `Say which:  pagevault ${flags._cmd ?? "pin"} ${name} --portal <slug>`,
+    );
+  }
+
+  return { portal: portals[0], doc: matches[0] };
+}
+
+/** GET the portal, apply `change` to its pin list, PATCH the whole order back. */
+async function writePins(cfg, portalSlug, change) {
+  const portal = await api(cfg, "GET", `/portals/${encodeURIComponent(portalSlug)}`);
+  const before = portal.pinned ?? [];
+  const after = change(before);
+
+  const updated = await api(cfg, "PATCH", `/portals/${encodeURIComponent(portalSlug)}`, { pinned: after });
+  const kept = updated.pinned ?? [];
+
+  // 🔴 Version skew, not a cap. An older Worker does not know the `pinned` field, ignores it, and
+  // answers 200 with the portal unchanged — so the write silently did nothing. npm ships
+  // independently of deploys (ADR-010), which makes "new CLI, old Worker" the ORDINARY state right
+  // after `npm update -g pagevault`, not an edge case. Distinguishable because we sent a non-empty
+  // list and the field came back absent entirely; clearing pins sends `[]` and legitimately gets
+  // nothing back, which is why the guard is on what we SENT.
+  if (after.length && !kept.length) {
+    throw new PvError(
+      `${cfg.url} accepted the request but stored no pin order.\n\n` +
+        "That deployment is running a Worker from before pinning existed — it ignored the field.\n" +
+        "Bring it up to this CLI with `pagevault upgrade` (or `make deploy` from a checkout).\n\n" +
+        "Nothing was changed, and nothing else about the portal was touched.",
+    );
+  }
+
+  // A real cap. The Worker owns it, so it can keep fewer than we sent — say so rather than printing
+  // a list the operator did not ask for and letting them find the missing one later.
+  if (kept.length < after.length) {
+    note(`⚠ ${after.length - kept.length} dropped — a portal holds at most ${kept.length} pinned documents.`);
+  }
+  return kept;
+}
+
+/** The pinned block, in order, as the operator will see it. */
+const showPins = (pinned) =>
+  pinned.length
+    ? note(`Pinned, in order:\n${pinned.map((n, i) => `  ${i + 1}. ${n}`).join("\n")}`)
+    : note("Nothing pinned — the portal reads newest-first, as it always has.");
+
+async function pin(pos, flags) {
+  const name = pos[0];
+  if (!name) throw new PvError(usageError("pin"));
+
+  const cfg = commandTarget(flags);
+  const { portal } = await resolvePinTarget(cfg, name, { ...flags, _cmd: "pin" });
+
+  // Exactly one placement, so two of them is a typo rather than a preference to resolve.
+  const ops = ["top", "bottom", "up", "down"].filter((o) => flags[o] === true);
+  if (flags.to !== undefined) ops.push("to");
+  if (ops.length > 1) throw new PvError(`Pick one placement, not ${ops.length}: ${ops.map((o) => `--${o}`).join(" ")}`);
+
+  const op = flags.to !== undefined ? Number(flags.to) : (ops[0] ?? "top");
+  if (op === "to" || (typeof op === "number" && !Number.isFinite(op))) {
+    throw new PvError(`--to needs a position, e.g. --to 2`);
+  }
+
+  const kept = await writePins(cfg, portal, (before) => applyPin(before, name, op));
+  note(`Pinned "${name}" in portal "${portal}".`);
+  showPins(kept);
+}
+
+async function unpin(pos, flags) {
+  const name = pos[0];
+  if (!name) throw new PvError(usageError("unpin"));
+
+  const cfg = commandTarget(flags);
+  // Deliberately NOT resolved against the documents: unpinning a name whose document is already
+  // gone is exactly the cleanup someone would want, and refusing it would strand the entry.
+  const portalSlug = typeof flags.portal === "string" ? flags.portal : (await resolvePinTarget(cfg, name, { ...flags, _cmd: "unpin" })).portal;
+
+  const kept = await writePins(cfg, portalSlug, (before) => applyUnpin(before, name));
+  note(`Unpinned "${name}" from portal "${portalSlug}".`);
+  showPins(kept);
+}
+
 async function share(pos, flags) {
   const [portal, ...rest] = pos;
   const add = [...rest, ...(splitList(flags.emails) ?? [])];
@@ -1086,6 +1206,8 @@ Portals — the client boundary; permissions live here, not on the document:
   pagevault share <portal> <email> [email …]        grant access to everything in it
   pagevault share <portal> --remove a@b,c@d         revoke it
   pagevault portal-delete <slug> [--cascade] [--yes]  delete it; --cascade takes the documents too
+  pagevault pin <filename> [--top|--bottom|--up|--down|--to <n>]   lead the index with it
+  pagevault unpin <filename>          back to newest-first
 
 Operate your deployment:
   pagevault status [--json]           what this install is configured for (local, no network)

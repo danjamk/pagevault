@@ -30,6 +30,7 @@ import {
   normalizeName,
   putDoc,
   putMembers,
+  repinRenamed,
   putMeta,
   putMoved,
   putPortal,
@@ -374,6 +375,18 @@ export async function editDocument(env: Env, id: string, edit: DocEdit): Promise
   if (next.publicToken) await putPublicToken(env, next.publicToken, newId);
   await putMoved(env, id, newId);
   await deleteDocKeys(env, meta);
+
+  // 🔴 Carry the pin across the rename (#142). Pins name FILENAMES (ADR-017), so a rename that
+  // did not patch the list would drop the document out of the pinned block — silently, because
+  // `partitionPinned` skips an unknown name by design, and that skip is what makes a *deletion*
+  // self-healing. Correcting a typo would quietly unpin the thing you had chosen to feature.
+  //
+  // Last, and non-fatal by placement rather than by a catch: the document has already moved
+  // correctly at this point, and a failure to re-pin must not turn a completed rename into an
+  // error the caller reports as a failed one. Costs one write on top of a rename's 9–11.
+  const portal = await getPortal(env, meta.portal);
+  const repinned = repinRenamed(portal?.pinned, meta.name, next.name);
+  if (portal && repinned) await putPortal(env, { ...portal, pinned: repinned, updatedAt: next.updatedAt });
 
   return { meta: next, movedFrom: id };
 }
