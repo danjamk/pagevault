@@ -139,18 +139,51 @@ at Secured.
 
 ### A domain, in the same Cloudflare account
 
-A custom domain replaces the `*.workers.dev` URL with your own. It must be a **zone
-in the same Cloudflare account** as the Worker — Cloudflare can't use a domain that
-lives in a different account.
+A custom domain replaces the `*.workers.dev` URL with your own. PageVault serves a
+**subdomain** — `pagevault.example.com`, `reports.example.com` — so your existing website
+at `example.com` is untouched.
 
-- **Check:** the domain appears under **Websites** in your Cloudflare dashboard,
-  status *Active*.
-- **Get it:** register one through **Cloudflare Registrar** (it lands in your account
-  automatically), or add a domain you already own by pointing its nameservers at
-  Cloudflare. A cheap throwaway domain is fine for testing.
+What Cloudflare needs is the **apex domain's DNS**. Not the registration, not the website,
+not the email — the nameservers. Which of two situations you are in decides everything:
 
-> Have the domain in a *different* Cloudflare account? It can't be used across
-> accounts — register or move one into the account running PageVault.
+| Your situation | Can you do this? |
+|---|---|
+| The domain's DNS **can move** to Cloudflare (or is already there) | **Yes** — free, ~15 minutes plus propagation |
+| The domain's DNS **must stay** where it is, and you want only a subdomain delegated | **No** — Enterprise-only |
+
+⚠️ **The second row is a hard limit, not a difficulty.** Cloudflare's
+[subdomain setup](https://developers.cloudflare.com/dns/zone-setups/subdomain-setup/) —
+adding `reports.example.com` as a zone of its own while the apex stays elsewhere — is
+available on **Enterprise plans only**. Free, Pro and Business can do full setup and nothing
+else. If your DNS genuinely cannot move, use a different domain, or stay on `*.workers.dev`.
+
+- **Check:** the domain appears under **Websites** in your Cloudflare dashboard, status
+  *Active*. `make preflight` checks the same thing and names what is wrong.
+- **Already on Cloudflare?** Nothing to do. Skip to the install.
+
+#### Moving a domain's DNS to Cloudflare
+
+The part that sounds alarming and is not: **your registration does not move**, you do not
+transfer the domain, and your existing website and email keep working. You are changing
+which nameservers answer for the domain.
+
+1. **Add the site.** Cloudflare dashboard → *Add a site* → the **apex** domain
+   (`example.com`, never `reports.example.com`) → **Free** plan.
+2. **Check what it imported.** Cloudflare scans your current DNS and copies what it finds.
+   This is the step that matters — go through the record list against your current provider
+   before continuing. **`MX` records are the ones to verify**: a missing `MX` is silently
+   broken email, and you will find out from a client rather than from an error.
+3. **Change the nameservers at your registrar** — GoDaddy, Namecheap, Squarespace, Google
+   Domains, wherever the domain is registered. Cloudflare gives you two to paste in.
+4. **Wait for *Active*.** Usually minutes, occasionally up to 24 hours. Cloudflare emails you.
+5. **Then run the install** with `pagevault.example.com` as the host.
+
+> Have the domain in a *different* Cloudflare account? It can't be used across accounts —
+> register or move one into the account running PageVault.
+
+> No domain at all, and you don't mind buying one? **Cloudflare Registrar** is the shortcut —
+> a domain registered there lands in your account already Active, and steps 1–4 do not happen.
+> A cheap throwaway domain is fine for testing.
 
 ---
 

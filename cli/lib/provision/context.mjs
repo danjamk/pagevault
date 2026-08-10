@@ -379,6 +379,64 @@ export async function cfAccounts() {
 /** Cloudflare's error list, flattened to a line. */
 export const cfErr = (errors = []) => errors.map((e) => `[${e.code}] ${e.message}`).join("; ");
 
+// --- Zones ------------------------------------------------------------------
+
+/**
+ * 🔴 The Cloudflare zone that serves `host`, chosen from the zones that actually exist.
+ *
+ * This used to be `host.split(".").slice(-2).join(".")` — take the last two labels and call that the
+ * domain. That is not what a domain is. `pv.acme.co.uk` derives `co.uk`, no zone by that name is
+ * found, and provisioning dies with "No Cloudflare zone found for co.uk" on a setup that is
+ * perfectly valid. Everyone on `.co.uk`, `.com.au`, `.co.nz`, `.co.jp` — and every other multi-label
+ * TLD — hit it, and the error named a domain they had never typed (#138).
+ *
+ * There is no rule that recovers the registrable domain from a hostname; the public suffix list is
+ * data, not an algorithm, and shipping a copy of it to answer one question would be absurd. So stop
+ * deriving and start matching: the account's own zone list is the authority on where its zones split,
+ * and it is one API call we can afford.
+ *
+ * **Longest match wins**, which matters in the one case where two candidates are both real: an
+ * account holding both `acme.co.uk` and a delegated `eu.acme.co.uk` should serve `pv.eu.acme.co.uk`
+ * from the more specific of the two. A host that IS a zone matches itself.
+ *
+ * Pure, so the rule is testable without an account — which is the half that was wrong.
+ */
+export function pickZone(zones, host) {
+  const h = String(host ?? "").trim().toLowerCase().replace(/\.$/, "");
+  if (!h) return null;
+  const matches = (zones ?? []).filter((z) => {
+    const n = String(z?.name ?? "").trim().toLowerCase();
+    return n !== "" && (h === n || h.endsWith(`.${n}`));
+  });
+  // Ties are impossible — two zones cannot share a name — so length alone is a total order here.
+  return matches.sort((a, b) => b.name.length - a.name.length)[0] ?? null;
+}
+
+/**
+ * Every zone this token can see, across pages.
+ *
+ * Deliberately NOT filtered to the pinned account. `preflight` reports "that domain is in a
+ * different account" as its own distinct failure, and a filtered list could only ever say "not
+ * found" — which sends an operator looking for a zone that is sitting right there. Callers that
+ * want one account's zones filter the result themselves.
+ *
+ * Cloudflare caps `per_page` at 50 here. The page cap is a runaway guard, not a real limit: 500
+ * zones on the account a single operator provisions PageVault from is not a case worth paging for.
+ *
+ * `api` is injectable so the paging and the `null`-vs-`[]` distinction can be tested without a
+ * Cloudflare account — the same pattern `readEnvVar` and `restoreHint` use.
+ */
+export async function listZones({ maxPages = 10, api = cfApi } = {}) {
+  const zones = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const r = await api(`/zones?per_page=50&page=${page}`);
+    if (!r.ok) return page === 1 ? null : zones; // null = could not ask, which is not "none exist"
+    zones.push(...(r.result ?? []));
+    if (page >= (r.result_info?.total_pages ?? 1)) break;
+  }
+  return zones;
+}
+
 // --- What the deployment actually has ---------------------------------------
 
 /** The Worker script name. Fixed by the committed wrangler.jsonc; the API paths are built from it. */

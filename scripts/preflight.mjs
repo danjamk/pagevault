@@ -11,7 +11,7 @@
 // preflight just points there.
 //
 import { versions } from "node:process";
-import { c, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, acct, shortId, slug, banner } from "../cli/lib/provision/context.mjs";
+import { c, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, acct, shortId, slug, banner, listZones, pickZone } from "../cli/lib/provision/context.mjs";
 
 const ctx = loadContext();
 const rung = ctx.rung ?? 1;
@@ -88,12 +88,16 @@ if (account) {
   // rung 2: the domain must be a zone in this account, and its hostname record must be free —
   // a Worker custom domain creates its OWN record and Cloudflare refuses over an existing one.
   if (rung >= 2 && host) {
-    const zoneName = host.split(".").slice(-2).join(".");
-    const z = await cfApi(`/zones?name=${encodeURIComponent(zoneName)}`);
-    const zone = z.ok ? z.result?.[0] : null;
-    if (!zone) fail("Domain zone", `"${zoneName}" is not a zone on this account`, "Add it via Cloudflare Registrar, or move it in.");
-    else if (zone.account?.id !== account.id) fail("Domain zone", `"${zoneName}" is in a different account`, "Move it into this account.");
-    else if (zone.status !== "active") warn("Domain zone", `"${zoneName}" is "${zone.status}" — nameservers may not be live yet`);
+    // Matched against the account's real zones rather than derived from the hostname: the old
+    // `slice(-2)` read `pv.acme.co.uk` as the zone `co.uk` and failed a valid setup (#138).
+    // Unfiltered by account on purpose — "it is in a different account" is a distinct verdict here,
+    // and a filtered list could only ever say "not found".
+    const zones = await listZones();
+    const zone = pickZone(zones, host);
+    if (zones === null) fail("Domain zone", "could not list zones", "Add 'Zone — DNS — Edit' to the token.");
+    else if (!zone) fail("Domain zone", `no zone on this token serves "${host}"`, "Move the domain's DNS to Cloudflare — see docs/setup/prerequisites.md.");
+    else if (zone.account?.id !== account.id) fail("Domain zone", `"${zone.name}" is in a different account`, "Move it into this account.");
+    else if (zone.status !== "active") warn("Domain zone", `"${zone.name}" is "${zone.status}" — nameservers may not be live yet`);
     else {
       pass("Domain zone", `${zone.name} active`);
 

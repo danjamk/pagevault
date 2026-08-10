@@ -8,6 +8,18 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 ## [Unreleased]
 
 ### Fixed
+- **A domain on a multi-label TLD can be provisioned.** The zone was *derived* from the hostname by
+  taking its last two labels, so `pv.acme.co.uk` resolved to the zone `co.uk`, found nothing, and
+  killed provisioning with an error naming a domain the operator had never typed. Every `.co.uk`,
+  `.com.au`, `.co.nz` and `.co.jp` operator hit it on a setup that was perfectly valid. There is no
+  rule that recovers a registrable domain from a hostname — the public suffix list is data, not an
+  algorithm — so the zone is now **matched against the ones the account actually has**, longest
+  suffix winning. ([#138](../../issues/138))
+- **The "no zone" message says what to do about it.** It named a derived string and offered "the
+  domain must already be on Cloudflare DNS"; it now lists the zones the account does have and points
+  at the nameserver move. `preflight` keeps telling "not a zone" apart from "in a different account".
+- **The hostname suggestions in `init` page.** They stopped at the first 50 domains, so an operator
+  with more could not be offered the one they wanted.
 - **`--no-analytics` now sticks at the Public tiers.** It was honoured for one deploy and then
   forgotten: rungs 1–2 deliberately recorded nothing, so a `declared` value set months earlier by a
   Secured provision outranked it forever. An operator who said `--no-analytics`, saw `off`, and
@@ -21,6 +33,15 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
   `upgrade` resolved through the build record and never read the registry at all, so the gate could
   not fire even in principle. It now refuses without an explicit `--yes`, before anything is built or
   contacted. Unprotected deployments are unchanged. ([#176](../../issues/176))
+
+### Changed
+- **[`docs/setup/prerequisites.md`](docs/setup/prerequisites.md) — the domain section, rewritten**
+  around the two situations operators actually arrive in: DNS that *can* move to Cloudflare
+  (supported, free, a walkthrough) and DNS that *must* stay elsewhere with only a subdomain
+  delegated. The second is **Enterprise-only** and is now said out loud rather than left implied, so
+  nobody spends an afternoon on it. The walkthrough leads with what the move does not touch —
+  registration, the existing website, email — and flags verifying `MX` records as the step whose
+  failure mode is silently broken email. ([#138](../../issues/138))
 
 ### Added
 - **The deploy banner names the deployment.** ADR-021 gave deployments names so the operator

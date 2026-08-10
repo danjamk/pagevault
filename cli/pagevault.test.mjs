@@ -15,7 +15,7 @@ import { loadConfig } from "./lib/client.mjs";
 // Still imported from provision.mjs though it now lives in context.mjs (#190) — the re-export is
 // part of that module's surface, so this pins it too.
 import { resolveAnalytics } from "./lib/provision/provision.mjs";
-import { analyticsChoice, analyticsPatch, stripAnalyticsBinding, bindsAnalytics } from "./lib/provision/context.mjs";
+import { analyticsChoice, analyticsPatch, stripAnalyticsBinding, bindsAnalytics, listZones, pickZone } from "./lib/provision/context.mjs";
 
 const BIN = fileURLToPath(new URL("./bin/pagevault.mjs", import.meta.url));
 
@@ -885,6 +885,77 @@ test("rung 1–2 keeps a binding the live Worker already has (#190, ADR-024)", (
   // to warn that it had nowhere to go.
   assert.equal(resolveAnalytics({ flag: true, declared: undefined, live: null }).value, true);
   assert.equal(resolveAnalytics({ flag: false, declared: undefined, live: true }).downgrade, false);
+});
+
+// --- the zone that serves a host (#138) ---------------------------------------------------------
+
+const Z = (...names) => names.map((name) => ({ name, id: name }));
+
+test("🔴 a multi-label TLD resolves to the right zone (#138)", () => {
+  // The bug: `host.split(".").slice(-2).join(".")` read `pv.acme.co.uk` as the zone `co.uk`, found
+  // nothing by that name, and killed provisioning with "No Cloudflare zone found for co.uk" — naming
+  // a domain the operator had never typed, on a setup that is perfectly valid. Everyone on .co.uk,
+  // .com.au, .co.nz and every other multi-label TLD hit it.
+  assert.equal(pickZone(Z("acme.co.uk"), "pv.acme.co.uk").name, "acme.co.uk");
+  assert.equal(pickZone(Z("acme.com.au"), "pagevault.acme.com.au").name, "acme.com.au");
+  assert.equal(pickZone(Z("acme.co.nz"), "reports.acme.co.nz").name, "acme.co.nz");
+
+  // And the ordinary two-label case that always worked keeps working.
+  assert.equal(pickZone(Z("example.com"), "pagevault.example.com").name, "example.com");
+  assert.equal(pickZone(Z("example.com"), "a.b.c.example.com").name, "example.com", "depth is not the rule");
+});
+
+test("the most specific zone wins, and a host that is a zone matches itself", () => {
+  // The one case where two candidates are both real: an account holding a delegated subdomain zone
+  // alongside its parent. Serving from the parent would put the record in the wrong zone.
+  assert.equal(pickZone(Z("acme.co.uk", "eu.acme.co.uk"), "pv.eu.acme.co.uk").name, "eu.acme.co.uk");
+  assert.equal(pickZone(Z("eu.acme.co.uk", "acme.co.uk"), "pv.eu.acme.co.uk").name, "eu.acme.co.uk",
+    "and the answer does not depend on the order Cloudflare returned them");
+  assert.equal(pickZone(Z("share.example.com"), "share.example.com").name, "share.example.com");
+});
+
+test("a near-miss is not a match", () => {
+  // Suffix on a LABEL boundary, never on characters — `notexample.com` must not match a zone
+  // `example.com`, or provisioning would write a DNS record into somebody else's domain.
+  assert.equal(pickZone(Z("example.com"), "notexample.com"), null);
+  assert.equal(pickZone(Z("example.com"), "example.com.evil.net"), null);
+  assert.equal(pickZone(Z("acme.co.uk"), "pv.other.co.uk"), null);
+
+  // Nothing to match against, or nothing to match — never a throw, and never a false positive.
+  assert.equal(pickZone([], "pv.example.com"), null);
+  assert.equal(pickZone(null, "pv.example.com"), null);
+  assert.equal(pickZone(Z("example.com"), ""), null);
+  assert.equal(pickZone(Z("example.com"), undefined), null);
+  assert.equal(pickZone([{ name: "" }, null], "pv.example.com"), null, "a malformed zone is skipped");
+});
+
+test("hostname casing and a trailing dot are the same host", () => {
+  assert.equal(pickZone(Z("example.com"), "PageVault.Example.COM").name, "example.com");
+  assert.equal(pickZone(Z("Example.com"), "pagevault.example.com").name, "Example.com");
+  assert.equal(pickZone(Z("example.com"), "pagevault.example.com.").name, "example.com", "the FQDN root dot");
+});
+
+test("listing zones pages, and cannot-ask is not the same as none-exist", async () => {
+  const page = (names, total) => ({ ok: true, result: Z(...names), result_info: { total_pages: total } });
+
+  const calls = [];
+  const api = async (path) => {
+    calls.push(path);
+    return path.includes("page=1") ? page(["a.com"], 2) : page(["b.co.uk"], 2);
+  };
+  assert.deepEqual((await listZones({ api })).map((z) => z.name), ["a.com", "b.co.uk"]);
+  assert.deepEqual(calls, ["/zones?per_page=50&page=1", "/zones?per_page=50&page=2"]);
+
+  // 🔴 null, not []. A token that cannot list zones has told us nothing about whether the zone
+  // exists — and the caller's message differs completely ("fix your token" vs "move your DNS").
+  assert.equal(await listZones({ api: async () => ({ ok: false, errors: [] }) }), null);
+
+  // An account with genuinely no zones is [], which IS an answer.
+  assert.deepEqual(await listZones({ api: async () => page([], 1) }), []);
+
+  // The page cap is a runaway guard: a server that always claims another page must still terminate.
+  const forever = async () => page(["x.com"], 9999);
+  assert.equal((await listZones({ api: forever, maxPages: 3 })).length, 3);
 });
 
 test("view tracking can be set by flag or by environment, and the flag wins", () => {

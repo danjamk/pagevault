@@ -22,7 +22,7 @@ import {
   fromEnv, writeEnvLocalVar, isInteractive, banner, releaseTag, BUNDLE_PATH, applyBundleMode,
   generatedConfigPath, templatePath, runHint, RUNNING_FROM_REPO, deployedBindings, analyticsChoice,
   resolveAnalytics, stripAnalyticsBinding, bindsAnalytics, analyticsBecause, refuseAnalyticsDowngrade,
-  analyticsDashboard,
+  analyticsDashboard, listZones, pickZone,
 } from "./context.mjs";
 import { parseArgs } from "../format.mjs";
 
@@ -95,10 +95,27 @@ export async function provisionAccess(opts = {}) {
 
   // --- Zone: the host must be a Cloudflare zone ------------------------------
 
-  const zoneName = host.split(".").slice(-2).join(".");
-  const zres = await cfApi(`/zones?name=${encodeURIComponent(zoneName)}`);
-  const zone = zres.ok ? zres.result?.[0] : null;
-  if (!zone) die(`No Cloudflare zone found for "${zoneName}".`, "The domain must already be on Cloudflare DNS.");
+  // Matched against the account's real zones, never derived from the hostname — see `pickZone`.
+  const zones = await listZones();
+  const zone = pickZone(zones, host);
+  if (!zone) {
+    const mine = (zones ?? []).filter((z) => z.account?.id === account.id).map((z) => z.name);
+    die(`No Cloudflare zone in this account serves "${host}".`, [
+      ...(zones === null
+        ? ["  Could not list this account's zones — check the token has 'Zone — DNS — Edit'."]
+        : mine.length
+          ? ["  Zones on this account:", ...mine.slice(0, 12).map((z) => `    ${c.bold(z)}`),
+             ...(mine.length > 12 ? [`    ${c.dim(`… and ${mine.length - 12} more`)}`] : [])]
+          : ["  This account has no zones at all."]),
+      "",
+      "  PageVault serves a SUBDOMAIN of a zone Cloudflare hosts the DNS for. Registration can stay",
+      "  wherever it is — what has to move is the nameservers, and the apex domain's whole DNS with",
+      "  them. Cloudflare has no free or Pro path to delegate one subdomain on its own.",
+      "",
+      `  ${c.bold("docs/setup/prerequisites.md")} walks the nameserver move — it is ~15 minutes plus`,
+      "  propagation, and existing website and email records carry over.",
+    ]);
+  }
   ok(`Zone: ${zone.name} ${c.dim(shortId(zone.id))}`);
 
   // --- KV: self-healing, same reconcile as tier0 -----------------------------
