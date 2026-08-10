@@ -278,6 +278,27 @@ quota. Use \`pagevault list --portal <slug>\` instead.`,
 Prints the slug to stdout, so a script can publish into it immediately.`,
   ),
 
+  "portal-delete": H(
+    "Usage: pagevault portal-delete <slug> [--cascade] [--yes]",
+    `
+Delete a portal. Without --cascade it refuses on a portal that holds documents, and names them —
+that refusal is the safety feature, not an obstacle to route around.
+
+  --cascade         delete the documents in it too. No undo; the /p/ and /v/ links go with them
+  --yes             skip the confirmation (required in a script)
+
+The confirmation matches the blast radius. An empty portal asks y/N. A cascading delete makes you
+type the slug back, after naming what it is about to destroy — the same gesture \`destroy\` uses,
+because "3 documents" and "fourteen months of an engagement" are different decisions.
+
+Take a copy first if there is any doubt:  pagevault export --portal <slug>
+
+On a deployment registered with \`login --protected\`, this needs an explicit --yes.
+
+There is no MCP tool for this, deliberately — see ADR-026. An agent may create and share; it may
+not end a client boundary.`,
+  ),
+
   share: H(
     `Usage: pagevault share <portal> <email> [email …]     grant access
        pagevault share <portal> --remove a@b,c@d     revoke it`,

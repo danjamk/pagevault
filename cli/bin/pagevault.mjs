@@ -223,6 +223,8 @@ async function main() {
       return portals(flags);
     case "portal-create":
       return portalCreate(positional, flags);
+    case "portal-delete":
+      return portalDelete(positional, flags);
     case "share":
       return share(positional, flags);
     case "rm":
@@ -591,6 +593,99 @@ async function portalCreate(pos, flags) {
   }
   // stdout carries the one thing a script wants — the slug it can now publish into.
   out(portal.slug);
+}
+
+/**
+ * Delete a portal — the one command that can end a client's entire record.
+ *
+ * `DELETE /api/portals/{slug}` has existed and been tested since the portal API was written, and
+ * had no caller on ANY surface (#180). So removing a mistyped slug meant hand-rolling a request with
+ * a bearer read out of `deployments.json`, and the only shipped alternative was `destroy`, which
+ * takes the whole deployment with it.
+ *
+ * 🔴 The confirmation is proportional to what is being destroyed, because one gesture cannot be
+ * right for both cases here:
+ *
+ *   empty portal          → y/N, like `rm`. A slug and nothing else.
+ *   documents, no flag    → refused. `--cascade` is the deliberate act, and asking "are you sure"
+ *                           in its place would train the reflex this is trying to avoid.
+ *   documents + --cascade → type the slug back, like `destroy`. Naming the count first, because
+ *                           "3 documents" and "fourteen months of an engagement" are different
+ *                           decisions and only the operator can tell which one this is.
+ *
+ * The count comes from a listing, and the SERVER's 409 is still the authority — KV is eventually
+ * consistent, so a document published between the listing and the delete is a real case, and the
+ * refusal it produces is surfaced intact rather than retried with cascade.
+ */
+async function portalDelete(pos, flags) {
+  const slug = pos[0];
+  if (!slug) throw new PvError(usageError("portal-delete"));
+
+  const cfg = commandTarget(flags);
+  requireYesOnProtected(cfg, flags, "deleting a portal");
+
+  const path = `/portals/${encodeURIComponent(slug)}`;
+  const { portals: all = [] } = await api(cfg, "GET", "/portals");
+  const portal = all.find((p) => p.slug === slug);
+  if (!portal) {
+    throw new PvError(
+      `No portal "${slug}" on ${cfg.url}.\n\n` +
+        `Portals: ${all.map((p) => p.slug).join(", ") || "(none)"}`,
+    );
+  }
+
+  const { docs = [] } = await api(cfg, "GET", `/docs?portal=${encodeURIComponent(slug)}`);
+
+  if (docs.length && flags.cascade !== true) {
+    // Refuse in the same shape the Worker would, before touching it. Naming the documents is the
+    // point: a count is a number, and a list is a decision.
+    throw new PvError(
+      `Portal "${slug}" holds ${docs.length} document${docs.length === 1 ? "" : "s"}. Deleting it deletes them too.\n\n` +
+        docs.slice(0, 8).map((d) => `  · ${d.name ?? d.title}`).join("\n") +
+        (docs.length > 8 ? `\n  … and ${docs.length - 8} more` : "") +
+        `\n\nThere is no undo, and the /p/ and /v/ links go with them.\n` +
+        `  pagevault portal-delete ${slug} --cascade    delete the portal AND everything in it\n` +
+        `  pagevault export --portal ${slug}            take a copy first`,
+    );
+  }
+
+  if (flags.yes !== true) {
+    if (!stdin.isTTY) {
+      throw new PvError(`Refusing to delete portal "${slug}" non-interactively without --yes.`);
+    }
+    const rl = createInterface({ input: stdin, output: stderr });
+    let ok;
+    if (docs.length) {
+      // The destroy model. A y/N here would be answered by reflex, and this is the gesture that
+      // ends an engagement's record.
+      note(`Deleting portal "${slug}" and all ${docs.length} document${docs.length === 1 ? "" : "s"} in it. This cannot be undone.`);
+      ok = (await rl.question(`Type the portal slug to confirm (${slug}): `)).trim() === slug;
+    } else {
+      ok = (await rl.question(`Delete empty portal "${slug}"? [y/N] `)).trim().toLowerCase() === "y";
+    }
+    rl.close();
+    if (!ok) return note("Cancelled — nothing was deleted.");
+  }
+
+  let res;
+  try {
+    res = await api(cfg, "DELETE", `${path}${flags.cascade === true ? "?cascade=true" : ""}`);
+  } catch (err) {
+    // The Worker refused because the portal filled up between our listing and this call — KV has no
+    // read-after-write guarantee, so this is a real race and not a hypothetical. Surface its
+    // refusal unchanged; do not "resolve" it by adding cascade to a delete the operator sized
+    // against a smaller portal.
+    if (err.code === "portal_not_empty") {
+      throw new PvError(
+        `${err.message}\n\n` +
+          "That count is higher than when this command started — something was published in\n" +
+          "between. Re-run and read it again before adding --cascade.",
+      );
+    }
+    throw err;
+  }
+
+  note(`Deleted portal "${slug}"${res.deleted ? ` and ${res.deleted} document${res.deleted === 1 ? "" : "s"}` : ""}.`);
 }
 
 async function share(pos, flags) {
@@ -990,6 +1085,7 @@ Portals — the client boundary; permissions live here, not on the document:
                                 [--description "…"]
   pagevault share <portal> <email> [email …]        grant access to everything in it
   pagevault share <portal> --remove a@b,c@d         revoke it
+  pagevault portal-delete <slug> [--cascade] [--yes]  delete it; --cascade takes the documents too
 
 Operate your deployment:
   pagevault status [--json]           what this install is configured for (local, no network)

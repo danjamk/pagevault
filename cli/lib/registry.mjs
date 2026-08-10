@@ -117,7 +117,7 @@ export function findByName(registry, name) {
  * `destroy` is deliberately absent: it has a stronger guard of its own (type the hostname), so
  * naming it here would imply `--yes` is sufficient for it, which it is not.
  */
-export const PROTECTED_COMMANDS = ["rm", "revoke", "rotate", "upgrade"];
+export const PROTECTED_COMMANDS = ["rm", "revoke", "rotate", "portal-delete", "upgrade"];
 
 /** The list as prose — "rm, revoke, rotate and upgrade". */
 export const protectedCommands = () =>

@@ -238,6 +238,24 @@ Open a new client boundary. The slug is the URL segment and the handle every oth
 
 Prints the slug to stdout, so it pipes into a publish.
 
+### `pagevault portal-delete <slug> [--cascade] [--yes]`
+Close a client boundary. Without `--cascade` it **refuses** on a portal that holds documents, and
+names them — that refusal is the safety feature, not an obstacle to route around.
+
+| Flag | Effect |
+|---|---|
+| `--cascade` | delete the documents in it too. No undo, and the `/p/` and `/v/` links go with them |
+| `--yes` | skip the confirmation (required in a script, and on a `--protected` deployment) |
+
+The confirmation matches the blast radius: an empty portal asks `y/N`; a cascading delete names what
+it is about to destroy and makes you type the slug back, the same gesture `destroy` uses.
+
+⚠️ Take a copy first if there is any doubt — `pagevault export --portal <slug>` writes a
+human-readable folder tree, and this is the one command with nothing to restore from afterwards.
+
+**There is no `delete_portal` MCP tool, deliberately.** An agent may create and share; it may not end
+a client boundary. See [ADR-026](../adr/ADR-026-mcp-creates-and-shares-it-does-not-destroy.md).
+
 ### `pagevault share <portal> <email> [email …]` · `--remove a@b,c@d`
 Grant or revoke access to a whole portal — one write covers every document in it. Permissions live
 on the portal, not the document, so adding someone to a client's team is one call, not fourteen.
