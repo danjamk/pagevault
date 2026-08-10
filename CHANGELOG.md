@@ -7,6 +7,41 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **Pin documents to the top of a portal, in an order you set.** The index sorts newest-first, which
+  is right for an accumulating engagement and wrong nine months in, when the SOW and the "start
+  here" doc are buried under fourteen weekly updates. `pagevault pin <filename>` with
+  `--top/--bottom/--up/--down/--to <n>`, and `unpin`. **Zero pinned documents renders the page
+  exactly as it rendered before this existed**, which is what makes it safe on live client portals.
+  ([#142](../../issues/142))
+- **The order lives on the portal, not the document.** One write per reorder however many items
+  move — a per-document `featured` flag would cost one write per document per drag, 30–80 against a
+  1000/day quota to arrange one page — and an array cannot express the contradiction two documents
+  both claiming position 2 would be. Same argument as ADR-005: permissions live on the portal
+  because the portal is the unit, and so does the presentation of the collection. Capped at 8; a
+  page with twenty featured items features nothing.
+- **`pin_documents` over MCP**, so *"put the architecture doc above the roadmap"* works from the
+  conversation. It sets the whole order rather than nudging it, and **reports the filenames it
+  dropped** — the renderer skips a pin naming no document, which is what makes a deleted document
+  self-healing, so a model that guessed a filename would otherwise be told it succeeded while the
+  page showed nothing. `list_documents` now reports each document's pin position, which is what
+  makes a *relative* move expressible at all.
+- **Console controls** — pin, unpin, up, down. Quiet until a row is hovered, except on a pinned row
+  where the control is the state rather than an affordance. The client's portal index deliberately
+  gets none: its CSP is `default-src 'none'` with no `connect-src`, so that page cannot make an API
+  call at all, and adding one to serve an owner-only feature would widen the most locked-down
+  surface we serve — on the page every client loads.
+
+### Fixed
+- **A rename carries the pin with it.** Pins name filenames (ADR-017), and the renderer skips an
+  unknown one by design — so correcting a typo would have quietly unpinned the document you had
+  chosen to feature, with nothing anywhere saying so. ([#142](../../issues/142))
+- **`make check-docs` counts the MCP tools.** It compared the registered tools against
+  `connect-mcp.md` by name and could not read the three documents that state the count in English.
+  Two consecutive releases added a tool and found "fourteen tools" stale afterwards, by grep. Now a
+  build failure. Point-in-time records — ADRs, plans, the CHANGELOG, the retrospective — are exempt,
+  because a quantity in a story is grammatically identical to a claim about the registry.
+
 ## [0.37.0] — 2026-08-10
 
 Say which deployment you mean, and mean it — plus a way to close a client boundary.
