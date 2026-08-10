@@ -42,6 +42,7 @@ import {
   putPortal,
 } from "./store.js";
 import { assertFits, getViewSummary, mergeSummary, parseViewSummary, putViewSummary, syncRisk, withStats } from "./views.js";
+import { rollup } from "./rollup.js";
 import { log } from "./log.js";
 
 /**
@@ -132,6 +133,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
     if (rest === "/views/summary") {
       if (request.method === "POST") return await putViewSummaryHandler(request, env);
+      if (request.method === "GET") return await getViewsHandler(request, env);
       return fail(405, "method_not_allowed", `${request.method} not allowed on /api/views/summary`);
     }
 
@@ -267,6 +269,83 @@ async function putViewSummaryHandler(request: Request, env: Env): Promise<Respon
     documents: Object.keys(summary.docs).length,
     ...(reset ? { reset: true } : {}),
   });
+}
+
+/**
+ * `GET /api/views/summary` — view history, without a Cloudflare credential (#168, ADR-025).
+ *
+ * 🔴 The point of this route is what it does NOT need. Reading traffic used to mean querying
+ * Analytics Engine directly, which needs an account-scoped `Account Analytics Read` token and an
+ * account id — so an operator running a deployment they did not provision (production deployed by
+ * CI, read from a client-only install) could not see their own numbers at all. They were never
+ * missing the data: it sits in `views:summary`, in the KV namespace their bearer already reads for
+ * every other command. There was simply no way to ask for it.
+ *
+ * The Worker still cannot query Analytics Engine and gains no capability here (ADR-019 decision 1,
+ * unchanged by ADR-025). This is aggregation over data the operator already synced in.
+ *
+ * `?raw=true` returns the stored summary verbatim. Kept deliberately distinct from the rolled-up
+ * form: the summary is the durable artifact, and something must be able to fetch it for backup
+ * without a rollup's opinions applied.
+ */
+async function getViewsHandler(request: Request, env: Env): Promise<Response> {
+  const params = new URL(request.url).searchParams;
+  const summary = await getViewSummary(env);
+
+  if (params.get("raw") === "true") {
+    return json({ summary, ...(summary ? {} : { state: "never-synced" }) });
+  }
+
+  const now = new Date();
+  // Asked of the binding, never inferred from an empty summary: "recorded nothing" and "cannot
+  // record" produce identical data and mean opposite things (#185).
+  const recording = analyticsEnabled(env);
+
+  // The window. `days` is the ergonomic form every other surface already speaks; explicit `from`/`to`
+  // exist because a rollup asked for a fixed historical window must not move under the caller.
+  const days = clampDays(params.get("days"));
+  const to = params.get("to") ?? dayKey(now.getTime());
+  const from = params.get("from") ?? dayKey(now.getTime() - (days - 1) * 86_400_000);
+
+  const portal = params.get("portal") ?? undefined;
+  const doc = params.get("doc") ?? undefined;
+
+  // The document index the rollup needs: a document's portal is not in the summary, and cannot be
+  // (a document can move between portals — ADR-017 makes identity `(portal, filename)`).
+  const docs = (await listDocs(env, portal)).map((d) => ({
+    id: d.id,
+    portal: d.portal,
+    title: d.title,
+    name: d.name,
+    createdAt: d.createdAt,
+  }));
+
+  return json(
+    rollup(summary, docs, {
+      from,
+      to,
+      portal,
+      doc,
+      recording,
+      risk: syncRisk(summary, now.toISOString(), recording),
+    }),
+  );
+}
+
+/** `YYYY-MM-DD` for an epoch-ms instant. */
+const dayKey = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+
+/**
+ * A window length that cannot be used to make the Worker do unbounded work.
+ *
+ * Bounded at ten years rather than at the 90-day Analytics Engine horizon: since ADR-023 the
+ * summary ACCUMULATES, so it is the only source for history older than a live query can see, and
+ * capping at 90 here would hide exactly the data this route exists to expose.
+ */
+function clampDays(raw: string | null): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return 30;
+  return Math.min(Math.floor(n), 3650);
 }
 
 async function createDoc(request: Request, env: Env): Promise<Response> {

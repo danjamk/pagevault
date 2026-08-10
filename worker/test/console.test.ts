@@ -416,3 +416,56 @@ describe("shareable portal link on the portal card", () => {
     expect(body).toMatch(/return null;\s*\n\s*}/);
   });
 });
+
+describe("traffic panel (#164)", () => {
+  // The panel is built client-side, so these assert the embedded script's copy and its refusals.
+  // What matters here is not the chart — it is that the page never claims to be live, and never
+  // offers a control it cannot honour.
+  it("is reachable from the sidebar and reads the stored summary, not Analytics Engine", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain('id="nav-traffic"');
+    expect(body).toContain("/api/views/summary");
+    // This panel IS the dashboard: Analytics Engine has none, and is absent from the GraphQL API.
+    expect(body).toContain("how much was read");
+  });
+
+  it("🔴 shows sync STATUS and a command, never a sync button", async () => {
+    // The Worker cannot read Analytics Engine at all (ADR-019 decision 1), so a button here would
+    // have nothing to call. The honest surface is the command that works.
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain("pagevault sync-views");
+    expect(body).toContain("the Worker cannot read");
+    expect(body).not.toContain("Sync now");
+  });
+
+  it("🔴 never offers to take a Cloudflare token", async () => {
+    // That would put an account-scoped credential in a web page, where any console XSS inherits
+    // it — ADR-002's blast-radius argument relocated one hop. Considered and refused.
+    //
+    // Asserted on the FIELD, not on wording: the inline script ships its own comments to the
+    // browser, so a phrase match here passes or fails on prose that explains the refusal rather
+    // than on whether the refusal holds. This first cut matched its own comment.
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).not.toContain("CLOUDFLARE_API_TOKEN");
+    expect(body).not.toMatch(/<input[^>]*(cf|cloudflare)[^>]*>/i);
+  });
+
+  it("says the numbers are not live, and when they were taken", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain("Not live.");
+    expect(body).toContain("As of ");
+  });
+
+  it("never-synced and not-recording are their own states, not an empty chart", async () => {
+    // An empty panel reads as "nobody visited" — the exact lie the zero-versus-null rule stops.
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain("No history captured yet");
+    expect(body).toContain("not recording views");
+  });
+
+  it("states that referrers ignore the window", async () => {
+    // They carry no date (ADR-023 §5), so a windowed heading over them would be a wrong number.
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+    expect(body).toContain("referrers carry no date");
+  });
+});

@@ -169,8 +169,9 @@ async function fetchSyncRisk(base, bearer) {
  */
 function reportSyncRisk(risk) {
   if (!risk) return;
-  // Not `runHint`: `make views` has no sync path — scripts/views.mjs only queries — so
-  // `pagevault sync-views` is the only way to do this from either front door.
+  // `make sync-views` now exists and reaches the same engine (#166), but this stays the CLI form on
+  // purpose: `health` runs from installed deployments with no Makefile at all, and naming a target
+  // that is not there is worse than naming the longer command that always is.
   const fix = "pagevault sync-views";
   const days = (n) => `${n} day${n === 1 ? "" : "s"}`;
 

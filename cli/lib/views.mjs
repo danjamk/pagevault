@@ -527,6 +527,157 @@ export function formatReferrers({ days, sources }, c) {
   ].join("\n");
 }
 
+/**
+ * Render the stored summary's rollup — the DEFAULT read since ADR-025 (#168).
+ *
+ * A formatter and nothing more. The aggregation happens in the Worker (`worker/src/rollup.ts`) and
+ * arrives over `GET /api/views/summary`, because this file has no build step and cannot import the
+ * Worker's TypeScript — so computing it here would be a second implementation of the same
+ * arithmetic over a versioned wire shape, and the copy nobody watches is the one that drifts.
+ *
+ * 🔴 The four states are rendered as four different things. An empty table is not an acceptable
+ * rendering of "no sync has run": it reads as "nobody visited", which is the precise lie the
+ * zero-versus-null rule exists to stop.
+ */
+export function formatRollup(r, c, { by = "doc" } = {}) {
+  const dim = c?.dim ?? ((s) => s);
+  const bold = c?.bold ?? ((s) => s);
+
+  const asOf = r.syncedAt ? String(r.syncedAt).slice(0, 16).replace("T", " ") : null;
+  const window = `${r.window.from} to ${r.window.to}`;
+
+  if (r.state === "never-synced") {
+    return [
+      "No history captured yet.",
+      "",
+      dim("Views reach Analytics Engine the moment a page opens, but nothing moves them into the"),
+      dim("durable summary until you ask. Analytics Engine keeps ~90 days; the summary keeps everything."),
+      "",
+      `  ${bold("pagevault sync-views")}   ${dim("promote what has been recorded so far")}`,
+    ].join("\n");
+  }
+
+  if (r.state === "not-recording") {
+    // Zero here would be a measurement. There is no binding, so there is no measurement (#185).
+    return [
+      "This deployment is not recording views.",
+      "",
+      dim("The Worker has no Analytics Engine binding, so nothing is being counted and nothing will be."),
+      ...(r.total.views
+        ? [dim(`The ${plural(r.total.views, "view")} below were measured before it was turned off, and are still true.`), ""]
+        : [""]),
+      `  ${bold("pagevault upgrade --analytics")}   ${dim("start recording")}`,
+    ].join("\n");
+  }
+
+  // One table per breakdown (#162). `doc` is the default because "which document did they read" is
+  // the question people arrive with; the other three are the ones the old shape could not answer at
+  // all — it grouped by `(portal, doc, title, surface, viewer)`, so a document was many rows and
+  // there was no time axis anywhere.
+  const HEADS = {
+    doc: ["VIEWS", "DOCUMENT", "PORTAL", "LINK", "PUBLIC", "PORTAL", "LAST"],
+    portal: ["VIEWS", "PORTAL", "DOCS", "LINK", "PUBLIC", "PORTAL"],
+    day: ["DAY", "VIEWS", ""],
+    surface: ["VIEWS", "DOOR", "WHAT IT MEANS"],
+    referrer: ["VIEWS", "SOURCE"],
+  };
+  const peak = Math.max(1, ...r.byDay.map((d) => d.views));
+  const ROWS = {
+    doc: () =>
+      r.byDoc.map((d) => [
+        String(d.views),
+        truncate(d.title, 38),
+        d.portal,
+        String(d.surfaces.link),
+        String(d.surfaces.public),
+        String(d.surfaces.portal),
+        d.lastViewedAt ? String(d.lastViewedAt).slice(0, 16).replace("T", " ") : dim("—"),
+      ]),
+    portal: () =>
+      r.byPortal.map((p) => [
+        String(p.views),
+        p.portal,
+        String(p.docs),
+        String(p.surfaces.link),
+        String(p.surfaces.public),
+        String(p.surfaces.portal),
+      ]),
+    // A bar per day, scaled to the busiest one. The point of `--by day` is the SHAPE — whether
+    // traffic is rising, or all of it landed the afternoon you sent the link — and a column of
+    // numbers makes the reader do that work themselves.
+    day: () =>
+      r.byDay.map((d) => [
+        d.granularity === "month" ? `${d.key}    ${dim("(month)")}` : d.key,
+        String(d.views),
+        dim("▇".repeat(Math.max(1, Math.round((d.views / peak) * 24)))),
+      ]),
+    // Which door they came through. The third column is not decoration: "link 50" means nothing
+    // until you know a link is a /p/ capability URL that opens with no login, and that distinction
+    // is the one an operator most needs when reading their own numbers.
+    surface: () => [
+      [String(r.total.surfaces.portal), "portal", dim("signed in, through the portal")],
+      [String(r.total.surfaces.link), "link", dim("a /p/ capability URL — no login")],
+      [String(r.total.surfaces.public), "public", dim("a listed public portal page")],
+    ],
+    referrer: () => r.byReferrer.map((s) => [String(s.views), s.host || dim("direct")]),
+  };
+
+  const head = HEADS[by];
+  const body = ROWS[by]();
+
+  const widths = head.map((h, i) => Math.max(visible(h).length, ...body.map((row) => visible(row[i]).length)));
+  const line = (cells) => cells.map((cell, i) => pad(cell, widths[i])).join("  ").trimEnd();
+
+  // Under `--by doc` the sources ride along as a second block, because "what did they read" and
+  // "where did they come from" are usually one question. Every other breakdown gets one table.
+  const referrers =
+    by === "doc" && r.byReferrer.length
+      ? [
+          "",
+          bold("SOURCES"),
+          ...r.byReferrer.slice(0, 8).map((s) => `  ${String(s.views).padStart(5)}  ${s.host || dim("direct")}`),
+          dim("  All-time per portal — referrers carry no date, so the window above does not apply."),
+        ]
+      : [];
+
+  const emptyLine = {
+    doc: `Nothing was opened between ${window}.`,
+    portal: `No portal recorded traffic between ${window}.`,
+    day: `No day between ${window} recorded a view.`,
+    surface: `Nothing was opened between ${window}, through any door.`,
+    referrer: "No referrers recorded. Every visit arrived without one, or nothing has been opened.",
+  }[by];
+
+  return [
+    ...(body.length ? [bold(line(head)), ...body.map(line)] : [dim(emptyLine)]),
+    ...referrers,
+    "",
+    // 🔴 All-time, and it must say so even here: referrers are stored per portal with no date
+    // (ADR-023 §5), so a windowed heading over them would be a wrong number rather than a narrow
+    // one. This is the breakdown where the mistake would be easiest to make.
+    ...(by === "referrer"
+      ? [dim(`${plural(r.total.views, "view")} in the window; the sources above are ALL-TIME and ignore it.`)]
+      : [dim(`${plural(r.total.views, "view")} across ${plural(r.byDoc.filter((d) => d.views > 0).length, "document")}, ${window}.`)]),
+    // Provenance, every time. A number whose source and staleness are unstated is the ADR-024
+    // failure mode one domain over — it reads as current at exactly the moment it is not.
+    dim(`Source: the stored summary, synced ${asOf}. Not live — run \`pagevault sync-views\` to refresh.`),
+    ...(r.scope.monthlyBuckets
+      ? [dim(`${plural(r.scope.monthlyBuckets, "bucket")} older than 90 days are monthly, so those views carry no day.`)]
+      : []),
+    ...(r.risk.state === "warn" || r.risk.state === "urgent" || r.risk.state === "losing"
+      ? [
+          "",
+          bold(
+            r.risk.state === "losing"
+              ? `${plural(r.risk.lostDays, "day")} of history is already unrecoverable.`
+              : `${plural(r.risk.uncapturedDays, "day")} of history becomes unrecoverable in ${plural(r.risk.daysUntilLoss ?? 0, "day")}.`,
+          ),
+          dim("  pagevault sync-views"),
+        ]
+      : []),
+  ].join("\n");
+}
+
 export const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** Column widths must ignore ANSI, or a styled cell throws the whole table off. */

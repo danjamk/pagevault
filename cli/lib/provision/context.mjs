@@ -564,6 +564,7 @@ export const EXPECTED_MCP_TOOLS = [
   "rotate_public_link",
   "revoke_document",
   "edit_document",
+  "traffic",
   "server_info",
 ];
 

@@ -329,33 +329,45 @@ reports that there is no group, which is expected.
   ),
 
   views: H(
-    "Usage: pagevault views [--days 30] [--portal s] [--doc id] [--account id] [--json]",
+    "Usage: pagevault views [--by doc|portal|day|surface|referrer] [--days 30] [--portal s] [--doc id] [--live] [--who] [--json]",
     `
-Which documents were actually opened, and where the traffic came from. A read-only look at the
-last 90 days. Reads Analytics Engine directly with your Cloudflare token — the Worker's binding is
-write-only, so it can never run this query itself (ADR-015).
+How much your documents were read. Reads the summary stored in your deployment — so it needs only
+your PageVault bearer, no Cloudflare token and no account id, and it works from any machine that
+can reach the deployment, including one that did not provision it.
 
-  --account <id>   the Cloudflare account to query. Defaults to the one this install provisioned;
-                   pass it when this machine did not provision the deployment — production
-                   deployed by CI, say. A token scoped to Account Analytics (Read) is enough,
-                   and cannot deploy or destroy anything.
+The summary ACCUMULATES. Analytics Engine keeps ~90 days; the summary keeps everything that has
+ever been synced into it, so this reaches further back than a live query can see. It is only as
+current as your last \`pagevault sync-views\` — the output says when that was, every time.
 
-Below the table, the hosts that linked to your documents — or "direct". The linking HOST only,
-never the page it linked from: that path is someone else's private context (ADR-023). Skipped
-under --doc, where a per-portal aggregate would be a wrong answer rather than a narrower one.
+  --by <what>      doc (default) · portal · day · surface · referrer. One table each. \`day\` draws the shape,
+                   which is the question a column of numbers makes you answer yourself.
+  --days <n>       window for the document counts. Default 30.
+  --portal <slug>  one client.
+  --doc <id>       one document. Referrers are dropped, not narrowed: they aggregate per portal
+                   (ADR-023), so printing them under one document would be a wrong answer.
 
-A "(portal index)" row is someone landing on a collection page without opening anything. Counted
-apart from document views, and recording no viewer on any surface — including /v/, where Access
-knows who it was.
+  --live           ask Analytics Engine instead — what has happened since the last sync, and WHO
+                   opened it. Needs a Cloudflare token with Account Analytics (Read) and sees only
+                   the last 90 days.
+  --who            show viewer identities. Implies --live: the summary has never held an identity
+                   (ADR-019), so there is nowhere else to get one.
+  --account <id>   with --live, the Cloudflare account to query. Defaults to the one this install
+                   provisioned; pass it when this machine did not.
+
+Referrers are the linking HOST only, never the page it linked from — that path is someone else's
+private context (ADR-023). They carry no date, so they are all-time even when the table above is
+windowed, and the output says so.
 
 Automated previews and unfurls fetch the page too, so public numbers read high.
 
-View records are ACCOUNT-LEVEL and outlive the deployment that wrote them: after a teardown and
-rebuild this shows history the new deployment never created. Cloudflare keeps them three months
-and documents no way to delete a dataset.
+Under --live, a "(portal index)" row is someone landing on a collection page without opening
+anything. The summary does not store those, so they appear only there.
 
-This command only LOOKS. To make the numbers durable — and to let an agent see them — run
-\`pagevault sync-views\`.`,
+Under --live, view records are ACCOUNT-LEVEL and outlive the deployment that wrote them: after a
+teardown and rebuild that query shows history the new deployment never created. The stored summary
+belongs to the deployment and does not have this problem.
+
+To make the numbers durable — and to let an agent see them — run \`pagevault sync-views\`.`,
   ),
 
   "sync-views": H(

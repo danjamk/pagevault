@@ -523,7 +523,9 @@ MOVES the document, see ADR-020), `create_portal`, `update_portal_members`,
 the CLI's `rm`, not a link-only revoke).
 
 **Read — the differentiator:** `list_portals`, `list_documents`, `read_document`,
-`search_portal`, `server_info` (version + host, readable in-chat). Thirteen tools in all.
+`search_portal`, `traffic` (volume, trend and referrers, from the stored summary — counts and
+surfaces, never identities), `server_info` (version + host, readable in-chat). Fourteen tools in
+all.
 
 Documents are also exposed as **MCP Resources** (`pagevault://{portal}/{id}`), so a host can
 attach one directly rather than round-tripping through a tool call. See

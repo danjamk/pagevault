@@ -679,10 +679,15 @@ test("🔴 `views --sync` still works, and says where it moved", () => {
 
 test("both forms are reachable from help, and views no longer advertises the flag", () => {
   assert.match(runIn(registryHome(), "help", "sync-views").text, /Move view counts out of Analytics Engine/);
-  // `views` is now described as read-only, and points at the command that makes numbers durable.
+  // `views` reads; `sync-views` writes. This asserted the phrase "A read-only look" until ADR-025
+  // rewrote what `views` reads (#168) — the property it was protecting is that `views` never
+  // advertises a way to write and always names the command that does.
   const views = runIn(registryHome(), "help", "views").text;
-  assert.match(views, /A read-only look/);
+  assert.doesNotMatch(views, /--sync\b/, "the write half is its own command, not a flag here");
   assert.match(views, /pagevault sync-views/);
+  // And the point of #168: the default read needs no Cloudflare credential.
+  assert.match(views, /no Cloudflare token/);
+  assert.match(views, /--live/, "the live query is still reachable, as an opt-in");
 });
 
 // --- View tracking across a re-deploy (#187) --------------------------------

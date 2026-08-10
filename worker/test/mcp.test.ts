@@ -175,6 +175,7 @@ describe("/mcp — protocol", () => {
       "rotate_public_link",
       "search_portal",
       "server_info",
+      "traffic",
       "update_portal_members",
     ]);
   });
@@ -252,7 +253,9 @@ describe("⭐ structured tool output — the read→publish chain is machine-rea
       .map((t) => t.name)
       .sort();
 
-    // The five #81 chain tools, plus server_info (#98) — all machine-readable returns.
+    // The five #81 chain tools, plus server_info (#98) and traffic (#163) — all machine-readable
+    // returns. `traffic` earns one for the same reason `list_documents` does: an agent asked to
+    // compare two windows or chart a trend needs the numbers, not a paragraph to re-parse.
     expect(withSchema).toEqual([
       "list_documents",
       "list_portals",
@@ -260,6 +263,7 @@ describe("⭐ structured tool output — the read→publish chain is machine-rea
       "read_document",
       "search_portal",
       "server_info",
+      "traffic",
     ]);
 
     // The emitted schema is an object schema — the shape a 2020-12 host expects (SEP-1613).
@@ -1007,5 +1011,121 @@ describe("view metrics ride along with the read tools (#127)", () => {
       expect(tool.description).toContain("viewsSyncedAt");
       expect(tool.description).toContain("not from");
     }
+  });
+});
+
+describe("/mcp — traffic (#163)", () => {
+  const SYNCED = "2026-07-30T09:00:00.000Z";
+  const today = new Date().toISOString().slice(0, 10);
+
+  const sync = (docs: Record<string, unknown>, portals: Record<string, unknown> = {}) =>
+    SELF.fetch(`${HOST}/api/views/summary`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ v: 2, syncedAt: SYNCED, coverage: { from: "2026-05-01", to: today }, docs, portals }),
+    });
+
+  async function publishBackdated(title: string): Promise<string> {
+    const { structured } = await callToolFull("publish_document", { title, html: `<h1>${title}</h1>` });
+    const id = structured["id"] as string;
+    const { getMeta, putMeta } = await import("../src/store.js");
+    const meta = (await getMeta(env, id))!;
+    await putMeta(env, { ...meta, createdAt: "2026-01-01T00:00:00.000Z" });
+    return id;
+  }
+
+  beforeEach(async () => {
+    await env.PAGEVAULT.delete("views:summary");
+  });
+
+  it("🔴 never-synced is said in words, not reported as zero views", async () => {
+    // An agent that reads "0" will tell the operator the client never opened it. That is a
+    // different claim from "nothing has been measured", and it is the one thing a deployment
+    // with no history cannot support.
+    const { text, structured } = await callToolFull("traffic");
+    expect(text).toContain("No view history has been captured yet");
+    expect(text).toContain("NOT zero views");
+    expect(text).toContain("pagevault sync-views");
+    expect(structured["state"]).toBe("never-synced");
+    expect(structured["syncedAt"]).toBeNull();
+  });
+
+  it("reports totals and a breakdown, from the same rollup the CLI and console read", async () => {
+    const id = await publishBackdated("Measured");
+    await sync({ [id]: { [today]: { link: 5, portal: 2, t: "10:00:00" } } }, { default: { "": 3, "news.ycombinator.com": 2 } });
+
+    const { text, structured } = await callToolFull("traffic", { days: 30 });
+    expect(structured["state"]).toBe("ok");
+    expect(structured["total"]).toMatchObject({ views: 7 });
+    expect((structured["byDoc"] as Record<string, unknown>[])[0]).toMatchObject({ id, views: 7 });
+    expect(text).toContain("7 views");
+  });
+
+  it("🔴 staleness is in the PROSE, not only in structuredContent", async () => {
+    // A host that renders only text would otherwise show a column of numbers with no "as of",
+    // which reads as live. ADR-019 decision 6.
+    const id = await publishBackdated("Stale");
+    await sync({ [id]: { [today]: { link: 1 } } });
+
+    const { text, structured } = await callToolFull("traffic");
+    expect(text).toContain("As of the last sync, 2026-07-30");
+    expect(text).toContain("not live");
+    expect(structured["syncedAt"]).toBe(SYNCED);
+  });
+
+  it("🔴 carries counts and surfaces, and no identity anywhere", async () => {
+    // Not a redaction — the stored summary has never held a viewer (ADR-019 decision 4). Pinned
+    // so a later change that starts storing one cannot leak it through this tool by default.
+    const id = await publishBackdated("No Identities");
+    await sync({ [id]: { [today]: { portal: 4, owner: 2 } } });
+
+    const { structured } = await callToolFull("traffic");
+    const serialized = JSON.stringify(structured);
+    expect(serialized).not.toContain("@");
+    expect(serialized).not.toContain("viewer");
+    expect(serialized).not.toContain("owner");
+    expect(structured["total"]).toMatchObject({ surfaces: { link: 0, public: 0, portal: 4 } });
+  });
+
+  it("--by referrer says the counts ignore the window", async () => {
+    // Referrers carry no date (ADR-023 §5). A model repeating a windowed heading over them would
+    // state a wrong number.
+    const id = await publishBackdated("Referred");
+    await sync({ [id]: { [today]: { link: 1 } } }, { default: { "t.co": 9 } });
+
+    const { text } = await callToolFull("traffic", { by: "referrer" });
+    expect(text).toContain("ALL-TIME");
+    expect(text).toContain("t.co: 9");
+  });
+
+  it("a portal filter narrows the answer", async () => {
+    const id = await publishBackdated("In Default");
+    await sync({ [id]: { [today]: { link: 3 } } });
+
+    const { structured } = await callToolFull("traffic", { portal: "nonexistent" });
+    expect(structured["byDoc"]).toEqual([]);
+    expect(structured["total"]).toMatchObject({ views: 0 });
+  });
+
+  it("--by surface names each door in words the operator uses", async () => {
+    // The split is only useful if the reader knows a "link" view arrived through a /p/ capability
+    // URL that needs no login. Raw keys make them look up the vocabulary.
+    const id = await publishBackdated("Doors");
+    await sync({ [id]: { [today]: { link: 4, portal: 2, pub: 1 } } });
+
+    const { text } = await callToolFull("traffic", { by: "surface" });
+    expect(text).toContain("portal (signed in): 2");
+    expect(text).toContain("link (capability URL, no login): 4");
+    expect(text).toContain("public (listed portal page): 1");
+  });
+
+  it("the tool description tells the model the numbers are not live", async () => {
+    const payload = await result(await rpc("tools/list"));
+    const tools = payload["tools"] as { name: string; description: string }[];
+    const traffic = tools.find((t) => t.name === "traffic")!;
+    expect(traffic.description).toContain("NOT from live traffic");
+    expect(traffic.description).toContain("never imply");
+    // And that it is the wrong tool for "did this person open it".
+    expect(traffic.description).toContain("never reports WHO");
   });
 });

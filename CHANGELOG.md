@@ -7,6 +7,59 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **`pagevault views` needs no Cloudflare credential.** It reads the summary stored in your own
+  deployment, over `/api`, with the bearer every other command already uses — so it works from a
+  machine that did not provision the deployment, which is the ordinary case for a production
+  instance deployed by CI. It also reaches further back than it could before: Analytics Engine keeps
+  ~90 days, the accumulated summary keeps everything ever synced into it. ([#168](../../issues/168))
+- **`GET /api/views/summary`** — owner-scoped, returning totals and breakdowns by document, portal,
+  day and referrer for a requested window, alongside coverage, the sync time and the staleness
+  verdict. `?raw=true` returns the stored summary verbatim, for backup. The route was POST-only.
+- **`worker/src/rollup.ts`** — one aggregation, computed in the Worker and shared by every surface
+  that reports traffic. The CLI asks for it over HTTP; the console and MCP will call it in-process.
+  A client-side rollup would be a second implementation of the same arithmetic over a versioned wire
+  shape, and the copy nobody watches is the one that drifts.
+- **`--live` and `--who` on `views`.** `--live` keeps the Analytics Engine query — what has happened
+  since the last sync, and who opened it. `--who` implies it: the summary has never held an identity
+  (ADR-019 §4), so there is nowhere else to get one.
+- **`views --by doc|portal|day|referrer`.** The old shape grouped by
+  `(portal, doc, title, surface, viewer)`, so one document was many rows, `VIEWS` was a per-row
+  number, and there was no time axis anywhere. Now a document is one row with one number, portals
+  and days total properly, and `--by day` draws the shape rather than making you read it out of a
+  column of numbers. ([#162](../../issues/162))
+- **`make sync-views`.** The write half was reachable from the CLI and not from `make`, so one front
+  door could not reach half the feature. ([#166](../../issues/166))
+- **A `traffic` MCP tool.** Metrics reached agents only as fields riding along inside
+  `list_documents` and `read_document`, so an agent could answer *did they open this document* and
+  nothing else — not how much traffic last week, which portal is busiest, whether a referrer is
+  producing anything, or what the trend is. That is the question most worth asking in the place it
+  could not be asked: while you are already in a conversation about that client. Same rollup,
+  called in-process. Counts and surfaces, never identities. The staleness stamp is in the prose as
+  well as `structuredContent`, so a host that renders only text still sees "as of".
+  ([#163](../../issues/163))
+- **A traffic panel in the console.** Deployment total, a daily sparkline, per-portal bars and top
+  referrers, from the same rollup — read through the owner session the console already holds, so no
+  Cloudflare credential reaches the page. This panel *is* the dashboard: Analytics Engine has no
+  console of its own, is absent from the GraphQL API, and so cannot feed Cloudflare's Custom
+  Dashboards either. Sync **status**, never a sync button — the Worker cannot read Analytics Engine,
+  so a button would have nothing to call; it shows when the summary was taken, how much history is
+  at risk, and the command that fixes it. ([#164](../../issues/164))
+
+### Removed
+- **`scripts/views.mjs`** — a second implementation of `views` that queried Analytics Engine
+  directly. `make views` now calls the CLI, so both front doors reach one engine and a flag added to
+  either reaches both. It stays zero-config: the CLI resolves this checkout's deployment from the
+  marker beside the Makefile. ([#166](../../issues/166))
+
+### Changed
+- **The Worker still cannot read Analytics Engine, and gains no capability here.** ADR-019 decision
+  1 is unchanged by ADR-025 — this serves a KV value the operator synced in.
+- **A CLI newer than its deployment says so.** Asking an older Worker for view history returned a
+  raw `405 method_not_allowed`, which reads as a broken deployment rather than an out-of-date one.
+  Since the package ships on npm independently of any deploy (ADR-010), that is the ordinary state
+  after `npm update -g pagevault`, not an edge case.
+
 ## [0.35.4] — 2026-08-09
 
 A successful install stops being followed by a command that cannot authenticate.

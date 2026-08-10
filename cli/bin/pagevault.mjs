@@ -17,7 +17,7 @@ import { emptyRegistry, findByName, findByUrl, listDeployments, loadRegistry, sa
 import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "../lib/format.mjs";
 import { helpText, usageError } from "../lib/help.mjs";
 import { buildExport } from "../lib/export.mjs";
-import { formatReferrers, formatViews, plural, queryBuckets, queryReferrers, queryViews, summarizeReferrers, summarizeViews } from "../lib/views.mjs";
+import { formatReferrers, formatRollup, formatViews, plural, queryBuckets, queryReferrers, queryViews, summarizeReferrers, summarizeViews } from "../lib/views.mjs";
 
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
@@ -1025,6 +1025,62 @@ async function views(flags) {
     note("Note: `views --sync` is now `pagevault sync-views` — same flags, same behaviour.");
     note("      The old form keeps working; the new one reads correctly in a crontab.");
     return syncViews(flags);
+  }
+
+  // 🔴 The stored summary is the DEFAULT read (ADR-025, #168). It needs no Cloudflare credential
+  // and no account id — just the deployment bearer every other command already uses — and since
+  // ADR-023 it accumulates, so it answers for history older than the 90 days a live query can see.
+  //
+  // `--live` is the opt-in for the other question: did THIS person open it, and what has happened
+  // since the last sync. `--who` implies it, because identities exist nowhere else — the summary
+  // has never held one (ADR-019 §4).
+  const live = flags.live === true || flags.who === true;
+  if (!live) {
+    // `--by` is summary-only. `--live` answers a different question — did THIS person open it — and
+    // breakdowns over it were deliberately left out (ADR-025 §3): `queryBuckets` exists, but nobody
+    // has asked for them, and offering the flag on both paths would imply the two produce the same
+    // numbers over the same history. They do not; the summary reaches further back.
+    const BY = ["doc", "portal", "day", "surface", "referrer"];
+    const by = flags.by ?? "doc";
+    if (!BY.includes(by)) {
+      throw new PvError(`--by ${by} is not a breakdown. Use one of: ${BY.join(", ")}.`);
+    }
+    if (flags.account) {
+      throw new PvError(
+        "--account applies to the live Analytics Engine query, which is not what this reads.\n\n" +
+          "The stored summary comes from the deployment itself, so there is no account to name.\n" +
+          "  pagevault views --live --account <id>",
+      );
+    }
+    const cfg = commandTarget(flags);
+    const params = new URLSearchParams();
+    if (flags.days) params.set("days", String(flags.days));
+    if (flags.portal) params.set("portal", flags.portal);
+    if (flags.doc) params.set("doc", flags.doc);
+    let rolled;
+    try {
+      rolled = await api(cfg, "GET", `/views/summary?${params}`);
+    } catch (err) {
+      // 🔴 A CLI newer than the deployment it is talking to. This is the ORDINARY case, not an edge
+      // one: the package ships on npm independently of any deploy (ADR-010), so every
+      // `npm update -g pagevault` produces it until the operator upgrades the Worker. A raw
+      // "405 method_not_allowed" would read as a broken deployment rather than an out-of-date one.
+      if (err.code === "method_not_allowed") {
+        throw new PvError(
+          `${cfg.url} is running a version of PageVault that cannot serve view history.\n\n` +
+            "Reading the stored summary arrived in 0.36.0. This CLI asks for it by default; that\n" +
+            "deployment only accepts the write half.\n\n" +
+            "  pagevault upgrade         bring the deployment up to this CLI\n" +
+            "  pagevault views --live    query Analytics Engine instead (needs a Cloudflare token)",
+        );
+      }
+      throw err;
+    }
+    // `--json` carries the WHOLE rollup, not just the requested breakdown: every breakdown is
+    // already computed, and a consumer that has to re-request for a second view of the same window
+    // would be paying twice for one aggregation.
+    if (flags.json) return out(JSON.stringify(rolled, null, 2));
+    return note(formatRollup(rolled, null, { by }));
   }
 
   const { loadContext, loadCloudToken } = await import("../lib/provision/context.mjs");
