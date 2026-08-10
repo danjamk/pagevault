@@ -91,6 +91,8 @@ re-scoping:
 (Read)  ← *Public*
 plus for a domain and for Secured: `Workers Routes` (Edit) · `DNS` (Edit) · `Access: Apps and Policies` (Edit) ·
 `Access: Organizations, Identity Providers, and Groups` (Edit — *groups hide here, easy to miss*)
+plus for view tracking, at any tier: `Account Analytics` (Read) — *without it `pagevault views` and
+`sync-views` fail with a bare Cloudflare 403, and you find out weeks later*
 
 - **Save it:** `echo 'CLOUDFLARE_API_TOKEN=…' > .env.local`  (gitignored, never committed)
 - **Check:** `make preflight` verifies the token, names the account, and flags any missing scope.

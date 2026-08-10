@@ -78,6 +78,7 @@ the ladder never means re-scoping:
 | Zone | DNS | Edit | domain · the domain record |
 | Account | Access: Apps and Policies | Edit | Secured · gated access |
 | Account | Access: Organizations, Identity Providers, and Groups | Edit | Secured · **the viewer group lives here — easy to miss** |
+| Account | Account Analytics | Read | any tier · `pagevault views`, `sync-views` |
 
 ### Install — pick a path
 

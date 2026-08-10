@@ -15,7 +15,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { c, ok, info, warn, die, loadCloudToken, loadContext, cfApi, cfErr, isInteractive, banner, runHint } from "../provision/context.mjs";
+import { c, ok, info, warn, die, loadCloudToken, loadContext, cfApi, cfErr, isInteractive, banner, runHint, cloudCredentialHint } from "../provision/context.mjs";
 import { planRestore } from "./restore-plan.mjs";
 
 // KV bulk write caps: 10,000 keys and 100 MB per request. Stay well under both.
@@ -60,13 +60,13 @@ export async function restoreCmd({ file, kv, force = false } = {}) {
   const restoreHint = viaMake ? "make restore FILE=pagevault-backup-….json" : "pagevault restore pagevault-backup-….json";
 
   const token = loadCloudToken();
-  if (!token) die("No Cloudflare token.", `Run \`${runHint("setup", "init")}\` first — it captures and saves one.`);
-
   const ctx = loadContext();
   const account = ctx.accountId;
   const nsId = kv ?? ctx.kvId;
 
-  if (!account) die("No Cloudflare account recorded.", `Run \`${runHint("setup", "init")}\`.`);
+  const SCOPE = "Account · Workers KV Storage · Edit";
+  if (!token) die("No Cloudflare token on this machine.", cloudCredentialHint("restore", SCOPE));
+  if (!account) die("No Cloudflare account recorded on this machine.", cloudCredentialHint("restore", SCOPE));
   if (!nsId) die("No KV namespace id.", "Deploy first, or pass --kv <id>.");
   if (!file) die("No backup file.", `Run \`${restoreHint}\`.`);
   if (!existsSync(file)) die(`No such file: ${file}`);

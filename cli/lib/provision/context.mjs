@@ -379,6 +379,31 @@ export async function cfAccounts() {
 /** Cloudflare's error list, flattened to a line. */
 export const cfErr = (errors = []) => errors.map((e) => `[${e.code}] ${e.message}`).join("; ");
 
+/**
+ * Why a command that needs YOUR Cloudflare credential cannot run here, and what to do instead.
+ *
+ * 🔴 Deliberately does NOT say "run init". `backup` and `restore` are operator commands an installed
+ * operator can reach (#133), and an operator whose production is deployed by CI has a login and no
+ * build record — `init` there would provision production from their laptop. That is #144 exactly,
+ * one command over, and it was still the advice these two printed (#167).
+ *
+ * Both situations are named because the message cannot tell them apart and guessing wrong is the
+ * failure being fixed. The escape hatch comes first; `init` appears only as the thing not to do.
+ */
+export const cloudCredentialHint = (what, scope) => [
+  `  ${what} talks to Cloudflare directly, not through your deployment — KV key metadata is what`,
+  "  listings render from, and no PageVault endpoint exposes it. So the deployment bearer is not",
+  "  enough here, by design.",
+  "",
+  `  ${c.bold("If this machine provisioned the deployment")} — its token is missing. Put it in the`,
+  `  environment as ${c.bold("CLOUDFLARE_API_TOKEN")}, or re-run \`${runHint("setup", "init")}\`, which captures one.`,
+  "",
+  `  ${c.bold("If it did not")} — production deployed by CI, or from another machine — run this there`,
+  `  instead. ${c.bold("Do not run init here:")} it would provision this deployment from this machine.`,
+  "",
+  `  ${c.dim(`Token scope: ${scope}`)}`,
+];
+
 // --- Zones ------------------------------------------------------------------
 
 /**
@@ -750,6 +775,11 @@ export function printTokenSetup() {
     ["Zone", "DNS", "Edit", "rung 2 · custom-domain record"],
     ["Account", "Access: Apps and Policies", "Edit", "rung 3 · portals"],
     ["Account", "Access: Organizations, Identity Providers, and Groups", "Edit", "rung 3 · the viewer group lives here"],
+    // 🔴 Not optional in practice. Without it `views --live` and `sync-views` fail with a bare
+    // Cloudflare 403, and every operator who followed this list built a token that cannot read
+    // their own view history — discovered weeks later, by which point Analytics Engine's ~90-day
+    // window has been quietly expiring the whole time (#167).
+    ["Account", "Account Analytics", "Read", "any rung · pagevault views, sync-views"],
   ];
   console.log(`  ${c.bold("Create a Cloudflare API token")} ${c.dim("— how PageVault reaches your account (one per clone)")}`);
   console.log();

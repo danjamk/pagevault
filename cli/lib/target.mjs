@@ -223,7 +223,20 @@ export function resolveTarget({
     ? { name: direct, entry: byName(direct) }
     : (url ? findByUrl(registry, url) : null);
 
-  const record = marker.kind === "record" ? marker.record : (pointed ?? matched?.entry ?? null);
+  // 🔴 A build record describes this target only when it NAMES it. Standing in the checkout that
+  // provisioned `test` and asking about `prod` — `--deployment prod`, `PAGEVAULT_DEPLOYMENT`, or a
+  // `--url` — handed back the checkout's record anyway. So `provisioned` said yes for a deployment
+  // this machine has never deployed, and `status --deployment prod` printed test's tier, account,
+  // host and KV under prod's heading: every field wrong, none of them marked as such (#167).
+  //
+  // The rule is not new here. `provisionedFrom` above applies it, and so does `markerFor` in the
+  // CLI; this was the one place that read the marker without asking who it was about. Same shape as
+  // #170 and #195 — one source consulted where the answer needs two.
+  const markerRecord = marker.kind === "record" ? marker.record : null;
+  const record =
+    markerRecord && sameDeployment(recordUrl(markerRecord), url)
+      ? markerRecord
+      : (pointed ?? matched?.entry ?? null);
   return {
     url,
     source,

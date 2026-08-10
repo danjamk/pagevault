@@ -141,6 +141,34 @@ test("in the checkout → the checkout's deployment; outside it → the login", 
   assert.equal(outside.provisioned, false, "a login without a build record is client-only, not broken");
 });
 
+test("🔴 the checkout's build record does not describe a deployment you named instead (#167)", () => {
+  // Found by running it. Standing in the checkout that provisioned `test` and asking about `prod`,
+  // `provisioned` came back TRUE — so `status --deployment prod` printed test's tier, account, host
+  // and KV under prod's heading, every field wrong and none of them marked as such. The `--json`
+  // surface said the same, which is worse.
+  //
+  // The rule was already written twice in this codebase (`provisionedFrom`, and `markerFor` in the
+  // CLI); this was the one place that read the marker without asking who it was about.
+  const registry = { deployments: { prod: { url: "https://prod.example.com", token: "p" } } };
+
+  const byName = resolveIn("/repo", { flags: { deployment: "prod" }, registry });
+  assert.equal(byName.url, "https://prod.example.com");
+  assert.equal(byName.source, "flag-name");
+  assert.equal(byName.provisioned, false, "this machine has never deployed prod");
+  assert.notEqual(byName.record, testRecord.record, "and must not hand back the checkout's record");
+
+  // Same through the environment, and through a bare --url that happens to match a registry entry.
+  assert.equal(resolveIn("/repo", { env: { PAGEVAULT_DEPLOYMENT: "prod" }, registry }).provisioned, false);
+  assert.equal(resolveIn("/repo", { flags: { url: "https://prod.example.com" }, registry }).provisioned, false);
+
+  // The ordinary case is untouched: no override, standing in the checkout, and the record IS this
+  // deployment's — so it is used, and `provisioned` stays true.
+  const here = resolveIn("/repo", { registry });
+  assert.equal(here.url, "https://test.example.com");
+  assert.equal(here.provisioned, true);
+  assert.equal(here.record, testRecord.record);
+});
+
 test("a disagreement is reported, not resolved away", () => {
   const t = resolveIn("/repo");
   assert.equal(t.conflicted, true);

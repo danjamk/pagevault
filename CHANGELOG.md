@@ -8,6 +8,28 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 ## [Unreleased]
 
 ### Fixed
+- **🔴 `status` described one deployment with another's build record.** `pagevault status
+  --deployment prod`, run from the checkout that provisioned `test`, reported test's tier, account,
+  host and KV **under prod's heading** — every field wrong, none marked as such, and `--json` said
+  the same. A build record now describes a target only when it names that target; the rule was
+  already written twice elsewhere in the codebase (`provisionedFrom`, `markerFor`) and this was the
+  one place reading the marker without asking who it was about. Found by running it, not by reading
+  it. ([#167](../../issues/167))
+- **🔴 `views --live` read one deployment's Analytics Engine and reported it as another's.** It took
+  the account id from whichever build record was nearest the working directory, so naming a
+  deployment this machine did not provision queried the *local* account and printed the rows under
+  the named deployment's heading — silent, and indistinguishable from the real answer. `sync-views`
+  has been guarded since ADR-021 phase 2 on the same reasoning; the read never was. It now refuses
+  and names `--account` as the way through. ([#167](../../issues/167))
+- **`Account Analytics · Read` is in the token setup.** It was missing from both `pagevault init`'s
+  printed scope list and the README table, so every operator who followed the instructions built a
+  token that could not read their own view history — discovered weeks later, with Analytics Engine's
+  ~90-day window quietly expiring throughout. ([#167](../../issues/167))
+- **`backup` and `restore` no longer tell a client-only operator to run `init`.** That advice is
+  #144 one command over: an operator whose production is deployed by CI has a login and no build
+  record, and `init` there would provision production from their laptop. Both now name the escape
+  hatch — run it where the credential lives — and say `init` is the thing *not* to do.
+  ([#167](../../issues/167))
 - **A domain on a multi-label TLD can be provisioned.** The zone was *derived* from the hostname by
   taking its last two labels, so `pv.acme.co.uk` resolved to the zone `co.uk`, found nothing, and
   killed provisioning with an error naming a domain the operator had never typed. Every `.co.uk`,
@@ -33,6 +55,15 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
   `upgrade` resolved through the build record and never read the registry at all, so the gate could
   not fire even in principle. It now refuses without an explicit `--yes`, before anything is built or
   contacted. Unprotected deployments are unchanged. ([#176](../../issues/176))
+
+### Added
+- **[`docs/setup/operating-a-deployment.md`](docs/setup/operating-a-deployment.md)** — the path for a
+  machine that did not provision the deployment it operates, which is the ordinary case for a
+  production instance deployed by CI. Leads with the trap: `login` connects, `init` would deploy your
+  production Worker from your laptop. Then the capability boundary as a table — what runs on the
+  deployment bearer (nearly everything, including `views`), what needs an `Account Analytics · Read`
+  token (`--live`, `--who`, `sync-views`), and what is deliberately out of reach. Verified against a
+  real client-only install rather than by reading the code. ([#167](../../issues/167))
 
 ### Changed
 - **[`docs/setup/prerequisites.md`](docs/setup/prerequisites.md) — the domain section, rewritten**

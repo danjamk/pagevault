@@ -641,6 +641,65 @@ test("🔴 status names the deployment on BOTH branches (#170)", () => {
   assert.equal(j.provisioned, true);
 });
 
+/** A machine that provisioned `test` and merely holds a login for `prod` — the #144/#167 shape. */
+function twoDeploymentHome(prefix) {
+  const home = mkdtempSync(join(tmpdir(), prefix));
+  writeFileSync(join(home, ".pagevault.json"), JSON.stringify({ rung: 3, accountId: "test-acct", host: "test.invalid" }));
+  writeFileSync(
+    join(home, "deployments.json"),
+    JSON.stringify({
+      current: "test",
+      deployments: {
+        prod: { url: "https://prod.invalid", token: "p" },
+        test: { url: "https://test.invalid", token: "t" },
+      },
+    }),
+  );
+  return home;
+}
+
+test("🔴 status does not describe one deployment with another's build record (#167)", () => {
+  // Found by running it against a real install. `status --deployment prod`, from the checkout that
+  // provisioned `test`, printed test's tier, account, host and KV under prod's heading — every field
+  // wrong and none of them marked as such. `--json` said the same, which is worse: a human might
+  // notice the hostname, a script will not.
+  const home = twoDeploymentHome("pv-foreignrec-");
+
+  const j = JSON.parse(runIn(home, "status", "--deployment", "prod", "--json").stdout);
+  assert.equal(j.deploymentName, "prod");
+  assert.equal(j.provisioned, false, "this machine has never deployed prod");
+  for (const field of ["tier", "rung", "ownerEmail", "account", "host", "kvId", "deployedUrl"]) {
+    assert.equal(j[field], null, `${field} must be null, not the checkout's answer`);
+  }
+
+  // The human table takes the client-only branch and says why.
+  const human = runIn(home, "status", "--deployment", "prod");
+  assert.match(human.text, /Deployment\s+prod/);
+  assert.match(human.text, /not provisioned from this machine/);
+
+  // And the deployment this machine DID provision is unaffected.
+  const own = JSON.parse(runIn(home, "status", "--json").stdout);
+  assert.equal(own.deploymentName, "test");
+  assert.equal(own.provisioned, true);
+  assert.equal(own.account.id, "test-acct");
+});
+
+test("🔴 views --live never reads one deployment's account for another (#167)", () => {
+  // The read side of the guard `sync-views` has had since ADR-021 phase 2. `views --live` took the
+  // account from whichever build record was nearest the cwd, so naming `prod` queried TEST's
+  // Analytics Engine and printed the rows under prod's name — a cross-deployment read, silent, and
+  // indistinguishable from the real answer.
+  const home = twoDeploymentHome("pv-liveacct-");
+
+  const r = runIn(home, "views", "--live", "--deployment", "prod");
+  assert.notEqual(r.status, 0, "it must refuse rather than answer with the wrong account");
+  assert.match(r.text, /No Cloudflare account id/);
+  // The refusal names the escape hatch, and names it in a form that actually runs: `--account`
+  // without `--live` is refused on the other path.
+  assert.match(r.text, /views --live --account/);
+  assert.match(r.text, /→ prod/, "and it says which deployment it was asked about");
+});
+
 test("a protected deployment says so in status", () => {
   const home = mkdtempSync(join(tmpdir(), "pv-statusprot-"));
   writeFileSync(

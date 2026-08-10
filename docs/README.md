@@ -25,6 +25,7 @@ Start with the question you came here to answer.
 - [`setup/ai-guided-setup.md`](setup/ai-guided-setup.md) — hand your LLM this runbook and let it walk you through setup.
 - [`setup/cli-reference.md`](setup/cli-reference.md) — every `pagevault` command, flag, and environment variable.
 - [`setup/connect-mcp.md`](setup/connect-mcp.md) — point Claude (web, Desktop, Code) at your MCP server.
+- [`setup/operating-a-deployment.md`](setup/operating-a-deployment.md) — someone else deployed it (CI, another machine): what works, what needs a credential, and why not to run `init`.
 - [`setup/scheduling-the-sync.md`](setup/scheduling-the-sync.md) — keep your view history: launchd, a systemd timer, or a scheduled Action.
 - [`setup/backup-and-restore.md`](setup/backup-and-restore.md) — export your state and put it back.
 - [`architecture.md` §12](architecture.md#12-operations--what-the-deployment-tells-you) — what the deployment logs, what it never logs, and how to read view tracking.

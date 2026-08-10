@@ -78,6 +78,11 @@ verifies the connection. The flags are optional — it falls back to `PAGEVAULT_
 have exported. `init` already does this for the deployment it stood up; reach for `login` only for a
 **second machine**, or **someone else's** deployment.
 
+⚠️ **`login`, not `init`, is how you connect to a deployment that already exists.** `init` is the
+setup command — it would provision that deployment *from this machine*. See
+[`operating-a-deployment.md`](operating-a-deployment.md) for what works from a machine that did not
+provision the deployment, and what needs a Cloudflare credential.
+
 `--as <name>` registers the deployment by name in `~/.pagevault/deployments.json` instead, so one
 machine can hold several. Without it, nothing changes: one deployment, one `config.json`.
 

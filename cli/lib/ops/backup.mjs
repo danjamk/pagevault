@@ -19,7 +19,7 @@
 // us the body and the keys endpoint gives us the metadata inline.
 //
 import { writeFileSync } from "node:fs";
-import { c, ok, info, warn, die, loadCloudToken, loadContext, cfApi, cfErr, banner, runHint } from "../provision/context.mjs";
+import { c, ok, info, warn, die, loadCloudToken, loadContext, cfApi, cfErr, banner, runHint, cloudCredentialHint } from "../provision/context.mjs";
 
 const CF = "https://api.cloudflare.com/client/v4";
 
@@ -53,12 +53,13 @@ export function defaultOutName(now = new Date()) {
  */
 export async function backupCmd({ out, kv } = {}) {
   const token = loadCloudToken();
-  if (!token) die("No Cloudflare token.", `Run \`${runHint("setup", "init")}\` first — it captures and saves one.`);
-
   const ctx = loadContext();
   const account = ctx.accountId;
   const nsId = kv ?? ctx.kvId;
-  if (!account) die("No Cloudflare account recorded.", `Run \`${runHint("setup", "init")}\`.`);
+
+  const SCOPE = "Account · Workers KV Storage · Read";
+  if (!token) die("No Cloudflare token on this machine.", cloudCredentialHint("backup", SCOPE));
+  if (!account) die("No Cloudflare account recorded on this machine.", cloudCredentialHint("backup", SCOPE));
   if (!nsId) die("No KV namespace id.", "Deploy first, or pass --kv <id>.");
 
   const file = out ?? defaultOutName();
