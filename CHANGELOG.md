@@ -7,17 +7,14 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
-### Fixed
-- **🔴 An installed `pagevault verify` now publishes a first document.** It read the bare relative
-  path `examples/welcome.html`, and `examples/` is not in the npm package's `files` allowlist — so
-  an operator who ran `npm install -g pagevault` finished `init` looking at a blank console, with a
-  line calling that expected. That is precisely the "dead first moment" [#31](../../issues/31) was
-  opened to prevent, unfixed for the audience Prime Directive #2 says *is* the product. The sample
-  moved to `cli/assets/welcome.html` and ships with the package.
-- **And it no longer depends on your working directory.** The same relative path meant a repo
-  operator got a first document or did not depending on where they were standing. It now resolves
-  from the module. `cli/smoke.mjs` asserts the asset is in the tarball, so a `files` allowlist edited
-  in a future refactor fails the release rather than the operator.
+## [0.37.0] — 2026-08-10
+
+Say which deployment you mean, and mean it — plus a way to close a client boundary.
+
+Five bugs where a command described one deployment using another's facts, or honoured an answer for
+exactly one run. Three were found by running the thing against a real install rather than by reading
+it, which is now the pattern: `status` reported a foreign build record, `views --live` queried a
+foreign account, and an installed `verify` published nothing at all.
 
 ### Added
 - **`pagevault portal-delete <slug> [--cascade] [--yes]`** — closing a client boundary was reachable
@@ -38,8 +35,47 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
   link already in a client's inbox, from one misread sentence, with no undo. A human typing a slug
   back is a materially different act from a model emitting a tool call. A test now fails on the
   decision rather than on the list, so the omission cannot be read as a gap and quietly closed.
+- **[`docs/setup/operating-a-deployment.md`](docs/setup/operating-a-deployment.md)** — the path for a
+  machine that did not provision the deployment it operates, which is the ordinary case for a
+  production instance deployed by CI. Leads with the trap: `login` connects, `init` would deploy your
+  production Worker from your laptop. Then the capability boundary as a table — what runs on the
+  deployment bearer (nearly everything, including `views`), what needs an `Account Analytics · Read`
+  token (`--live`, `--who`, `sync-views`), and what is deliberately out of reach. Verified against a
+  real client-only install rather than by reading the code. ([#167](../../issues/167))
+- **The deploy banner names the deployment.** ADR-021 gave deployments names so the operator
+  confirms identity before acting, and the vocabulary stopped at the door of the most consequential
+  command — the y/N block showed an account id and a URL, which name a machine rather than the thing
+  the operator calls "prod". Printed when the deployment is registered, silent on a first deploy.
+  ([#176](../../issues/176))
+- **[`docs/setup/scheduling-the-sync.md`](docs/setup/scheduling-the-sync.md)** — working snippets for
+  launchd, a systemd timer, cron and a scheduled GitHub Action, with a sentence on choosing between
+  them. "Schedule it" was easy to say and left every operator to work out the wiring; production had
+  a worked example and nobody else did. Linked from `sync-views --help` and the CLI reference, which
+  is where the question gets asked. ([#166](../../issues/166))
+- **The gotcha that actually breaks these jobs, named up front.** `pagevault` starts
+  `#!/usr/bin/env node`, so under cron's minimal environment even the *full path* to it fails with
+  `env: node: No such file or directory`. Every snippet sets `PATH` accordingly. Found by running it,
+  and it is the difference between a schedule that works and one that silently never runs.
+
+### Changed
+- **[`docs/setup/prerequisites.md`](docs/setup/prerequisites.md) — the domain section, rewritten**
+  around the two situations operators actually arrive in: DNS that *can* move to Cloudflare
+  (supported, free, a walkthrough) and DNS that *must* stay elsewhere with only a subdomain
+  delegated. The second is **Enterprise-only** and is now said out loud rather than left implied, so
+  nobody spends an afternoon on it. The walkthrough leads with what the move does not touch —
+  registration, the existing website, email — and flags verifying `MX` records as the step whose
+  failure mode is silently broken email. ([#138](../../issues/138))
 
 ### Fixed
+- **🔴 An installed `pagevault verify` now publishes a first document.** It read the bare relative
+  path `examples/welcome.html`, and `examples/` is not in the npm package's `files` allowlist — so
+  an operator who ran `npm install -g pagevault` finished `init` looking at a blank console, with a
+  line calling that expected. That is precisely the "dead first moment" [#31](../../issues/31) was
+  opened to prevent, unfixed for the audience Prime Directive #2 says *is* the product. The sample
+  moved to `cli/assets/welcome.html` and ships with the package. It also no longer depends on your
+  working directory: the same relative path meant a repo operator got a first document or did not
+  depending on where they were standing. `cli/smoke.mjs` asserts the asset is in the tarball, so a
+  `files` allowlist edited in a future refactor fails the release rather than the operator.
 - **🔴 `status` described one deployment with another's build record.** `pagevault status
   --deployment prod`, run from the checkout that provisioned `test`, reported test's tier, account,
   host and KV **under prod's heading** — every field wrong, none marked as such, and `--json` said
@@ -87,40 +123,6 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
   `upgrade` resolved through the build record and never read the registry at all, so the gate could
   not fire even in principle. It now refuses without an explicit `--yes`, before anything is built or
   contacted. Unprotected deployments are unchanged. ([#176](../../issues/176))
-
-### Added
-- **[`docs/setup/operating-a-deployment.md`](docs/setup/operating-a-deployment.md)** — the path for a
-  machine that did not provision the deployment it operates, which is the ordinary case for a
-  production instance deployed by CI. Leads with the trap: `login` connects, `init` would deploy your
-  production Worker from your laptop. Then the capability boundary as a table — what runs on the
-  deployment bearer (nearly everything, including `views`), what needs an `Account Analytics · Read`
-  token (`--live`, `--who`, `sync-views`), and what is deliberately out of reach. Verified against a
-  real client-only install rather than by reading the code. ([#167](../../issues/167))
-
-### Changed
-- **[`docs/setup/prerequisites.md`](docs/setup/prerequisites.md) — the domain section, rewritten**
-  around the two situations operators actually arrive in: DNS that *can* move to Cloudflare
-  (supported, free, a walkthrough) and DNS that *must* stay elsewhere with only a subdomain
-  delegated. The second is **Enterprise-only** and is now said out loud rather than left implied, so
-  nobody spends an afternoon on it. The walkthrough leads with what the move does not touch —
-  registration, the existing website, email — and flags verifying `MX` records as the step whose
-  failure mode is silently broken email. ([#138](../../issues/138))
-
-### Added
-- **The deploy banner names the deployment.** ADR-021 gave deployments names so the operator
-  confirms identity before acting, and the vocabulary stopped at the door of the most consequential
-  command — the y/N block showed an account id and a URL, which name a machine rather than the thing
-  the operator calls "prod". Printed when the deployment is registered, silent on a first deploy.
-  ([#176](../../issues/176))
-- **[`docs/setup/scheduling-the-sync.md`](docs/setup/scheduling-the-sync.md)** — working snippets for
-  launchd, a systemd timer, cron and a scheduled GitHub Action, with a sentence on choosing between
-  them. "Schedule it" was easy to say and left every operator to work out the wiring; production had
-  a worked example and nobody else did. Linked from `sync-views --help` and the CLI reference, which
-  is where the question gets asked. ([#166](../../issues/166))
-- **The gotcha that actually breaks these jobs, named up front.** `pagevault` starts
-  `#!/usr/bin/env node`, so under cron's minimal environment even the *full path* to it fails with
-  `env: node: No such file or directory`. Every snippet sets `PATH` accordingly. Found by running it,
-  and it is the difference between a schedule that works and one that silently never runs.
 
 ## [0.36.0] — 2026-08-10
 
@@ -1779,7 +1781,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.36.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.37.0...HEAD
+[0.37.0]: https://github.com/danjamk/pagevault/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/danjamk/pagevault/compare/v0.35.4...v0.36.0
 [0.35.4]: https://github.com/danjamk/pagevault/compare/v0.35.3...v0.35.4
 [0.35.3]: https://github.com/danjamk/pagevault/compare/v0.35.2...v0.35.3

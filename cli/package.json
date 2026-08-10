@@ -1,6 +1,6 @@
 {
   "name": "pagevault",
-  "version": "0.36.0",
+  "version": "0.37.0",
   "description": "Self-hosted publishing for HTML and Markdown artifacts with per-document access control, on your own Cloudflare account — CLI and remote MCP server.",
   "type": "module",
   "author": "Dan Kuhn",
