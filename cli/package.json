@@ -18,6 +18,7 @@
     "bin",
     "lib",
     "dist",
+    "assets",
     "LICENSE",
     "README.md"
   ],

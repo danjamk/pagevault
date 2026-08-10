@@ -7,6 +7,18 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **🔴 An installed `pagevault verify` now publishes a first document.** It read the bare relative
+  path `examples/welcome.html`, and `examples/` is not in the npm package's `files` allowlist — so
+  an operator who ran `npm install -g pagevault` finished `init` looking at a blank console, with a
+  line calling that expected. That is precisely the "dead first moment" [#31](../../issues/31) was
+  opened to prevent, unfixed for the audience Prime Directive #2 says *is* the product. The sample
+  moved to `cli/assets/welcome.html` and ships with the package.
+- **And it no longer depends on your working directory.** The same relative path meant a repo
+  operator got a first document or did not depending on where they were standing. It now resolves
+  from the module. `cli/smoke.mjs` asserts the asset is in the tarball, so a `files` allowlist edited
+  in a future refactor fails the release rather than the operator.
+
 ### Added
 - **`pagevault portal-delete <slug> [--cascade] [--yes]`** — closing a client boundary was reachable
   only by hand-rolling a `curl -X DELETE` with a bearer read out of `deployments.json`. The endpoint

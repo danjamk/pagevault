@@ -60,8 +60,9 @@ Check and report each as pass or fail:
   Confirm the file exists and points at what was just deployed.
 - `verify` exits 0: the Worker is live, root serves a 200 landing, `/health` reports
   `<version>+<sha>`, `/mcp` answers `initialize` and `tools/list`, and a publish → read → revoke
-  round-trip through the MCP tools succeeds. It will skip the sample publish — the npm package does
-  not ship `examples/`, and that is correct, not a failure.
+  round-trip through the MCP tools succeeds, and it **publishes the bundled welcome sample** and
+  prints a `/p/` link. Open that link — an install that ends with a blank console is the failure
+  this step exists to catch (#31). A skip here means the package shipped without `assets/`.
 - `health --json` version matches `pagevault --version`.
 
 Then publish real documents and confirm the whole surface works:

@@ -7,7 +7,34 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { shouldUseColor } from "../cli/lib/provision/context.mjs";
-import { dnsFlushHint, isWsl } from "../cli/lib/ops/verify.mjs";
+import { dnsFlushHint, isWsl, welcomeSamplePath } from "../cli/lib/ops/verify.mjs";
+import { existsSync, readFileSync } from "node:fs";
+
+// --- the first document verify publishes (#31) -------------------------------------------------
+
+test("🔴 the welcome sample ships in the package and resolves from anywhere", () => {
+  // Two bugs in one string. `verify` read the bare relative path "examples/welcome.html", so:
+  //
+  //   · an INSTALLED operator — the product, per Prime Directive #2 — had no first document at all,
+  //     because `examples/` is not in cli/package.json's `files`. `init` ended with a blank console
+  //     and a line calling that expected. That is the exact "dead first moment" #31 was opened to
+  //     fix, unfixed for the audience that matters most.
+  //   · a repo operator got one or not depending on which directory they were standing in.
+  //
+  // Resolved from import.meta.url, so neither depends on the cwd.
+  const path = welcomeSamplePath();
+  assert.ok(existsSync(path), `the bundled welcome sample must exist at ${path}`);
+  assert.match(path, /assets[\\/]welcome\.html$/, "and it must live in the shipped assets/ directory");
+
+  // A real artifact, not a placeholder — this is the first thing an operator ever opens.
+  const html = readFileSync(path, "utf8");
+  assert.ok(html.length > 1000, "the sample must be a real document");
+  assert.match(html, /<!doctype html>/i);
+
+  // 🔴 Prime Directive #4: it renders in a sandboxed iframe, so it is subject to the same rule as
+  // every artifact. A sample that violated it would be teaching by example.
+  assert.doesNotMatch(html, /allow-same-origin/, "never, anywhere in this codebase");
+});
 
 // --- color -----------------------------------------------------------------------------------
 

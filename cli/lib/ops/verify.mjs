@@ -1,8 +1,8 @@
 //
 // `pagevault verify` (and `make verify`) — after a deploy: does it actually work? A smoke test
 // that ends with something you can open. It confirms the Worker is ours and routing, drives the
-// /mcp protocol for real (#75), then PUBLISHES a real document (examples/welcome.html when present)
-// over the bearer API and prints its public /p/ link.
+// /mcp protocol for real (#75), then PUBLISHES a real document (the welcome sample bundled in
+// cli/assets/) over the bearer API and prints its public /p/ link.
 //
 // Why publish, not just ping: at rung 1 there is no Cloudflare Access, so the /admin console is
 // (correctly) Forbidden — a fail-closed door with nothing behind it yet. A public capability link
@@ -15,11 +15,23 @@
 // in that mode the narration is suppressed so stdout carries only the JSON.
 //
 import { readFileSync, existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Resolver, lookup } from "node:dns/promises";
 import { platform } from "node:process";
 import { c, ok, die, loadContext, fromEnv, banner, mcpCall, runHint, EXPECTED_MCP_TOOLS } from "../provision/context.mjs";
 // One source of truth for the sample's title: `restore` keys its "this is disposable" check on it.
 import { SAMPLE_TITLE } from "./restore-plan.mjs";
+
+/**
+ * The welcome document `verify` publishes — resolved from THIS MODULE, never from the cwd.
+ *
+ * Exported so a test can assert both halves of #31 without a deployment: that the file ships inside
+ * the package, and that the answer does not depend on where the operator is standing. It used to be
+ * the bare relative string `"examples/welcome.html"`, which meant an installed operator had no first
+ * document at all — `examples/` is not in the npm `files` allowlist — and a repo operator got one or
+ * not depending on their working directory.
+ */
+export const welcomeSamplePath = () => fileURLToPath(new URL("../../assets/welcome.html", import.meta.url));
 import { loadConfig } from "../client.mjs";
 import { loadRegistry } from "../registry.mjs";
 import { resolveTarget, describeTarget, resolveBearer } from "../target.mjs";
@@ -468,15 +480,29 @@ export async function verifyCmd({ json = false } = {}) {
   }
 
   // --- 4. Publish the first document, so there is something to open ---------------------------
-  // examples/welcome.html ships with the repo, not the npm package — an installed `verify` simply
-  // skips this step (the MCP round-trip above is the real proof); it isn't a failure.
-  const welcomePath = "examples/welcome.html";
+  //
+  // 🔴 The sample ships INSIDE the package (`cli/assets/`), not in the repo's `examples/`, and the
+  // path is resolved from this module rather than from the working directory. Both halves were
+  // wrong, and in the same direction (#31):
+  //
+  //   · `examples/` is not in cli/package.json's `files`, so an INSTALLED operator — the one Prime
+  //     Directive #2 says is the product — reached the end of `init` with a blank console and no
+  //     document to open. The "dead first moment" #31 was opened to fix was unfixed for exactly the
+  //     audience that matters, and the skip line called it expected.
+  //   · The path was relative to the cwd, so even in a checkout `verify` published a first document
+  //     or did not depending on which directory you happened to be standing in.
+  //
+  // Now there is one file, on one path, and every install route publishes something openable.
+  const welcomePath = welcomeSamplePath();
   if (!existsSync(welcomePath)) {
-    say(`\n  ${c.dim("○ No examples/welcome.html here — skipping the sample publish (installed verify).")}\n`);
+    // Only reachable if the package was assembled wrong — `cli/smoke.mjs` asserts the asset ships,
+    // so this is a broken build, not a shape. Say so rather than calling it normal.
+    say(`\n  ${c.dim("○ The bundled welcome sample is missing — skipping the sample publish.")}`);
+    say(`  ${c.dim("  That is a packaging fault, not a configuration one. Reinstall pagevault.")}\n`);
     return finish(allPassed(), { published: false });
   }
 
-  say(`\n  Publishing your first document ${c.dim("(examples/welcome.html)…")}`);
+  say(`\n  Publishing your first document ${c.dim("(the bundled welcome sample)…")}`);
   // Cheap, and it lands before the write rather than after the refusal it causes (#125).
   say(`  ${c.dim("Recovering from a backup? Restore first — this sample leaves keys a restore won't replace.")}`);
   const html = readFileSync(welcomePath, "utf8");
