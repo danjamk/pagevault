@@ -117,8 +117,8 @@ test("the gate fires on the deployment being overwritten, not the selected one",
 test("the protected command set is named from one list", () => {
   // #176 grew this set for the first time since it was written, and found three of the four places
   // that state it still saying "rm, revoke and rotate".
-  assert.deepEqual(PROTECTED_COMMANDS, ["rm", "revoke", "rotate", "upgrade"]);
-  assert.equal(protectedCommands(), "rm, revoke, rotate and upgrade");
+  assert.deepEqual(PROTECTED_COMMANDS, ["rm", "revoke", "rotate", "portal-delete", "upgrade"]);
+  assert.equal(protectedCommands(), "rm, revoke, rotate, portal-delete and upgrade");
   // `destroy` stays out: it has a stronger guard (type the hostname), and listing it here would
   // imply --yes is enough for it.
   assert.ok(!PROTECTED_COMMANDS.includes("destroy"));

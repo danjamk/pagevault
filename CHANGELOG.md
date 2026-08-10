@@ -7,6 +7,26 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **`pagevault portal-delete <slug> [--cascade] [--yes]`** — closing a client boundary was reachable
+  only by hand-rolling a `curl -X DELETE` with a bearer read out of `deployments.json`. The endpoint
+  had been implemented and tested since the portal API was written and had **no caller on any
+  surface**, so every mistyped slug and every finished engagement was permanent in the listing, and
+  the only shipped alternative was `destroy` — which takes the whole deployment.
+  ([#180](../../issues/180))
+- **A confirmation proportional to what is being destroyed.** An empty portal asks `y/N`, like `rm`.
+  A portal holding documents refuses without `--cascade`, and names them — the refusal is the safety
+  feature, and a prompt in its place would train the reflex it exists to avoid. With `--cascade` it
+  names the count and makes you type the slug back, the gesture `destroy` uses. `protected` now gates
+  it too: it is more destructive than the three commands the flag was written for.
+- **[ADR-026](docs/adr/ADR-026-mcp-creates-and-shares-it-does-not-destroy.md) — MCP creates and
+  shares; it does not destroy.** There is no `delete_portal` MCP tool and there will not be: the one
+  standing exception to surface parity, scoped precisely to this operation. Every other tool's worst
+  case is a wrong document at a right URL; this one's is nine months of an engagement and every `/p/`
+  link already in a client's inbox, from one misread sentence, with no undo. A human typing a slug
+  back is a materially different act from a model emitting a tool call. A test now fails on the
+  decision rather than on the list, so the omission cannot be read as a gap and quietly closed.
+
 ### Fixed
 - **🔴 `status` described one deployment with another's build record.** `pagevault status
   --deployment prod`, run from the checkout that provisioned `test`, reported test's tier, account,

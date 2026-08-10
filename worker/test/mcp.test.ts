@@ -180,6 +180,31 @@ describe("/mcp — protocol", () => {
     ]);
   });
 
+  it("🔴 registers NO tool that deletes a portal (ADR-026)", async () => {
+    // The exhaustive list above already fails if `delete_portal` is added — but it fails looking
+    // like a list that needs updating, which is exactly how a deliberate omission gets "fixed".
+    // This one fails saying what it is: a decision.
+    //
+    // `DELETE /api/portals/{slug}` exists and the CLI calls it (#180). MCP does not, and will not.
+    // Every other tool's worst case is a wrong document at a right URL; this one's is nine months of
+    // an engagement and every /p/ link already in a client's inbox, from one misread sentence, with
+    // no undo. An agent may create and share. It may not end a client boundary.
+    const payload = await result(await rpc("tools/list"));
+    const tools = payload["tools"] as { name: string; description: string }[];
+
+    expect(tools.find((t) => t.name === "delete_portal")).toBeUndefined();
+    // And not under another name: nothing on /mcp may remove a portal.
+    for (const t of tools) {
+      expect(t.name).not.toMatch(/(delete|destroy|drop|remove|purge)_?portal/i);
+    }
+
+    // The closest destructive tool MCP does hold keeps the document — it is a flag, not a deletion.
+    // If that ever stops being true, this assertion should be the thing that objects.
+    const revoke = tools.find((t) => t.name === "revoke_document")!;
+    expect(revoke).toBeDefined();
+    expect(revoke.description.toLowerCase()).not.toMatch(/permanently deletes|cannot be undone/);
+  });
+
   it("⭐ warns the model that mint_public_link is a WIDENING operation", async () => {
     // The tool description is the only thing standing between a model and a casually
     // public client report. It has to say so, in the description, not in our docs.

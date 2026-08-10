@@ -700,13 +700,43 @@ test("🔴 views --live never reads one deployment's account for another (#167)"
   assert.match(r.text, /→ prod/, "and it says which deployment it was asked about");
 });
 
+test("portal-delete guards its argument before touching the network", () => {
+  const r = run("portal-delete");
+  assert.notEqual(r.status, 0);
+  assert.match(r.text, /Usage: pagevault portal-delete <slug>/);
+  assert.doesNotMatch(r.text, /Not configured/, "the usage guard comes before config, like every other command");
+});
+
+test("🔴 portal-delete is gated on a protected deployment (#180)", () => {
+  // More destructive than the three commands `protected` was written for: `rm` takes one document,
+  // this takes the boundary and — with --cascade — everything inside it.
+  const home = mkdtempSync(join(tmpdir(), "pv-portaldel-"));
+  writeFileSync(
+    join(home, "deployments.json"),
+    JSON.stringify({ current: "prod", deployments: { prod: { url: "https://prod.invalid", token: "p", protected: true } } }),
+  );
+  const r = runIn(home, "portal-delete", "acme");
+  assert.notEqual(r.status, 0);
+  assert.match(r.text, /protected deployment/);
+  assert.match(r.text, /deleting a portal needs an explicit --yes/);
+});
+
+test("portal-delete help states the MCP exception, not just the flags (#180, ADR-026)", () => {
+  // The absence of an MCP tool is a decision. If it is only in the ADR, the next reader finds a gap
+  // and closes it — so the surface an operator actually reads has to say so too.
+  const help = run("help", "portal-delete").text;
+  assert.match(help, /--cascade/);
+  assert.match(help, /ADR-026/);
+  assert.match(help, /No MCP tool|no MCP tool/);
+});
+
 test("a protected deployment says so in status", () => {
   const home = mkdtempSync(join(tmpdir(), "pv-statusprot-"));
   writeFileSync(
     join(home, "deployments.json"),
     JSON.stringify({ current: "prod", deployments: { prod: { url: "https://prod.invalid", token: "p", protected: true } } }),
   );
-  assert.match(runIn(home, "status").text, /Protected\s+rm, revoke, rotate and upgrade require --yes/);
+  assert.match(runIn(home, "status").text, /Protected\s+rm, revoke, rotate, portal-delete and upgrade require --yes/);
 });
 
 test("a single-deployment install sees no name row it cannot use", () => {
