@@ -310,9 +310,9 @@ function page(session: string, nonce: string, owner: string, version: string, de
      the page, and it is not. A PINNED row keeps its control visible: that is the state, not an
      affordance, and hiding it would leave nothing to say the order is deliberate. */
   .pinctl { display:inline-flex; align-items:center; gap:2px; }
-  .pinb { background:none; border:0; padding:3px 4px; cursor:pointer; color:var(--pv-muted);
-          line-height:1; font-size:11px; border-radius:4px; opacity:0; transition:opacity .12s; }
-  .pinb .icon { width:14px; height:14px; }
+  .pinb { background:none; border:0; padding:4px 6px; cursor:pointer; color:var(--pv-muted);
+          line-height:1; font-size:13px; border-radius:4px; opacity:0; transition:opacity .12s; }
+  .pinb .icon { width:17px; height:17px; }
   .doc:hover .pinb, .pinb:focus-visible, .doc.ispin .pinb { opacity:1; }
   .pinb:hover:not([disabled]) { background:var(--pv-surface-3, var(--pv-surface-2)); color:var(--pv-ink); }
   .pinb[disabled] { opacity:.25; cursor:default; }
