@@ -93,6 +93,42 @@ const CONNECT = "docs/setup/connect-mcp.md";
 const connectText = read(join(ROOT, CONNECT));
 for (const t of registered) if (!connectText.includes(t)) add("mcp", CONNECT, `undocumented tool → ${t}`);
 
+// --- 4b · a spelled-out tool COUNT in prose matches the registered list --------------------------
+//
+// The check above compares tools by NAME, which is the part that matters. But three documents also
+// state the count in English — "Fourteen tools, `verb_noun`, consistent" — and a name check cannot
+// read English. Two consecutive releases added a tool and found those sentences stale afterwards,
+// by grep, which is precisely the class of drift this script exists to stop finding by hand.
+//
+// Only a recognisable NUMBER counts as a claim: "MCP tools", "the read tools" and "these tools" are
+// prose, not assertions, and flagging them would train everyone to ignore this check.
+const NUMBER_WORDS = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17,
+  eighteen: 18, nineteen: 19, twenty: 20,
+};
+// Point-in-time records are exempt for the same reason they are exempt from the route check: an
+// ADR, a shipped CHANGELOG entry or a retrospective saying "twelve tools" is history, and
+// "correcting" it would rewrite what was true when it was written. `how-i-built-this.md` earns the
+// exemption by nature — it recounts a bug where "a deployment missing three tools verified clean",
+// which is a quantity in a story and grammatically identical to a claim about the registry.
+const RETROSPECTIVE = (p) =>
+  p.startsWith("docs/adr/") || p.includes("implementation/") || p.endsWith("CHANGELOG.md") || p.endsWith("how-i-built-this.md");
+
+for (const f of prose) {
+  if (RETROSPECTIVE(rel(f))) continue;
+  // 🔴 `[^\S\n]+`, not `\s+`. `\s` spans newlines, so a line ending in a number word and the next
+  // line beginning "tools" matched as a phrase that appears nowhere in the rendered text — which
+  // is how this check's first run reported a count no reader could find.
+  for (const [, word] of read(f).matchAll(/\b([A-Za-z]+|\d+)[^\S\n]+tools\b/g)) {
+    const claimed = /^\d+$/.test(word) ? Number(word) : NUMBER_WORDS[word.toLowerCase()];
+    if (claimed === undefined) continue;
+    if (claimed !== registered.length) {
+      add("mcp", rel(f), `stale tool count → "${word} tools", but the Worker registers ${registered.length}`);
+    }
+  }
+}
+
 // --- 5 · docs never name a route the Worker doesn't serve ---------------------------------------
 const workerSrc = all.filter((f) => f.startsWith(join(ROOT, "worker/src"))).map(read).join("\n");
 const liveRoots = new Set([...workerSrc.matchAll(/["'`](\/[a-z]+)/g)].map((m) => m[1]).filter((p) => p.length > 1));
