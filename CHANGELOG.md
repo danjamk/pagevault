@@ -30,6 +30,14 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
   column of numbers. ([#162](../../issues/162))
 - **`make sync-views`.** The write half was reachable from the CLI and not from `make`, so one front
   door could not reach half the feature. ([#166](../../issues/166))
+- **A `traffic` MCP tool.** Metrics reached agents only as fields riding along inside
+  `list_documents` and `read_document`, so an agent could answer *did they open this document* and
+  nothing else — not how much traffic last week, which portal is busiest, whether a referrer is
+  producing anything, or what the trend is. That is the question most worth asking in the place it
+  could not be asked: while you are already in a conversation about that client. Same rollup,
+  called in-process. Counts and surfaces, never identities. The staleness stamp is in the prose as
+  well as `structuredContent`, so a host that renders only text still sees "as of".
+  ([#163](../../issues/163))
 - **A traffic panel in the console.** Deployment total, a daily sparkline, per-portal bars and top
   referrers, from the same rollup — read through the owner session the console already holds, so no
   Cloudflare credential reaches the page. This panel *is* the dashboard: Analytics Engine has no

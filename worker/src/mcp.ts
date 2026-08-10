@@ -36,7 +36,8 @@ import {
   putPortal,
   putPublicToken,
 } from "./store.js";
-import { type ViewStats, type ViewSummary, getViewSummary, statsFor } from "./views.js";
+import { type ViewStats, type ViewSummary, getViewSummary, statsFor, syncRisk } from "./views.js";
+import { type Rollup, rollup } from "./rollup.js";
 
 /**
  * The remote MCP server. This is the reason the project exists.
@@ -973,6 +974,150 @@ function buildServer(env: Env, origin: string): McpServer {
   // doubles as a lightweight check-for-updates the model drives. See #98. Read-only.
   // -------------------------------------------------------------------------
   server.registerTool(
+    "traffic",
+    {
+      title: "Traffic",
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      description: [
+        "How much the documents were read — totals, a daily trend, per-portal rollups and referrers.",
+        "",
+        "Ask this when the question is about VOLUME rather than a specific document: how much traffic",
+        "last week, which client is busiest, whether a referrer is producing anything, is it trending.",
+        "For 'did they open this one', use list_documents or read_document — the per-document counts",
+        "ride along there.",
+        "",
+        "🔴 These numbers come from the operator's last `pagevault sync-views`, NOT from live traffic.",
+        "`syncedAt` says when that ran. Report them as of that date — say 'as of Tuesday', never imply",
+        "you just looked. When nothing has ever been synced, say so; do not report zero views, which",
+        "reads as 'nobody opened anything' and is a different claim entirely.",
+        "",
+        "Counts and surfaces only. This never reports WHO read something — the stored history has",
+        "never held an identity, so there is nothing here to withhold or to ask for.",
+      ].join("\n"),
+      inputSchema: {
+        days: z.number().int().positive().max(3650).optional().describe("Window, in days. Default 30."),
+        portal: z.string().optional().describe("One client. Omit for the whole deployment."),
+        doc: z.string().optional().describe("One document id. Referrers are omitted — they aggregate per portal."),
+        by: z
+          .enum(["doc", "portal", "day", "referrer"])
+          .optional()
+          .describe("Which breakdown to lead the prose with. All of them ride in structuredContent regardless."),
+      },
+      outputSchema: {
+        syncedAt: z.string().nullable().describe("When the numbers were taken. Null means never synced."),
+        state: z.string().describe("never-synced | not-recording | empty | ok"),
+        window: z.object({ from: z.string(), to: z.string() }),
+        total: z.object({ views: z.number(), surfaces: z.object({ link: z.number(), public: z.number(), portal: z.number() }) }),
+        byDoc: z.array(z.object({ id: z.string(), portal: z.string(), title: z.string(), views: z.number() })),
+        byPortal: z.array(z.object({ portal: z.string(), views: z.number(), docs: z.number() })),
+        byDay: z.array(z.object({ key: z.string(), granularity: z.string(), views: z.number() })),
+        byReferrer: z.array(z.object({ host: z.string(), views: z.number() })),
+        syncRisk: z.object({ state: z.string(), uncapturedDays: z.number(), daysUntilLoss: z.number().nullable() }),
+      },
+    },
+    async (args) => {
+      try {
+        // 🔴 No canView() call here, and that is deliberate rather than an omission.
+        //
+        // #163 asked for one, reasoning that a metrics tool must respect the portal boundary like
+        // everything else. The boundary is real; the check would not be. The whole /mcp surface is
+        // operator-authenticated before `buildServer` runs — a static bearer or an OAuth token
+        // issued to the operator — so there is exactly one caller and they own every portal.
+        // `canView()` would return true unconditionally.
+        //
+        // Writing it anyway would MISSTATE WHERE THE AUTHORIZATION IS, which is the same reasoning
+        // the resource registration below already records (ADR-016, "authorization, stated
+        // honestly"). A check that cannot fail reads to the next person as the thing keeping
+        // clients apart, and they will trust it in a context where it is not. Prime directive #5 is
+        // that there is ONE authorization function — not that every function must call it.
+        //
+        // `portal` narrows the answer because the operator asked it to, not because it gates
+        // anything. If /mcp ever admits a non-operator identity, this is where the real check goes.
+        const summary = await getViewSummary(env);
+        // Asked of the binding, never inferred from an empty summary (#185).
+        const recording = analyticsEnabled(env);
+        const now = new Date();
+        const days = args.days ?? 30;
+        const to = now.toISOString().slice(0, 10);
+        const from = new Date(now.getTime() - (days - 1) * 86_400_000).toISOString().slice(0, 10);
+
+        const docs = (await listDocs(env, args.portal)).map((d) => ({
+          id: d.id,
+          portal: d.portal,
+          title: d.title,
+          name: d.name,
+          createdAt: d.createdAt,
+        }));
+
+        // The SAME rollup the console renders and the CLI fetches over HTTP — called in-process
+        // here. One aggregation, three surfaces; a second implementation would drift (#168).
+        const r = rollup(summary, docs, {
+          from,
+          to,
+          portal: args.portal,
+          doc: args.doc,
+          recording,
+          risk: syncRisk(summary, now.toISOString(), recording),
+        });
+
+        // 🔴 Staleness in the PROSE, not only in structuredContent. A host that renders text alone
+        // would otherwise show a column of numbers with no "as of", which reads as live.
+        if (r.state === "never-synced") {
+          return structured(
+            "No view history has been captured yet — nothing has ever been synced into this deployment, " +
+              "so there are no numbers to report. This is NOT zero views. The operator promotes history " +
+              "with `pagevault sync-views`.",
+            trafficOut(r),
+          );
+        }
+        if (r.state === "not-recording") {
+          return structured(
+            "This deployment is not recording views — the Worker has no Analytics Engine binding, so " +
+              "nothing is being counted and nothing will be." +
+              (r.total.views ? ` The ${r.total.views} views below were measured before it was turned off.` : ""),
+            trafficOut(r),
+          );
+        }
+
+        const lead = args.by ?? "doc";
+        const rows =
+          lead === "portal"
+            ? r.byPortal.map((p) => `  ${p.portal}: ${p.views} across ${p.docs} document${p.docs === 1 ? "" : "s"}`)
+            : lead === "day"
+              ? r.byDay.map((d) => `  ${d.key}${d.granularity === "month" ? " (month)" : ""}: ${d.views}`)
+              : lead === "referrer"
+                ? r.byReferrer.map((s) => `  ${s.host || "direct"}: ${s.views}`)
+                : r.byDoc.filter((d) => d.views > 0).map((d) => `  ${d.title} (${d.portal}): ${d.views}`);
+
+        const risky = r.risk.state === "warn" || r.risk.state === "urgent" || r.risk.state === "losing";
+        return structured(
+          [
+            `${r.total.views} view${r.total.views === 1 ? "" : "s"} between ${r.window.from} and ${r.window.to}` +
+              (args.portal ? ` in ${args.portal}` : "") + ".",
+            ...(rows.length ? ["", `By ${lead}:`, ...rows] : ["", "Nothing was opened in this window."]),
+            "",
+            `As of the last sync, ${String(r.syncedAt).slice(0, 10)} — not live.`,
+            // Referrers carry no date (ADR-023 §5), so they ignore the window. Said in the prose
+            // because a model that repeats a windowed heading over them states a wrong number.
+            ...(lead === "referrer" ? ["Referrer counts are ALL-TIME per portal and ignore the window above."] : []),
+            // #165's warning belongs wherever the numbers are read, not only in the CLI.
+            ...(risky
+              ? [
+                  r.risk.state === "losing"
+                    ? `WARNING: ${r.risk.lostDays} days of history is already unrecoverable and more goes each day. Tell the operator to run \`pagevault sync-views\`.`
+                    : `WARNING: ${r.risk.uncapturedDays} days of history becomes unrecoverable in ${r.risk.daysUntilLoss} days. Tell the operator to run \`pagevault sync-views\`.`,
+                ]
+              : []),
+          ].join("\n"),
+          trafficOut(r),
+        );
+      } catch (err) {
+        return toolError(err, "traffic");
+      }
+    },
+  );
+
+  server.registerTool(
     "server_info",
     {
       title: "Server info",
@@ -1117,6 +1262,28 @@ function viewLine(stats: ViewStats, summary: ViewSummary | null = null): string 
 
 /** The top-level staleness stamp, present exactly when a summary is. */
 const syncedAtOf = (summary: ViewSummary | null) => (summary ? { viewsSyncedAt: summary.syncedAt } : {});
+
+/**
+ * The `traffic` tool's structuredContent — the rollup, narrowed to what an agent can use.
+ *
+ * 🔴 Counts and surfaces, never identities (ADR-019 decision 4). Nothing is being stripped here:
+ * the stored summary has never held a viewer, so there is no identity to omit. Stated because the
+ * absence should read as the design rather than as an oversight for someone to "fix" later.
+ *
+ * `owner` and `lastViewedAt` are dropped from `byDoc` on purpose — this tool answers volume, and
+ * the per-document detail already rides along on `list_documents` in the shape agents know.
+ */
+const trafficOut = (r: Rollup) => ({
+  syncedAt: r.syncedAt,
+  state: r.state,
+  window: r.window,
+  total: { views: r.total.views, surfaces: r.total.surfaces },
+  byDoc: r.byDoc.map((d) => ({ id: d.id, portal: d.portal, title: d.title, views: d.views })),
+  byPortal: r.byPortal.map((p) => ({ portal: p.portal, views: p.views, docs: p.docs })),
+  byDay: r.byDay,
+  byReferrer: r.byReferrer,
+  syncRisk: { state: r.risk.state, uncapturedDays: r.risk.uncapturedDays, daysUntilLoss: r.risk.daysUntilLoss },
+});
 
 const baseUrl = (env: Env, origin: string): string => {
   const host = env.PUBLIC_HOST?.trim();

@@ -91,12 +91,19 @@ claude.ai and Claude Code do not share that ceiling.
 
 ## What you get once connected
 
-Thirteen tools, split into a write side (`publish_document`, `edit_document`, `create_portal`,
+Fourteen tools, split into a write side (`publish_document`, `edit_document`, `create_portal`,
 `update_portal_members`, the public-link lifecycle — `mint_public_link`, `rotate_public_link`,
 `revoke_public_link` — and `revoke_document`) and the read side that makes the portal *memory*
 rather than an outbox (`list_portals`, `list_documents`, `read_document`, `search_portal`, plus
-`server_info`). The full surface and its rules are in [`../architecture.md`](../architecture.md);
-the standard it's held to is [`../engineering/mcp-best-practices.md`](../engineering/mcp-best-practices.md).
+`traffic` and `server_info`). The full surface and its rules are in
+[`../architecture.md`](../architecture.md); the standard it's held to is
+[`../engineering/mcp-best-practices.md`](../engineering/mcp-best-practices.md).
+
+`traffic` is the one that answers *volume* — how much was read last week, which client is busiest,
+whether a referrer is producing anything. Ask it in the conversation you are already having about
+that client. It reports counts and surfaces and never who read something: the stored history has
+never held an identity. Its numbers come from the operator's last `pagevault sync-views`, and it
+says so in its own output, so a model reports "as of Tuesday" rather than implying it just looked.
 
 `pagevault verify` checks this count against the live deployment, so if the number here and the
 number it prints ever disagree, this file is the one that is wrong.
