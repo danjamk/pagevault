@@ -403,7 +403,11 @@ MEASURED zero for every document it left out. Defaults to a 90-day window (the t
 SCHEDULE IT. Daily is the sensible cadence and one KV write a day is nothing. The WORKER cannot
 run this for you — its Analytics Engine binding is write-only, so it cannot read its own metrics
 at any schedule (ADR-019). That is a fact about the Worker, not advice against scheduling: since
-0.33.0 an operator-side schedule is what keeps history from ageing out uncovered.`,
+0.33.0 an operator-side schedule is what keeps history from ageing out uncovered.
+
+Working snippets for launchd, a systemd timer, cron and a scheduled GitHub Action:
+docs/setup/scheduling-the-sync.md — including the one that bites everybody, which is that
+\`node\` is not on cron's PATH, so even the full path to this command fails without it.`,
   ),
 
   backup: H(

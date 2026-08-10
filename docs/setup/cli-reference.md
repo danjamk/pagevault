@@ -369,7 +369,9 @@ a rolling 90-day query — so a document opened 43 times in January reported `vi
 ⚠️ **Sync at least once every 90 days.** That is the other side of the bargain: views only reach the
 durable summary when a sync runs, so a window that ages out of Analytics Engine uncovered is gone.
 Nothing errors — the data is simply never there later. A daily schedule is the sensible cadence and
-costs one KV write.
+costs one KV write. Working snippets for launchd, a systemd timer, cron and a scheduled Action are in
+[`scheduling-the-sync.md`](scheduling-the-sync.md) — including the one that bites everybody, which is
+that `node` is not on cron's PATH, so even the full path to the command fails without it.
 
 Your own views are counted apart from the client's, where the deployment can tell — the split is
 computed on your machine from an address that never leaves it. Where this machine does not hold the
