@@ -168,6 +168,7 @@ describe("/mcp — protocol", () => {
       "list_documents",
       "list_portals",
       "mint_public_link",
+      "pin_documents",
       "publish_document",
       "read_document",
       "revoke_document",
@@ -178,6 +179,36 @@ describe("/mcp — protocol", () => {
       "traffic",
       "update_portal_members",
     ]);
+  });
+
+  it("pin_documents sets the whole order and reports what it dropped (#142)", async () => {
+    await seedPortals();
+    // Publish two documents so there is something real to pin.
+    for (const name of ["sow.html", "weekly.html"]) {
+      await callToolFull("publish_document", {
+        portal: "acme",
+        filename: name,
+        title: name,
+        html: `<!doctype html><title>${name}</title><p>x</p>`,
+      });
+    }
+
+    // 🔴 The order is REPLACED, not merged — an agent sends the list it wants, top first.
+    const set = await callToolFull("pin_documents", { portal: "acme", filenames: ["weekly.html", "sow.html"] });
+    expect(set.structured["pinned"]).toEqual(["weekly.html", "sow.html"]);
+    expect(set.structured["dropped"]).toEqual([]);
+
+    // 🔴 A name matching no document is DROPPED and named. The renderer skips such a pin silently —
+    // which is what makes a deleted document self-healing — so if this did not report, a model that
+    // guessed a filename would be told it succeeded and the page would show nothing.
+    const typo = await callToolFull("pin_documents", { portal: "acme", filenames: ["sow.html", "nope.html"] });
+    expect(typo.structured["pinned"]).toEqual(["sow.html"]);
+    expect(typo.structured["dropped"]).toEqual(["nope.html"]);
+    expect(typo.text).toMatch(/not pinned/i);
+
+    // An empty list clears the block rather than being a no-op.
+    const cleared = await callToolFull("pin_documents", { portal: "acme", filenames: [] });
+    expect(cleared.structured["pinned"]).toEqual([]);
   });
 
   it("🔴 registers NO tool that deletes a portal (ADR-026)", async () => {
@@ -278,12 +309,15 @@ describe("⭐ structured tool output — the read→publish chain is machine-rea
       .map((t) => t.name)
       .sort();
 
-    // The five #81 chain tools, plus server_info (#98) and traffic (#163) — all machine-readable
-    // returns. `traffic` earns one for the same reason `list_documents` does: an agent asked to
-    // compare two windows or chart a trend needs the numbers, not a paragraph to re-parse.
+    // The five #81 chain tools, plus server_info (#98), traffic (#163) and pin_documents (#142) —
+    // all machine-readable returns. `traffic` earns one for the same reason `list_documents` does:
+    // an agent asked to compare two windows or chart a trend needs the numbers, not a paragraph to
+    // re-parse. `pin_documents` earns one because it reports what it DROPPED — a filename that
+    // matched no document — and "which of my names were wrong" is a list, not a sentence.
     expect(withSchema).toEqual([
       "list_documents",
       "list_portals",
+      "pin_documents",
       "publish_document",
       "read_document",
       "search_portal",

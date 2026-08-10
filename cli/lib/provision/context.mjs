@@ -664,6 +664,7 @@ export const EXPECTED_MCP_TOOLS = [
   "create_portal",
   "update_portal_members",
   "mint_public_link",
+  "pin_documents",
   "revoke_public_link",
   "rotate_public_link",
   "revoke_document",

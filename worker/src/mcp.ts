@@ -32,6 +32,7 @@ import {
   listDocs,
   listPortals,
   mintPublicToken,
+  normalizePinned,
   putMeta,
   putPortal,
   putPublicToken,
@@ -444,6 +445,76 @@ function buildServer(env: Env, origin: string): McpServer {
         return text(`Created portal "${portal.name}" (${portal.slug}, ${portal.kind}).`);
       } catch (err) {
         return toolError(err, "create_portal");
+      }
+    },
+  );
+
+  server.registerTool(
+    "pin_documents",
+    {
+      title: "Pin documents to the top of a portal",
+      // Reversible, and reaches the same end state however many times it runs — it SETS the order
+      // rather than nudging it. Not destructive: nothing is deleted, no link changes, and unpinning
+      // restores the page exactly.
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      description: [
+        "Set which documents lead a portal's index, and in what order.",
+        "",
+        "Everything else stays newest-first, grouped by month. This is for the two or three",
+        "documents a client should see first — the SOW, the 'start here' — not for curating the",
+        "whole collection. A portal with twenty pinned documents has nothing pinned.",
+        "",
+        "Takes FILENAMES (what list_documents calls `filename`), not titles, and REPLACES the",
+        "whole order: send the complete list you want, top first. Send [] to clear it.",
+        "",
+        "A filename matching no document in the portal is dropped, and the reply says which —",
+        "so a typo is reported here rather than silently rendering nothing.",
+      ].join("\n"),
+      inputSchema: {
+        portal: z.string().describe("Portal slug."),
+        filenames: z
+          .array(z.string())
+          .describe("Complete pinned order, top first. Filenames, not titles. [] clears all pins."),
+      },
+      outputSchema: {
+        portal: z.string(),
+        pinned: z.array(z.string()).describe("The order now stored, after de-duplication and the cap."),
+        dropped: z.array(z.string()).describe("Filenames that matched no document in this portal."),
+      },
+    },
+    async (args) => {
+      try {
+        const portal = await getPortal(env, args.portal);
+        if (!portal) throw new BadRequest("no_such_portal", `No such portal: ${args.portal}`);
+
+        // 🔴 Resolve against the portal's documents before writing. The renderer skips a pin naming
+        // nothing — that skip is what makes a deleted document self-healing — so an unresolvable
+        // name would otherwise be accepted, stored, and silently render as absence. A model that
+        // guessed a filename must be told it guessed.
+        const docs = await listDocs(env, portal.slug);
+        const known = new Map(docs.map((d) => [d.name.toLowerCase(), d.name]));
+        const wanted = normalizePinned(args.filenames);
+        const resolved: string[] = [];
+        const dropped: string[] = [];
+        for (const name of wanted) {
+          const hit = known.get(name.toLowerCase());
+          if (hit) resolved.push(hit);
+          else dropped.push(name);
+        }
+
+        const next: Portal = { ...portal, updatedAt: new Date().toISOString() };
+        if (resolved.length) next.pinned = resolved;
+        else delete next.pinned;
+        await putPortal(env, next);
+
+        const summary = resolved.length
+          ? `Pinned ${resolved.length} document(s) to the top of "${portal.slug}": ${resolved.join(", ")}.`
+          : `Cleared the pinned block on "${portal.slug}" — it reads newest-first again.`;
+        const warn = dropped.length ? `\n\nNot found in this portal, so not pinned: ${dropped.join(", ")}.` : "";
+
+        return structured(`${summary}${warn}`, { portal: portal.slug, pinned: resolved, dropped });
+      } catch (err) {
+        return toolError(err, "pin_documents");
       }
     },
   );
