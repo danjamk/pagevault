@@ -265,8 +265,9 @@ function requireCreds({ accountId, token }) {
         "(ADR-015).\n\n" +
         "If this machine provisioned the deployment, set it up so the account id is recorded.\n" +
         "If it did not — production deployed by CI, for instance — name the account yourself:\n\n" +
-        "  CLOUDFLARE_API_TOKEN=… pagevault views --account <account-id>\n\n" +
-        "A token scoped to Account Analytics (Read) is enough, and cannot deploy or destroy.",
+        "  CLOUDFLARE_API_TOKEN=… pagevault views --live --account <account-id>\n\n" +
+        "A token scoped to Account Analytics (Read) is enough, and cannot deploy or destroy.\n" +
+        "Or drop --live: the stored summary needs no Cloudflare credential and reaches further back.",
     );
   }
   if (!token) {

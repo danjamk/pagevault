@@ -1087,10 +1087,28 @@ async function views(flags) {
     return note(formatRollup(rolled, null, { by }));
   }
 
-  const { loadContext, loadCloudToken } = await import("../lib/provision/context.mjs");
-  const ctx = loadContext();
+  const { loadCloudToken } = await import("../lib/provision/context.mjs");
 
-  const creds = { accountId: flags.account || ctx.accountId, token: process.env.CLOUDFLARE_API_TOKEN || loadCloudToken() };
+  // 🔴 The account to query is THIS deployment's — not whichever build record happens to be nearest
+  // the working directory. Standing in the checkout that provisioned `test` and running
+  // `views --live --deployment prod` read TEST's Analytics Engine and printed the answer under
+  // prod's name: a cross-deployment read, silent, and indistinguishable from the real thing (#167).
+  // `sync-views` has been guarded since ADR-021 phase 2 because writing the wrong summary is
+  // obviously bad; reading the wrong one and believing it is not obviously better.
+  //
+  // Resolved only when `--account` did not settle it, so `views --live --account <id>` still works
+  // on a machine with no deployment configured at all — which is the one case that has no target to
+  // resolve. `commandTarget` also announces which deployment was chosen, which this path never did.
+  let accountId = flags.account;
+  if (!accountId) {
+    const cfg = commandTarget(flags);
+    // `record` is null when it describes a different deployment, so this cannot inherit a foreign
+    // account id. No record and no --account leaves it undefined, and `queryViews` refuses with the
+    // message that names `--account` as the escape hatch.
+    accountId = cfg.target.provisioned ? cfg.target.record?.accountId : undefined;
+  }
+
+  const creds = { accountId, token: process.env.CLOUDFLARE_API_TOKEN || loadCloudToken() };
 
   let result;
   let sources;

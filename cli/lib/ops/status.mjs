@@ -38,6 +38,14 @@ export async function statusCmd({ json = false, flags = {}, out = (s) => process
   // What this install would ACT on, which is not the same question as what it provisioned (#144).
   const target = resolveTarget({ flags, config: loadConfig(), registry: loadRegistry() });
 
+  // 🔴 The build record for THE DEPLOYMENT NAMED ABOVE — not whichever one is nearest this working
+  // directory. `status --deployment prod`, run from the checkout that provisioned `test`, reported
+  // test's tier, account, host and KV under prod's heading. The human table caught it once
+  // `resolveTarget` stopped claiming a foreign record, because it branches on `provisioned`; the
+  // JSON did not, and a machine-readable surface stating it is worse than a human-readable one
+  // (#167). Null here is the honest answer, and it is a shape rather than a failure.
+  const rec = target.provisioned ? target.record : null;
+
   if (json) {
     out(
       JSON.stringify(
@@ -56,14 +64,14 @@ export async function statusCmd({ json = false, flags = {}, out = (s) => process
           provisioned: target.provisioned,
           version: VERSION,
           schemaVersion: ctx.schemaVersion ?? SCHEMA_VERSION,
-          configured: ctx.rung !== undefined,
-          tier: ctx.rung === undefined ? null : ctx.rung >= 3 ? "secured" : "public",
-          rung: ctx.rung ?? null,
-          ownerEmail: ctx.ownerEmail ?? null,
-          account: ctx.accountId ? { name: ctx.accountName ?? null, id: ctx.accountId } : null,
-          host: ctx.host ?? null,
-          kvId: ctx.kvId ?? null,
-          deployedUrl: ctx.deployedUrl ?? null,
+          configured: rec?.rung !== undefined,
+          tier: rec?.rung === undefined ? null : rec.rung >= 3 ? "secured" : "public",
+          rung: rec?.rung ?? null,
+          ownerEmail: rec?.ownerEmail ?? null,
+          account: rec?.accountId ? { name: rec.accountName ?? null, id: rec.accountId } : null,
+          host: rec?.host ?? null,
+          kvId: rec?.kvId ?? null,
+          deployedUrl: rec?.deployedUrl ?? null,
         },
         null,
         2,
@@ -111,7 +119,8 @@ export async function statusCmd({ json = false, flags = {}, out = (s) => process
       console.log(`  ${c.dim("Connected, but not provisioned from this machine — so there is no tier, account or")}`);
       console.log(`  ${c.dim("namespace to report here. That is normal when the deployment is deployed elsewhere,")}`);
       console.log(`  ${c.dim("for instance by CI. The document commands work; the provisioning ones do not.")}\n`);
-      console.log(`  ${c.dim("Ask the deployment itself with")} ${c.bold(CHECK_CMD)}${c.dim(".")}\n`);
+      console.log(`  ${c.dim("Ask the deployment itself with")} ${c.bold(CHECK_CMD)}${c.dim(".")}`);
+      console.log(`  ${c.dim("What works from here, and what needs a credential:")} ${c.bold("docs/setup/operating-a-deployment.md")}\n`);
       return;
     }
     console.log(`  ${c.dim("Not configured yet — run")} ${c.bold(SETUP_CMD)}.\n`);
