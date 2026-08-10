@@ -15,6 +15,10 @@
 // this repo has learned that a check which cannot fail is worse than no check.
 //
 
+// The one exception to "data only": the set of commands `protected` gates is a fact about the code,
+// not a sentence about it, and this file was one of four places restating it from memory (#176).
+import { PROTECTED_COMMANDS } from "./registry.mjs";
+
 const H = (usage, detail = "") => ({ usage, detail });
 
 export const HELP = {
@@ -55,11 +59,15 @@ Redeploy the Worker bundle that shipped with your installed package — the seco
 \`npm update -g pagevault\`. Keeps your KV data, config and secrets, and never rotates a live
 bearer.
 
+  --yes             skip the confirmation, and confirm a deployment marked --protected
   --analytics       turn view tracking ON (needs Analytics Engine enabled on the account)
   --no-analytics    turn view tracking OFF, deliberately
 
-Neither flag is the normal case. Left alone, an upgrade keeps view tracking exactly as the
-deployment already has it — so a redeploy can never quietly drop it. Passing --no-analytics is
+On a deployment registered with \`login --protected\`, upgrade refuses without --yes. It replaces
+the code that deployment is running, and nothing on this machine can put the old code back.
+
+Neither analytics flag is the normal case. Left alone, an upgrade keeps view tracking exactly as
+the deployment already has it — so a redeploy can never quietly drop it. Passing --no-analytics is
 the only way to switch it off, because doing that by accident costs data nothing can recover:
 Analytics Engine keeps about 90 days and there is no backfill.`,
   ),
@@ -79,7 +87,7 @@ machine, or for someone else's deployment.
   --as <name>           register it by NAME in ~/.pagevault/deployments.json instead, so this
                         machine can hold several deployments at once — a production instance
                         deployed by CI and a test one you deploy from a checkout.
-  --protected           on this deployment, rm/revoke/rotate require an explicit --yes.
+  --protected           on this deployment, ${PROTECTED_COMMANDS.join("/")} require an explicit --yes.
                         --no-protected clears it. Needs --as; there is nowhere else to put it.
 
 Without --as nothing changes: one deployment, one config.json, exactly as before. With it, the

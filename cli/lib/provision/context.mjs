@@ -475,6 +475,27 @@ export function resolveAnalytics({ flag, declared, live }) {
 }
 
 /**
+ * What a resolved view-tracking answer contributes to `.pagevault.json` — a patch, spread into the
+ * record, and usually empty.
+ *
+ * 🔴 The distinction is between an ANSWER and a SILENCE, and only rungs 1–2 have to draw it. Rung 3
+ * interviews the operator, so every resolution there is an answer and `provision.mjs` saves
+ * unconditionally. Rungs 1–2 have no interview: nothing-said means off, and writing THAT down turns
+ * a default into `declared`, which outranks rung 3's interview forever — so an operator who never
+ * thought about view tracking at rung 1 would climb to Secured and never be asked.
+ *
+ * That reasoning is right for the default and was wrong for the flag (#194). `--no-analytics` is not
+ * silence; it is the operator saying it out loud, and honouring it for one deploy and forgetting it
+ * by the next is the same shape of bug as #187 — a setting that reads as applied and isn't.
+ *
+ * `PAGEVAULT_ANALYTICS` counts, because `analyticsChoice` folds it into the same `flag` and rung 3
+ * has always persisted it on that footing. A second rule about which explicit signals stick would be
+ * a second asymmetry to explain, for a variable whose only real caller is CI — where the workspace
+ * is thrown away and nothing persists anyway.
+ */
+export const analyticsPatch = (value, source) => (source === "flag" ? { analytics: value } : {});
+
+/**
  * The template's view-tracking block, and the one function that removes it.
  *
  * 🔴 Shared by rung 1–2 (`tier0.mjs`) and rung 3 (`provision.mjs`) on purpose. Rung 3 stripped the

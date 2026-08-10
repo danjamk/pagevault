@@ -14,7 +14,7 @@
 //
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, releaseTag, BUNDLE_PATH, applyBundleMode, generatedConfigPath, templatePath, runHint, RUNNING_FROM_REPO, deployedBindings, resolveAnalytics, stripAnalyticsBinding, bindsAnalytics, analyticsBecause, refuseAnalyticsDowngrade, analyticsDashboard } from "./context.mjs";
+import { c, ok, info, warn, die, loadContext, saveContext, loadCloudToken, argValue, cfApi, cfErr, releaseTag, BUNDLE_PATH, applyBundleMode, generatedConfigPath, templatePath, runHint, RUNNING_FROM_REPO, deployedBindings, resolveAnalytics, stripAnalyticsBinding, bindsAnalytics, analyticsBecause, analyticsPatch, refuseAnalyticsDowngrade, analyticsDashboard, CONTEXT_FILE } from "./context.mjs";
 
 const CONFIG_IN = templatePath();
 const CONFIG_OUT = generatedConfigPath();
@@ -141,11 +141,18 @@ export async function writeTier0Config(opts = {}) {
     info(`  Turn it on later: enable it at ${c.dim(analyticsDashboard(ctx.accountId))}, then \`${runHint("deploy ANALYTICS=on", "upgrade --analytics")}\`.`);
   }
 
-  // 🔴 Deliberately NOT saved to .pagevault.json, unlike rung 3. A default is not an answer, and
-  // writing one down turns it into `declared` — which beats rung 3's interview, so an operator who
-  // never thought about view tracking at rung 1 would climb to Secured and never be asked. It also
-  // buys nothing: a rung 1–2 deployment that HAS the binding is carried across re-deploys by `live`
-  // (ADR-024), which is the case the record would have covered.
+  // Save an answer; never save a silence. See `analyticsPatch` for why the two differ only here.
+  //
+  // Saying which of the two just happened is the other half of #194: `--no-analytics` used to print
+  // "off — you asked for it on this run" and then be forgotten by the next deploy, and nothing in
+  // that line was false. The operator has no way to tell a recorded decision from a per-run one
+  // unless the run says so.
+  if ("analytics" in analyticsPatch(analytics, source)) {
+    saveContext({ ...loadContext(), ...analyticsPatch(analytics, source) });
+    info(`  ${c.dim(`Recorded in ${CONTEXT_FILE} — later deploys keep this until you say otherwise.`)}`);
+  } else if (source === "default") {
+    info(`  ${c.dim(`Not recorded — nothing asked. Climbing to Secured will ask you directly.`)}`);
+  }
 
   // --- Write the config ------------------------------------------------------
   //

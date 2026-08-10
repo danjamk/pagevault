@@ -39,6 +39,39 @@ export function deployCommand(configPath) {
   return `npx --yes wrangler@4 deploy --config "${configPath}"`;
 }
 
+/**
+ * Which deployment is this build record about to overwrite?
+ *
+ * 🔴 Deliberately NOT `resolveTarget()`, which #176 proposed. That resolver answers *"which
+ * deployment do the document commands act on"* — the registry's selection, the login config, the
+ * marker you are standing in. Deploy asks a different question: the build record decides where the
+ * code goes, and the selected deployment may be something else entirely. Gating on the resolver
+ * would put production's `protected` flag in front of a test deploy, and — far worse — leave a
+ * protected production ungated whenever `use` pointed somewhere else.
+ *
+ * Rung 2+ serves on the custom domain, which is known before the deploy. Rung 1 lands on
+ * workers.dev, whose URL wrangler only prints afterwards — so a re-deploy is identified by the one
+ * it landed on last time, and a genuinely first deploy resolves to nothing, correctly: there is no
+ * deployment yet to have agreed anything about.
+ */
+export const deployTargetUrl = (ctx = {}) =>
+  ctx.rung >= 2 && ctx.host ? `https://${ctx.host}` : ctx.deployedUrl || "";
+
+/**
+ * Does `protected` stop this deploy? (ADR-021 section 6, extended by #176.)
+ *
+ * `protected` used to cover `rm`, `revoke` and `rotate` — the document commands, which resolve
+ * through the registry where the flag lives. `upgrade` resolves through the build record and never
+ * read the registry at all, so the one command that REPLACES THE RUNNING CODE was the one that
+ * could not see the flag saying be careful with this deployment. Not an omission in a list: the two
+ * paths asked different stores.
+ *
+ * A refusal, not a prompt, matching `requireYesOnProtected` — `protected` must mean the same thing
+ * in a terminal and in a script.
+ */
+export const refusesProtectedDeploy = (known, flags = {}) =>
+  Boolean(known?.entry?.protected) && flags.yes !== true;
+
 export async function deploy(opts = {}) {
   loadCloudToken();
   const ctx = loadContext();
@@ -71,7 +104,30 @@ export async function deploy(opts = {}) {
 
   console.log(banner("deploy", `(${ctx.rung >= 3 ? "Secured" : "Public"} → ${shortId(ctx.accountId)})`));
 
-  // --- 0. WHERE? Verify the pinned account, name it once, confirm it ---------
+  // --- 0. WHICH one? The registry entry, and the flag that lives on it -------
+  //
+  // ADR-021 gave deployments names so the operator confirms identity before acting, and the
+  // vocabulary stopped at the door of the most consequential command (#176). Read before the
+  // account check so a protected deployment costs nothing to refuse — nothing has been built,
+  // nothing contacted, no config generated.
+  const registry = loadRegistry();
+  const known = findByUrl(registry, deployTargetUrl(ctx));
+
+  if (refusesProtectedDeploy(known, opts.flags ?? {})) {
+    die(`${known.name} is a protected deployment — replacing its running code needs an explicit --yes.`, [
+      `  ${c.bold(known.name)}  ${known.entry.url}`,
+      "",
+      "  This deploy would replace the Worker that deployment is running. That is not reversible by",
+      "  re-running anything: the code it was serving a minute ago is not on this machine unless the",
+      "  package that built it still is.",
+      "",
+      `    ${c.bold(runHint("deploy YES=1", "upgrade --yes"))}   do it anyway, deliberately`,
+      "",
+      `  ${c.dim(`Unset it by removing "protected" from ${known.name} in ~/.pagevault/deployments.json.`)}`,
+    ]);
+  }
+
+  // --- 0a. WHERE? Verify the pinned account, name it once, confirm it --------
 
   const accounts = await cfAccounts();
   if (accounts.length === 0) die("No Cloudflare token, or it reaches no account.", `Run \`${runHint("preflight", "init")}\` — it names the problem.`);
@@ -85,6 +141,11 @@ export async function deploy(opts = {}) {
   const targetUrl = ctx.rung >= 2 && ctx.host ? `https://${ctx.host}` : "*.workers.dev";
   const row = (label, val) => console.log(`  ${c.cyan(label.padStart(12))}  ${val}`);
   row("Deploying to", acct(target));
+  // The name, when there is one. ADR-021 section 4 asks every command to say what it is acting on,
+  // and this is the block the operator answers y/N to — an account id and a URL name a machine, not
+  // the thing the operator calls "prod". Silent on a first deploy, where there is nothing true to
+  // say yet, matching `announceTarget`: a name is printed when one exists, never invented.
+  if (known) row("Deployment", `${c.bold(known.name)}${known.entry.protected ? c.dim(" · protected") : ""}`);
   row("Owner", ctx.ownerEmail);
   // The tier belongs in the block you are saying y/N to. It was only in the banner above, which is
   // easy to scroll past — and it is the line that decides whether strangers can open your documents.
@@ -310,10 +371,12 @@ export async function deploy(opts = {}) {
   // describing production (#171). Where production's bearer lived only in that file, the credential
   // was destroyed rather than shadowed.
   if (!RUNNING_FROM_REPO && url && bearerValue) {
-    const registry = loadRegistry();
-    const known = findByUrl(registry, url);
+    // Re-resolved against the URL wrangler actually printed, not the one predicted in 0 — at rung 1
+    // a genuinely first deploy had no URL to predict from, and this is where it becomes knowable.
+    // Nothing has written the registry in between, so the read above is still current.
+    const landed = findByUrl(registry, url);
 
-    if (known) {
+    if (landed) {
       // A deployment we already know by name. Its bearer belongs on ITS entry — never in the global
       // slot, which may be describing something else entirely.
       //
@@ -322,10 +385,10 @@ export async function deploy(opts = {}) {
       // a copy — `deployments` reads the record fresh through it, so nothing here can go stale
       // (#170).
       const patch = { url, token: bearerValue, markerPath: statePath(CONTEXT_FILE) };
-      const file = saveRegistry(upsert(registry, known.name, patch), process.env);
-      ok(`Updated ${c.bold(known.name)} in ${file} — the bearer travels with the deployment.`);
-      if (registry.current && registry.current !== known.name) {
-        console.log(`  ${c.dim(`Still defaulting to ${registry.current} elsewhere. Switch with:`)} ${c.bold(`pagevault use ${known.name}`)}`);
+      const file = saveRegistry(upsert(registry, landed.name, patch), process.env);
+      ok(`Updated ${c.bold(landed.name)} in ${file} — the bearer travels with the deployment.`);
+      if (registry.current && registry.current !== landed.name) {
+        console.log(`  ${c.dim(`Still defaulting to ${registry.current} elsewhere. Switch with:`)} ${c.bold(`pagevault use ${landed.name}`)}`);
       }
     } else if (shouldAdoptCurrent(registry, url, loadConfig({}).url)) {
       // Nothing else claims the default, or the login already describes this deployment. This is the

@@ -12,7 +12,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout, stderr } from "node:process";
 import { api, apiText, loadConfig, sameDeployment, saveLoginConfig, waitReadable, PvError } from "../lib/client.mjs";
 import { resolveTarget, describeTarget, resolveBearerSource, stateEnvPath, stateToken, provisionedFrom, locateMarker, readMarker, recordUrl } from "../lib/target.mjs";
-import { emptyRegistry, findByName, findByUrl, listDeployments, loadRegistry, saveRegistry, shouldAdoptCurrent, upsert } from "../lib/registry.mjs";
+import { PROTECTED_COMMANDS, emptyRegistry, findByName, findByUrl, listDeployments, loadRegistry, protectedCommands, saveRegistry, shouldAdoptCurrent, upsert } from "../lib/registry.mjs";
 
 import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } from "../lib/format.mjs";
 import { helpText, usageError } from "../lib/help.mjs";
@@ -119,9 +119,13 @@ function announceTarget(target, registry) {
 }
 
 /**
- * A deployment may be marked `"protected": true` in the registry. On one, the commands that DESTROY
- * — `rm`, `revoke`, `rotate` — require an explicit `--yes`. Publishing, editing and sharing are
- * untouched (ADR-021 section 6).
+ * A deployment may be marked `"protected": true` in the registry. On one, the commands in
+ * `PROTECTED_COMMANDS` require an explicit `--yes`. Publishing, editing and sharing are untouched
+ * (ADR-021 section 6).
+ *
+ * This guards the three DOCUMENT commands, which is all the flag reached until #176. `upgrade` is
+ * the fourth and it is gated in `deploy.mjs` instead — not for tidiness but because the two resolve
+ * their target from different stores, and deploy's is the build record. See `refusesProtectedDeploy`.
  *
  * This is the narrow, declarative version of the guardrail: set once on production, costs nothing
  * on test, and does not train anyone to hit `y` without reading. A confirmation prompt on every
@@ -822,7 +826,7 @@ async function login(flags) {
     const registryFile = saveRegistry(next, process.env);
     note(`Registered ${name} → ${url} in ${registryFile} (mode 600).`);
     if (next.deployments[name].protected === true) {
-      note(`${name} is protected — rm, revoke and rotate will require --yes.`);
+      note(`${name} is protected — ${protectedCommands()} will require --yes.`);
     } else if (flags["no-protected"] === true) {
       note(`${name} is no longer protected.`);
     }
@@ -954,7 +958,7 @@ Set up & deploy:
   pagevault login [--url <url>] [--token <token>] [--as <name>] [--protected]
                                 point at a deployment (falls back to env; init does this)
                                 --as registers it by name so several can coexist
-                                --protected makes rm/revoke/rotate require --yes there
+                                --protected makes ${PROTECTED_COMMANDS.join("/")} require --yes there
 
 Several deployments on one machine:
   pagevault deployments [--json]      everything this machine can reach; * is the default

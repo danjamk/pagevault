@@ -21,7 +21,7 @@
 import { c, banner, loadContext, VERSION, SCHEMA_VERSION, RUNNING_FROM_REPO } from "../provision/context.mjs";
 import { resolveTarget, targetOrigin } from "../target.mjs";
 import { loadConfig } from "../client.mjs";
-import { loadRegistry } from "../registry.mjs";
+import { loadRegistry, protectedCommands } from "../registry.mjs";
 
 // The "not set up yet" nudge names the right door: `make setup` from the repo, `pagevault init`
 // from an install. Same reasoning everywhere a hint points at the setup step.
@@ -91,7 +91,7 @@ export async function statusCmd({ json = false, flags = {}, out = (s) => process
   if (target.url) {
     row("Deployment", target.name ? `${c.bold(target.name)}  ${c.dim(target.url)}` : c.bold(target.url));
     row("Resolved by", c.dim(targetOrigin(target)));
-    if (target.protected) row("Protected", c.dim("rm, revoke and rotate require --yes"));
+    if (target.protected) row("Protected", c.dim(`${protectedCommands()} require --yes`));
     console.log();
   }
 

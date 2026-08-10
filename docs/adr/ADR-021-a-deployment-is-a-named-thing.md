@@ -217,6 +217,24 @@ sharing are unaffected.
 This is the narrow, declarative version of the guardrail: it is set once on production, it costs
 nothing on test, and it does not train anyone to hit `y` without reading.
 
+> **Extended 2026-08-10 (#176).** `upgrade` joins the set. Destroying a *document* and replacing
+> the *code the deployment is running* are the same kind of act — irreversible from this machine —
+> and only the first was covered. The omission was structural rather than an oversight in a list:
+> the document commands resolve their target through the registry, where `protected` lives, and
+> `upgrade` resolves through the build record and never read the registry at all. So the gate could
+> not fire on it even in principle.
+>
+> The fix does **not** route `upgrade` through `resolveTarget()`. That resolver answers "which
+> deployment do the document commands act on", and deploy asks a different question — the build
+> record decides where the code goes, and the selected deployment may be something else. Gating on
+> the resolver would put production's flag in front of a test deploy and, worse, leave a protected
+> production ungated whenever `use` pointed elsewhere. `deploy.mjs` looks the deployment up by the
+> URL it is about to overwrite.
+>
+> The canonical list is `PROTECTED_COMMANDS` in `cli/lib/registry.mjs`. `destroy` stays out of it:
+> it has a stronger guard of its own — type the hostname — and listing it here would imply `--yes`
+> is enough for it.
+
 ## Rollout
 
 The registry is the end state, not the first step. Because a build record found by CWD-ascent is

@@ -125,9 +125,9 @@ provision: ## Rung 3: create the KV namespace, Access group, and two Access apps
 	@$(NVM) && node cli/lib/provision/provision.mjs \
 		$(if $(filter on,$(ANALYTICS)),--analytics,) $(if $(filter off,$(ANALYTICS)),--no-analytics,)
 
-deploy: ## Deploy the Worker — rung-aware (Tier 0, or provision at rung 3; ANALYTICS=on|off toggles view tracking)
+deploy: ## Deploy the Worker — rung-aware (Tier 0, or provision at rung 3; ANALYTICS=on|off toggles view tracking, YES=1 confirms a protected deployment)
 	@$(NVM) && node cli/lib/provision/deploy.mjs \
-		$(if $(filter on,$(ANALYTICS)),--analytics,) $(if $(filter off,$(ANALYTICS)),--no-analytics,)
+		$(if $(filter on,$(ANALYTICS)),--analytics,) $(if $(filter off,$(ANALYTICS)),--no-analytics,) $(if $(YES),--yes,)
 
 seed: ## Publish a realistic document set to the LIVE deployment, through the CLI (asks first)
 	@$(NVM) && node scripts/seed-live.mjs
@@ -181,8 +181,8 @@ export: ## Walk away with everything: a zipped, browsable dump of your deploymen
 bundle: ## Build the self-contained Worker bundle the npm package ships (cli/dist/worker.js) — ADR-014
 	@$(NVM) && node scripts/build-bundle.mjs
 
-deploy-bundle: bundle ## Deploy the PREBUILT bundle (the installed-product path) — for validating the no_bundle deploy on a test host
-	@$(NVM) && PAGEVAULT_BUNDLE=1 node cli/lib/provision/deploy.mjs
+deploy-bundle: bundle ## Deploy the PREBUILT bundle (the installed-product path) — for validating the no_bundle deploy on a test host (YES=1 confirms a protected deployment)
+	@$(NVM) && PAGEVAULT_BUNDLE=1 node cli/lib/provision/deploy.mjs $(if $(YES),--yes,)
 
 publish-cli: ## Publish the pagevault CLI to npm — prepublishOnly runs the unit tests + a pack/install smoke first (#56)
 # The guard is in cli/package.json: `prepublishOnly` runs the node --test suites and smoke.mjs,
