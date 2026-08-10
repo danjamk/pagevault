@@ -88,6 +88,13 @@ The override is a flag on *this* run (`--no-analytics`, `PAGEVAULT_ANALYTICS=off
 file. A file can be stale, restored, or reconstructed from a secret written months ago. An argument
 typed today cannot be any of those things.
 
+> **Clarified 2026-08-10 (#194).** This is a statement about *precedence*, not about persistence:
+> the flag outranks the file, and it is also written to it. Rungs 1–2 deliberately recorded nothing,
+> which honoured `--no-analytics` for one deploy and then let a months-old `declared` outrank it
+> forever — a capability changing with nobody saying so on that run, which is the exact failure this
+> ADR exists to prevent. A *default* is still not recorded, because writing a silence down would
+> turn it into an answer and rob rung 3's interview of its question. See `analyticsPatch`.
+
 ### And every deploy says where its answer came from
 
 `off` printed with no provenance reads as a decision when it was a silence. The line now names its

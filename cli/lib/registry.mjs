@@ -106,6 +106,23 @@ export function findByName(registry, name) {
  * `current` wins a tie. Duplicate URLs across names should not happen, but if they do, resolving to
  * the deployment the operator selected is the least surprising of the available answers.
  */
+/**
+ * Every command `protected: true` gates (ADR-021 section 6).
+ *
+ * One list, because four separate places SAY it — `status`, `login`'s confirmation, the usage
+ * summary, and `login --help` — and #176 grew the set for the first time since it was written.
+ * A list that lives in four string literals is a list that describes the code once and then
+ * describes history.
+ *
+ * `destroy` is deliberately absent: it has a stronger guard of its own (type the hostname), so
+ * naming it here would imply `--yes` is sufficient for it, which it is not.
+ */
+export const PROTECTED_COMMANDS = ["rm", "revoke", "rotate", "upgrade"];
+
+/** The list as prose — "rm, revoke, rotate and upgrade". */
+export const protectedCommands = () =>
+  `${PROTECTED_COMMANDS.slice(0, -1).join(", ")} and ${PROTECTED_COMMANDS.at(-1)}`;
+
 export function findByUrl(registry, url) {
   if (!registry || !url) return null;
   const entries = Object.entries(registry.deployments ?? {});

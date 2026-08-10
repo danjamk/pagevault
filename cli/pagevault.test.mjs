@@ -15,7 +15,7 @@ import { loadConfig } from "./lib/client.mjs";
 // Still imported from provision.mjs though it now lives in context.mjs (#190) — the re-export is
 // part of that module's surface, so this pins it too.
 import { resolveAnalytics } from "./lib/provision/provision.mjs";
-import { analyticsChoice, stripAnalyticsBinding, bindsAnalytics } from "./lib/provision/context.mjs";
+import { analyticsChoice, analyticsPatch, stripAnalyticsBinding, bindsAnalytics } from "./lib/provision/context.mjs";
 
 const BIN = fileURLToPath(new URL("./bin/pagevault.mjs", import.meta.url));
 
@@ -647,7 +647,7 @@ test("a protected deployment says so in status", () => {
     join(home, "deployments.json"),
     JSON.stringify({ current: "prod", deployments: { prod: { url: "https://prod.invalid", token: "p", protected: true } } }),
   );
-  assert.match(runIn(home, "status").text, /Protected\s+rm, revoke and rotate require --yes/);
+  assert.match(runIn(home, "status").text, /Protected\s+rm, revoke, rotate and upgrade require --yes/);
 });
 
 test("a single-deployment install sees no name row it cannot use", () => {
@@ -833,8 +833,48 @@ test("🔴 rung 1–2 defaults view tracking OFF when nothing has an opinion (#1
 
   // And the default stays a default: rung 1–2 does not write it to .pagevault.json, so climbing to
   // rung 3 still reaches the interview instead of inheriting a `declared: false` nobody chose.
+  assert.deepEqual(analyticsPatch(false, "default"), {}, "a default contributes nothing to the record");
+
+  // The guard is structural, not a promise: the ONLY thing tier0 can save is what `analyticsPatch`
+  // returns, so the property above cannot be undone by a later edit that writes `analytics` directly.
+  // (This assertion started life forbidding tier0 from persisting AT ALL, which #194 made wrong.)
   const tier0 = readFileSync(new URL("./lib/provision/tier0.mjs", import.meta.url), "utf8");
-  assert.ok(!/saveContext\(\{[^}]*\banalytics\b/.test(tier0), "tier0 must not persist the analytics default");
+  const saves = [...tier0.matchAll(/saveContext\([^;]*\)/g)].map((m) => m[0]).filter((s) => /analytics/i.test(s));
+  assert.equal(saves.length, 1, "exactly one saveContext in tier0 touches view tracking");
+  assert.match(saves[0], /analyticsPatch\(/, "and it goes through the guard, never a bare `analytics` key");
+});
+
+test("🔴 an explicit --no-analytics survives the next flagless deploy (#194)", () => {
+  // The bug: rungs 1–2 honoured the flag for one deploy and forgot it. `declared` — possibly set
+  // months earlier by a rung-3 provision — then outranked it forever, so an operator who said
+  // --no-analytics, saw `off`, and deployed again next week found it back on with no memory of
+  // asking. Benign in direction (turning tracking on loses nothing) and exactly the class of bug
+  // ADR-024 exists to prevent: a capability changed and nobody said so on this run.
+  assert.deepEqual(analyticsPatch(false, "flag"), { analytics: false }, "an answer is recorded");
+  assert.deepEqual(analyticsPatch(true, "flag"), { analytics: true }, "in both directions");
+
+  // PAGEVAULT_ANALYTICS counts as saying it out loud. `analyticsChoice` folds it into the same
+  // `flag`, and rung 3 has always persisted it on that footing — a second rule about which explicit
+  // signals stick would be a second asymmetry to explain, for the one variable whose real caller is
+  // CI, where the workspace is thrown away and nothing persists anyway.
+  const fromEnv = analyticsChoice({}, { PAGEVAULT_ANALYTICS: "off" });
+  assert.deepEqual(analyticsPatch(fromEnv, resolveAnalytics({ flag: fromEnv, live: null }).source), { analytics: false });
+
+  // Deploy 1 says it out loud; deploy 2 says nothing. What deploy 2 reads is what deploy 1 wrote.
+  const recorded = analyticsPatch(false, "flag");
+  const next = resolveAnalytics({ flag: undefined, declared: recorded.analytics, live: false });
+  assert.equal(next.value, false, "the second deploy does not turn it back on");
+  assert.equal(next.source, "declared");
+});
+
+test("only an answer is recorded — never a silence (#194)", () => {
+  // Everything except a flag leaves the record untouched, each for its own reason. `live` and
+  // `declared` are already recorded somewhere (the Worker's bindings, the file itself); `default`
+  // and `unset` are silences, and writing a silence down is what would rob rung 3 of its interview.
+  for (const source of ["declared", "live", "default", "unset"]) {
+    assert.deepEqual(analyticsPatch(false, source), {}, `${source} must not be persisted by rung 1–2`);
+    assert.deepEqual(analyticsPatch(true, source), {}, `${source} must not be persisted by rung 1–2`);
+  }
 });
 
 test("rung 1–2 keeps a binding the live Worker already has (#190, ADR-024)", () => {
@@ -885,5 +925,9 @@ test("upgrade documents both directions, and says which one is the accident", ()
   const help = run("help", "upgrade").text;
   assert.match(help, /--analytics/);
   assert.match(help, /--no-analytics/);
-  assert.match(help, /keeps view tracking exactly as the/);
+  assert.match(help, /keeps view tracking exactly as/);
+  // #176: the flag that gets you past a protected deployment belongs in the help of the command it
+  // now gates, not only in `login --help` where the flag is set.
+  assert.match(help, /--yes/);
+  assert.match(help, /--protected/);
 });

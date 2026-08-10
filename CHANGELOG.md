@@ -7,7 +7,27 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **`--no-analytics` now sticks at the Public tiers.** It was honoured for one deploy and then
+  forgotten: rungs 1–2 deliberately recorded nothing, so a `declared` value set months earlier by a
+  Secured provision outranked it forever. An operator who said `--no-analytics`, saw `off`, and
+  deployed again next week found view tracking back on with no memory of asking. An explicit flag —
+  or `PAGEVAULT_ANALYTICS` — is now recorded; a bare default still is not, which is what keeps the
+  question live for the day you climb to Secured and get asked directly. Every deploy says which of
+  the two just happened. ([#194](../../issues/194))
+- **`protected` reaches `upgrade`** — the one command that replaces the code a deployment is
+  running, and the only destructive one the flag could not see. Not an omission in a list: the
+  document commands resolve their target through the registry, where `protected` lives, and
+  `upgrade` resolved through the build record and never read the registry at all, so the gate could
+  not fire even in principle. It now refuses without an explicit `--yes`, before anything is built or
+  contacted. Unprotected deployments are unchanged. ([#176](../../issues/176))
+
 ### Added
+- **The deploy banner names the deployment.** ADR-021 gave deployments names so the operator
+  confirms identity before acting, and the vocabulary stopped at the door of the most consequential
+  command — the y/N block showed an account id and a URL, which name a machine rather than the thing
+  the operator calls "prod". Printed when the deployment is registered, silent on a first deploy.
+  ([#176](../../issues/176))
 - **[`docs/setup/scheduling-the-sync.md`](docs/setup/scheduling-the-sync.md)** — working snippets for
   launchd, a systemd timer, cron and a scheduled GitHub Action, with a sentence on choosing between
   them. "Schedule it" was easy to say and left every operator to work out the wiring; production had

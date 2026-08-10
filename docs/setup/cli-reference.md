@@ -57,11 +57,19 @@ rotates a live one.
 Redeploy the Worker bundle that shipped with your installed package — after `npm update -g pagevault`.
 Keeps your KV, config, and secrets.
 
+`--yes` skips the confirmation. On a deployment registered with `login --protected` it is also
+required: an upgrade replaces the code that deployment is running, and nothing on your machine can
+put the old code back. Unprotected deployments are unaffected.
+
 `--analytics` / `--no-analytics` turn view tracking on or off. Neither is the normal case: left
 alone, an upgrade keeps view tracking exactly as the deployment already has it, so a redeploy can
 never quietly drop it. `--no-analytics` is the only way off, because doing that by accident costs
 data nothing can recover — Analytics Engine keeps about 90 days and there is no backfill.
 `PAGEVAULT_ANALYTICS=on|off` does the same thing for a non-interactive run.
+
+Either flag is **recorded** in `.pagevault.json`, so the next flagless deploy keeps the answer. A
+default is not: at Public tiers, view tracking left unmentioned stays unmentioned, which is what
+keeps the question live for the day you climb to Secured and get asked directly.
 
 ### `pagevault login [--url <url>] [--token <token>] [--as <name>]`
 Point the CLI at a deployment: writes `~/.pagevault/config.json` (mode `600` — it holds a bearer) and
