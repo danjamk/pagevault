@@ -1107,6 +1107,18 @@ describe("/mcp — traffic (#163)", () => {
     expect(structured["total"]).toMatchObject({ views: 0 });
   });
 
+  it("--by surface names each door in words the operator uses", async () => {
+    // The split is only useful if the reader knows a "link" view arrived through a /p/ capability
+    // URL that needs no login. Raw keys make them look up the vocabulary.
+    const id = await publishBackdated("Doors");
+    await sync({ [id]: { [today]: { link: 4, portal: 2, pub: 1 } } });
+
+    const { text } = await callToolFull("traffic", { by: "surface" });
+    expect(text).toContain("portal (signed in): 2");
+    expect(text).toContain("link (capability URL, no login): 4");
+    expect(text).toContain("public (listed portal page): 1");
+  });
+
   it("the tool description tells the model the numbers are not live", async () => {
     const payload = await result(await rpc("tools/list"));
     const tools = payload["tools"] as { name: string; description: string }[];

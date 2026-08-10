@@ -578,6 +578,7 @@ export function formatRollup(r, c, { by = "doc" } = {}) {
     doc: ["VIEWS", "DOCUMENT", "PORTAL", "LINK", "PUBLIC", "PORTAL", "LAST"],
     portal: ["VIEWS", "PORTAL", "DOCS", "LINK", "PUBLIC", "PORTAL"],
     day: ["DAY", "VIEWS", ""],
+    surface: ["VIEWS", "DOOR", "WHAT IT MEANS"],
     referrer: ["VIEWS", "SOURCE"],
   };
   const peak = Math.max(1, ...r.byDay.map((d) => d.views));
@@ -610,6 +611,14 @@ export function formatRollup(r, c, { by = "doc" } = {}) {
         String(d.views),
         dim("▇".repeat(Math.max(1, Math.round((d.views / peak) * 24)))),
       ]),
+    // Which door they came through. The third column is not decoration: "link 50" means nothing
+    // until you know a link is a /p/ capability URL that opens with no login, and that distinction
+    // is the one an operator most needs when reading their own numbers.
+    surface: () => [
+      [String(r.total.surfaces.portal), "portal", dim("signed in, through the portal")],
+      [String(r.total.surfaces.link), "link", dim("a /p/ capability URL — no login")],
+      [String(r.total.surfaces.public), "public", dim("a listed public portal page")],
+    ],
     referrer: () => r.byReferrer.map((s) => [String(s.views), s.host || dim("direct")]),
   };
 
@@ -635,6 +644,7 @@ export function formatRollup(r, c, { by = "doc" } = {}) {
     doc: `Nothing was opened between ${window}.`,
     portal: `No portal recorded traffic between ${window}.`,
     day: `No day between ${window} recorded a view.`,
+    surface: `Nothing was opened between ${window}, through any door.`,
     referrer: "No referrers recorded. Every visit arrived without one, or nothing has been opened.",
   }[by];
 

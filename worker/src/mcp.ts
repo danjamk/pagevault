@@ -999,9 +999,13 @@ function buildServer(env: Env, origin: string): McpServer {
         portal: z.string().optional().describe("One client. Omit for the whole deployment."),
         doc: z.string().optional().describe("One document id. Referrers are omitted — they aggregate per portal."),
         by: z
-          .enum(["doc", "portal", "day", "referrer"])
+          .enum(["doc", "portal", "day", "surface", "referrer"])
           .optional()
-          .describe("Which breakdown to lead the prose with. All of them ride in structuredContent regardless."),
+          .describe(
+            "Which breakdown to lead the prose with. All of them ride in structuredContent regardless. " +
+              "`surface` is which door they came through: portal (signed in), link (a /p/ capability URL), " +
+              "public (a listed portal page).",
+          ),
       },
       outputSchema: {
         syncedAt: z.string().nullable().describe("When the numbers were taken. Null means never synced."),
@@ -1087,7 +1091,16 @@ function buildServer(env: Env, origin: string): McpServer {
               ? r.byDay.map((d) => `  ${d.key}${d.granularity === "month" ? " (month)" : ""}: ${d.views}`)
               : lead === "referrer"
                 ? r.byReferrer.map((s) => `  ${s.host || "direct"}: ${s.views}`)
-                : r.byDoc.filter((d) => d.views > 0).map((d) => `  ${d.title} (${d.portal}): ${d.views}`);
+                : lead === "surface"
+                  ? // Which door, in the words the operator uses for them. Named rather than left as
+                    // the raw keys: "link 50" is meaningless until you know a link is a /p/ URL that
+                    // needs no login, which is the whole reason the split is worth reporting.
+                    [
+                      `  portal (signed in): ${r.total.surfaces.portal}`,
+                      `  link (capability URL, no login): ${r.total.surfaces.link}`,
+                      `  public (listed portal page): ${r.total.surfaces.public}`,
+                    ]
+                  : r.byDoc.filter((d) => d.views > 0).map((d) => `  ${d.title} (${d.portal}): ${d.views}`);
 
         const risky = r.risk.state === "warn" || r.risk.state === "urgent" || r.risk.state === "losing";
         return structured(

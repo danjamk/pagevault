@@ -1040,7 +1040,7 @@ async function views(flags) {
     // breakdowns over it were deliberately left out (ADR-025 §3): `queryBuckets` exists, but nobody
     // has asked for them, and offering the flag on both paths would imply the two produce the same
     // numbers over the same history. They do not; the summary reaches further back.
-    const BY = ["doc", "portal", "day", "referrer"];
+    const BY = ["doc", "portal", "day", "surface", "referrer"];
     const by = flags.by ?? "doc";
     if (!BY.includes(by)) {
       throw new PvError(`--by ${by} is not a breakdown. Use one of: ${BY.join(", ")}.`);

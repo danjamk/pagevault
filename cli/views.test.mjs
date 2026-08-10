@@ -420,3 +420,15 @@ test("an empty breakdown says which one was empty, in its own words", () => {
   assert.match(formatRollup(bare, null, { by: "day" }), /No day between .* recorded a view/);
   assert.match(formatRollup(bare, null, { by: "referrer" }), /No referrers recorded/);
 });
+
+test("--by surface names the door, not just the key", () => {
+  // "link 50" is meaningless until you know a link is a /p/ capability URL that opens with no
+  // login. That distinction is the one an operator most needs when reading their own numbers, so
+  // the column carries it rather than assuming the reader remembers the vocabulary.
+  const out = formatRollup(rollupFixture(), null, { by: "surface" });
+  assert.match(out, /8 +link +a \/p\/ capability URL/);
+  assert.match(out, /3 +portal +signed in/);
+  assert.match(out, /1 +public +a listed public portal page/);
+  // Surfaces are a total, not a per-document list — the document table is a different question.
+  assert.doesNotMatch(out, /Q3 Review/);
+});
