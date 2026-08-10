@@ -173,7 +173,9 @@ const CORPUS = [
   },
   {
     portal: "notes",
-    file: "examples/welcome.html",
+    // The welcome sample lives in the PACKAGE, not `examples/` — it is what an installed `verify`
+    // publishes, so it has to ship with the npm tarball (#31).
+    file: "cli/assets/welcome.html",
     title: "Why HTML is the best universal document format",
     summary: "Public writing. No login, no seat, no wall.",
     tags: "type:essay",

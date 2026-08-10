@@ -84,6 +84,21 @@ try {
     throw new Error(`dist/worker.js shipped but is only ${bundleBytes} bytes — the bundle looks truncated or broken`);
   }
 
+  // 4b. The welcome sample must ship too. `verify` publishes it as the operator's first document,
+  // and it used to live in the repo's `examples/` — which is NOT in the files allowlist, so an
+  // installed operator finished `init` with a blank console and a line calling that expected (#31).
+  // A `files` entry is exactly the kind of thing that gets dropped in a refactor, so assert it here
+  // rather than trusting the list.
+  let welcomeBytes = 0;
+  try {
+    welcomeBytes = statSync(join(temp, "node_modules", "pagevault", "assets", "welcome.html")).size;
+  } catch {
+    throw new Error("assets/welcome.html is missing from the installed package — `verify` has no first document to publish (files allowlist)");
+  }
+  if (welcomeBytes < 1000) {
+    throw new Error(`assets/welcome.html shipped but is only ${welcomeBytes} bytes — that is not the sample`);
+  }
+
   // 5. The lifecycle commands ship and dispatch. `--help` short-circuits to usage before any
   // provisioning runs, so this stays a no-deploy check. `help` must document them.
   if (!/\binit\b/.test(run(bin, ["help"]))) {

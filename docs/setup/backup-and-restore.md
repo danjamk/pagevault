@@ -85,7 +85,7 @@ pagevault verify
 pagevault sync-access
 ```
 
-Why the order matters: `verify` publishes `examples/welcome.html` so you have something to open.
+Why the order matters: `verify` publishes a bundled welcome sample so you have something to open.
 That is useful on a first install and unhelpful during a recovery — the sample's keys are not in
 your backup, so at step 2 the restore would stop and make you decide about them. Nothing is lost
 either way, and `--force` is the correct answer if you have already run `verify`. Restoring first
