@@ -235,6 +235,10 @@ const DOC_OUT_SHAPE = {
   createdAt: z.string(),
   updatedAt: z.string(),
   bytes: z.number(),
+  pinned: z
+    .number()
+    .optional()
+    .describe("1-based position in the portal's pinned block. Absent when not pinned. Read this before pin_documents to move one relative to another."),
   ...VIEW_OUT_SHAPE,
 };
 
@@ -466,6 +470,11 @@ function buildServer(env: Env, origin: string): McpServer {
         "",
         "Takes FILENAMES (what list_documents calls `filename`), not titles, and REPLACES the",
         "whole order: send the complete list you want, top first. Send [] to clear it.",
+        "",
+        "To move one document relative to another — 'put the architecture doc above the roadmap' —",
+        "call list_documents first and read each document's `pinned` position, then send the",
+        "reordered list. Do NOT guess the current order: sending a partial list silently unpins",
+        "everything you left out.",
         "",
         "A filename matching no document in the portal is dropped, and the reply says which —",
         "so a typo is reported here rather than silently rendering nothing.",
@@ -863,13 +872,29 @@ function buildServer(env: Env, origin: string): McpServer {
         // the KV list quota (1000/day). See store.ts on why kind is not on the DocSummary.
         const base = baseUrl(env, origin);
         const byslug = new Map((await listPortals(env)).map((p) => [p.slug, p]));
+
+        // Pin positions (#142). The order lives in the portal VALUE, which the listing above
+        // cannot carry (see PortalSummary) — so it costs one read per portal actually represented
+        // here, which is exactly one in the common case where a portal was named. Worth it: this
+        // is the ONLY place on /mcp that exposes the current order, and without it a relative move
+        // ("put this above that") is not expressible and an agent has to guess.
+        const pinsBySlug = new Map<string, string[]>();
+        for (const slug of new Set(docs.map((d) => d.portal))) {
+          const p = await getPortal(env, slug);
+          if (p?.pinned?.length) pinsBySlug.set(slug, p.pinned);
+        }
+        const pinOf = (d: DocSummary): number | undefined => {
+          const list = pinsBySlug.get(d.portal);
+          const i = list ? list.findIndex((n) => n.toLowerCase() === d.name.toLowerCase()) : -1;
+          return i === -1 ? undefined : i + 1;
+        };
         // One KV read for the whole listing, never one per document (#127).
         const summary = await getViewSummary(env);
         // Asked of the binding, never inferred from an empty summary (#185). An agent that reads
         // `views: 0` will tell the operator the client never opened it, which is the one thing a
         // deployment that records nothing cannot support.
         const recording = analyticsEnabled(env);
-        const prose = docs.map((d) => describe(d, statsFor(summary, d, recording))).join("\n\n");
+        const prose = docs.map((d) => describe(d, statsFor(summary, d, recording), pinOf(d))).join("\n\n");
         return structured(
           // The staleness stamp goes once at the foot rather than onto every line — but it does
           // have to be in the PROSE. `viewsSyncedAt` in structuredContent is invisible to a host
@@ -877,7 +902,7 @@ function buildServer(env: Env, origin: string): McpServer {
           summary ? `${prose}\n\nView counts are as of the last sync, ${summary.syncedAt.slice(0, 10)} — not live.` : prose,
           {
             documents: docs.map((d) =>
-              docOut(d, docUrl(base, d.portal, d.id, byslug.get(d.portal) ?? null), statsFor(summary, d, recording)),
+              docOut(d, docUrl(base, d.portal, d.id, byslug.get(d.portal) ?? null), statsFor(summary, d, recording), pinOf(d)),
             ),
             ...syncedAtOf(summary),
           },
@@ -1320,9 +1345,13 @@ const describe = (
     tags?: string[] | undefined;
   },
   stats: ViewStats | null = null,
+  /** 1-based pin position, when pinned. In the prose too, not only structuredContent — a host that
+   *  renders text alone would otherwise show an agent nothing about the order it is being asked
+   *  to change. */
+  pinned?: number,
 ): string =>
   [
-    `${doc.title}${doc.ownerOnly ? "  [draft]" : ""}`,
+    `${doc.title}${doc.ownerOnly ? "  [draft]" : ""}${pinned ? `  [pinned #${pinned}]` : ""}`,
     `  file: ${doc.name} · id: ${doc.id} · portal: ${doc.portal} · ${doc.createdAt.slice(0, 10)}`,
     ...(doc.summary ? [`  ${doc.summary}`] : []),
     ...(doc.tags?.length ? [`  tags: ${doc.tags.join(", ")}`] : []),
@@ -1421,7 +1450,21 @@ const structured = (body: string, structuredContent: Record<string, unknown>, li
  * reading the field should not have to know that), while `summary`/`tags` stay optional — absent
  * means none, which is information, not a default worth inventing.
  */
-const docOut = (doc: DocSummary, url: string, stats: ViewStats | null = null): Record<string, unknown> => ({
+const docOut = (
+  doc: DocSummary,
+  url: string,
+  stats: ViewStats | null = null,
+  /**
+   * 1-based position in the portal's pinned block, or undefined when not pinned (#142).
+   *
+   * 🔴 Present so a relative move is expressible at all. `pin_documents` REPLACES the order, which
+   * is the right primitive for "put these three first" — but "move the architecture doc above the
+   * roadmap" needs the current positions, and nothing else on /mcp carries them: `list_portals` is
+   * built on `listPortals`, whose `PortalSummary` deliberately cannot hold the list. Without this
+   * an agent can only guess an order, and guessing is how it silently reorders a client's page.
+   */
+  pinned?: number,
+): Record<string, unknown> => ({
   id: doc.id,
   portal: doc.portal,
   name: doc.name,
@@ -1435,6 +1478,7 @@ const docOut = (doc: DocSummary, url: string, stats: ViewStats | null = null): R
   createdAt: doc.createdAt,
   updatedAt: doc.updatedAt,
   bytes: doc.bytes,
+  ...(pinned === undefined ? {} : { pinned }),
   // Spread whole or not at all — a document measured at zero carries `views: 0`, one that was
   // never measured carries no view fields. See statsFor in views.ts.
   ...(stats ?? {}),

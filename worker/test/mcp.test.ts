@@ -206,9 +206,29 @@ describe("/mcp — protocol", () => {
     expect(typo.structured["dropped"]).toEqual(["nope.html"]);
     expect(typo.text).toMatch(/not pinned/i);
 
-    // An empty list clears the block rather than being a no-op.
+    // 🔴 list_documents reports the position, which is what makes a RELATIVE move expressible at
+    // all. `pin_documents` replaces the order, so "move this above that" needs the current one —
+    // and nothing else on /mcp carries it: list_portals is built on PortalSummary, which
+    // deliberately cannot. Without this an agent can only guess, and a guessed partial list
+    // silently unpins everything it omits.
+    await callToolFull("pin_documents", { portal: "acme", filenames: ["weekly.html", "sow.html"] });
+    const listed = await callToolFull("list_documents", { portal: "acme" });
+    const byName = new Map(
+      (listed.structured["documents"] as { name: string; pinned?: number }[]).map((d) => [d.name, d.pinned]),
+    );
+    expect(byName.get("weekly.html")).toBe(1);
+    expect(byName.get("sow.html")).toBe(2);
+    // In the prose too — a host that renders text alone must not show an agent a bare list when it
+    // is about to be asked to reorder one.
+    expect(listed.text).toMatch(/\[pinned #1\]/);
+
+    // An empty list clears the block rather than being a no-op, and the position goes with it.
     const cleared = await callToolFull("pin_documents", { portal: "acme", filenames: [] });
     expect(cleared.structured["pinned"]).toEqual([]);
+    const after = await callToolFull("list_documents", { portal: "acme" });
+    for (const d of after.structured["documents"] as { pinned?: number }[]) {
+      expect(d.pinned).toBeUndefined();
+    }
   });
 
   it("🔴 registers NO tool that deletes a portal (ADR-026)", async () => {
