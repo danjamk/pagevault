@@ -55,7 +55,22 @@
       "Bash(node --test:*)",
       "Bash(npx vitest run:*)",
       "Bash(npx tsc --noEmit:*)",
-      "Bash(npm view pagevault:*)"
+      "Bash(npm view pagevault:*)",
+
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(sort:*)",
+      "Bash(uniq:*)",
+      "Bash(cut:*)",
+      "Bash(tr:*)",
+      "Bash(nl:*)",
+      "Bash(column:*)",
+      "Bash(diff:*)",
+      "Bash(jq:*)",
+      "Bash(ls:*)"
     ],
     "ask": [
       "Bash(make deploy:*)",
