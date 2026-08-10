@@ -96,9 +96,14 @@ for (const t of registered) if (!connectText.includes(t)) add("mcp", CONNECT, `u
 // --- 5 · docs never name a route the Worker doesn't serve ---------------------------------------
 const workerSrc = all.filter((f) => f.startsWith(join(ROOT, "worker/src"))).map(read).join("\n");
 const liveRoots = new Set([...workerSrc.matchAll(/["'`](\/[a-z]+)/g)].map((m) => m[1]).filter((p) => p.length > 1));
-// Repo directories and doc paths share the shape of a route and are not one.
+// Repo directories and doc paths share the shape of a route and are not one. Nor do FILESYSTEM
+// paths: `scheduling-the-sync.md` carries launchd and systemd snippets, and neither format expands
+// `~` or `$HOME` — a plist's ProgramArguments must be a literal absolute path, so `/Users/…` and
+// `/home/…` appear in docs that are correct precisely because they are absolute. `DTDs` comes from
+// the Apple DOCTYPE every plist starts with.
 const NOT_ROUTES = new Set(["docs", "setup", "adr", "design", "cli", "lib", "src", "test", "worker",
-  "scripts", "examples", "images", "brand", "com", "org", "io", "dev", "en", "main", "blob", "tree"]);
+  "scripts", "examples", "images", "brand", "com", "org", "io", "dev", "en", "main", "blob", "tree",
+  "Users", "home", "tmp", "DTDs"]);
 for (const f of [...prose, join(ROOT, "docs/index.html")]) {
   // ADRs and shipped plans are point-in-time records; a route they named is history, not a claim.
   if (!existsSync(f) || rel(f).startsWith("docs/adr/") || rel(f).includes("implementation/")) continue;

@@ -7,6 +7,17 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **[`docs/setup/scheduling-the-sync.md`](docs/setup/scheduling-the-sync.md)** — working snippets for
+  launchd, a systemd timer, cron and a scheduled GitHub Action, with a sentence on choosing between
+  them. "Schedule it" was easy to say and left every operator to work out the wiring; production had
+  a worked example and nobody else did. Linked from `sync-views --help` and the CLI reference, which
+  is where the question gets asked. ([#166](../../issues/166))
+- **The gotcha that actually breaks these jobs, named up front.** `pagevault` starts
+  `#!/usr/bin/env node`, so under cron's minimal environment even the *full path* to it fails with
+  `env: node: No such file or directory`. Every snippet sets `PATH` accordingly. Found by running it,
+  and it is the difference between a schedule that works and one that silently never runs.
+
 ## [0.36.0] — 2026-08-10
 
 Your own traffic, readable from anywhere — and in the conversation you are already having.
