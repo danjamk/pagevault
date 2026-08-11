@@ -11,6 +11,7 @@ import {
   getDoc,
   getMeta,
   getMovedTarget,
+  getPortal,
   getPublicTokenTarget,
   getRawSource,
   putDoc,
@@ -117,6 +118,55 @@ beforeEach(async () => {
 });
 
 // ---------------------------------------------------------------------------
+
+describe("🔴 a rename carries the pin with it (#142)", () => {
+  // The unit tests in pinned.test.ts pin `repinRenamed` itself. This pins the WIRING — that
+  // `editDocument` actually calls it, against real KV — which is the half that was verified by
+  // hand and would otherwise regress in silence: `partitionPinned` skips an unknown filename by
+  // design (it is what makes a DELETED document self-healing), so a rename that dropped the pin
+  // would produce no error, no log, and a page that quietly stopped featuring the document.
+
+  it("rewrites the pin list in place, keeping position", async () => {
+    const a = await seed({ filename: "sow.html" });
+    const b = await seed({ filename: "typo.html", title: "Typo" });
+    await putPortal(env, { ...portal("realplus"), pinned: ["sow.html", "typo.html"] });
+
+    const result = await editDocument(env, b.id, { name: "fixed.html" });
+    expect(result?.movedFrom).toBe(b.id);
+
+    const after = await getPortal(env, "realplus");
+    expect(after?.pinned).toEqual(["sow.html", "fixed.html"]);
+    expect(a.name).toBe("sow.html"); // untouched
+  });
+
+  it("leaves the list alone when the renamed document was not pinned", async () => {
+    await seed({ filename: "sow.html" });
+    const other = await seed({ filename: "weekly.html", title: "Weekly" });
+    await putPortal(env, { ...portal("realplus"), pinned: ["sow.html"] });
+
+    await editDocument(env, other.id, { name: "weekly-2.html" });
+    expect((await getPortal(env, "realplus"))?.pinned).toEqual(["sow.html"]);
+  });
+
+  it("a display-only edit does not touch the pin list", async () => {
+    const doc = await seed({ filename: "sow.html" });
+    await putPortal(env, { ...portal("realplus"), pinned: ["sow.html"] });
+
+    await editDocument(env, doc.id, { title: "SOW (final)" });
+    expect((await getPortal(env, "realplus"))?.pinned).toEqual(["sow.html"]);
+  });
+
+  it("does not duplicate when renaming onto an already-pinned filename", async () => {
+    await seed({ filename: "a.html" });
+    const b = await seed({ filename: "b.html", title: "B" });
+    await putPortal(env, { ...portal("realplus"), pinned: ["a.html", "b.html"] });
+
+    // Rename b → a is refused (the name is taken), so the pin list must be untouched — a partial
+    // repin on a rename that did not happen would be worse than no repin at all.
+    await expect(editDocument(env, b.id, { name: "a.html" })).rejects.toThrow(NameTaken);
+    expect((await getPortal(env, "realplus"))?.pinned).toEqual(["a.html", "b.html"]);
+  });
+});
 
 describe("display edits never move a document", () => {
   it("a new title keeps the id, the URL and the filename", async () => {
