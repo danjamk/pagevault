@@ -7,6 +7,14 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.38.0] — 2026-08-10
+
+Decide what a client sees first.
+
+Nine months into an engagement the SOW and the "start here" doc are buried under fourteen weekly
+updates. Pinning is opt-in, lives on the portal rather than the document, and its empty state is the
+page exactly as it rendered before — which is what makes it safe on live client portals.
+
 ### Added
 - **Pin documents to the top of a portal, in an order you set.** The index sorts newest-first, which
   is right for an accumulating engagement and wrong nine months in, when the SOW and the "start
@@ -1816,7 +1824,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.37.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.38.0...HEAD
+[0.38.0]: https://github.com/danjamk/pagevault/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/danjamk/pagevault/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/danjamk/pagevault/compare/v0.35.4...v0.36.0
 [0.35.4]: https://github.com/danjamk/pagevault/compare/v0.35.3...v0.35.4
