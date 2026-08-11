@@ -105,6 +105,28 @@ describe("🔴 /admin — session token + strict CSP (ADR-004)", () => {
     expect(body).not.toMatch(/\sstyle=/i);
   });
 
+  it("ships the pin controls, and reorders through the whole-order PATCH (#142)", async () => {
+    const body = await (await getAdmin(await adminJwt(OWNER))).text();
+
+    // The four actions the row can dispatch, and the sprite symbol they draw from. A missing
+    // symbol renders an empty <svg> at its intrinsic 300x150 and shoves the row apart — the same
+    // failure the inline-style test above exists for, one cause over.
+    for (const act of ["pin", "unpin", "pinup", "pindown"]) {
+      expect(body).toContain(`data-act="${act}"`);
+    }
+    expect(body).toContain('id="i-pin"');
+
+    // 🔴 The order is sent whole. If this ever becomes a move/swap endpoint, the API grows four
+    // verbs that each need their own concurrency story — and `normalizePinned` stops being the one
+    // place the cap and the de-duplication live.
+    expect(body).toMatch(/JSON\.stringify\(\{\s*pinned:\s*next\s*\}\)/);
+
+    // The console is served BY the Worker, so a version mismatch should be impossible — but a
+    // stale cached page against a rolled-back deployment is not, and a silent no-op reads as a
+    // broken button.
+    expect(body).toContain("has not been upgraded for pinning");
+  });
+
   it("embeds a session token, never the long-lived API token", async () => {
     const body = await (await getAdmin(await adminJwt(OWNER))).text();
     expect(body).not.toContain(API_TOKEN); // ADR-004: the API token must never reach the DOM

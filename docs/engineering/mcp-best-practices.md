@@ -75,7 +75,7 @@ formats and relationships. Namespacing (a common prefix) both groups related too
 defends against name collisions with other connected servers. Spec naming rules (2025-11-25,
 SEP-986): 1–128 chars, `A–Z a–z 0–9 _ - .`, unique within a server.
 
-**Where we stand.** Good. Fourteen tools, `verb_noun`, consistent, each narrowly scoped
+**Where we stand.** Good. Fifteen tools, `verb_noun`, consistent, each narrowly scoped
 (`server_info` was added in #98 as the in-chat "what am I connected to, and is it current?"
 check; `traffic` in #163 as the volume question, distinct from the per-document counts that ride
 along on `list_documents`). `traffic` is the one bare noun — it names a subject rather than an

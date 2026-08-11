@@ -91,11 +91,11 @@ claude.ai and Claude Code do not share that ceiling.
 
 ## What you get once connected
 
-Fourteen tools, split into a write side (`publish_document`, `edit_document`, `create_portal`,
-`update_portal_members`, the public-link lifecycle — `mint_public_link`, `rotate_public_link`,
-`revoke_public_link` — and `revoke_document`) and the read side that makes the portal *memory*
-rather than an outbox (`list_portals`, `list_documents`, `read_document`, `search_portal`, plus
-`traffic` and `server_info`). The full surface and its rules are in
+Fifteen tools, split into a write side (`publish_document`, `edit_document`, `create_portal`,
+`update_portal_members`, `pin_documents`, the public-link lifecycle — `mint_public_link`,
+`rotate_public_link`, `revoke_public_link` — and `revoke_document`) and the read side that makes the
+portal *memory* rather than an outbox (`list_portals`, `list_documents`, `read_document`,
+`search_portal`, plus `traffic` and `server_info`). The full surface and its rules are in
 [`../architecture.md`](../architecture.md); the standard it's held to is
 [`../engineering/mcp-best-practices.md`](../engineering/mcp-best-practices.md).
 

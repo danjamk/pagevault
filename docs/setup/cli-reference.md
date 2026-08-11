@@ -238,6 +238,29 @@ Open a new client boundary. The slug is the URL segment and the handle every oth
 
 Prints the slug to stdout, so it pipes into a publish.
 
+### `pagevault pin <filename> [flags]` · `unpin <filename>`
+Lead a portal's index with the two or three documents a client should see first — the SOW, the
+"start here" — instead of whatever happened to be published most recently. Everything else stays
+newest-first, grouped by month.
+
+| Flag | Effect |
+|---|---|
+| `--top` | first. The default: you pinned it because it matters |
+| `--bottom` | last within the pinned block |
+| `--up` / `--down` | one place |
+| `--to <n>` | an explicit 1-based position |
+| `--portal <slug>` | only needed when the same filename exists in more than one portal |
+
+Pinning takes the **filename**, not the title (`pagevault list` shows both). It is checked against
+the deployment before anything is written — a pin naming no document is skipped when the page
+renders, which is what lets a deleted document heal itself, and would also make a typo silent.
+
+A portal holds at most **8** pinned documents. Twenty featured items feature nothing.
+
+Renaming a pinned document carries the pin with it. `unpin` works on a document that no longer
+exists, which is the case it is actually for — pass `--portal` there, since there is nothing left to
+infer from.
+
 ### `pagevault portal-delete <slug> [--cascade] [--yes]`
 Close a client boundary. Without `--cascade` it **refuses** on a portal that holds documents, and
 names them — that refusal is the safety feature, not an obstacle to route around.

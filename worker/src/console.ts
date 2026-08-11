@@ -305,6 +305,22 @@ function page(session: string, nonce: string, owner: string, version: string, de
   .doc:hover { background:var(--pv-surface-2); }
   .doc[aria-expanded="true"] { background:var(--pv-surface-2); }
   .doc .dtype { width:20px; height:20px; stroke-width:1.5; color:var(--pv-muted); }
+  /* Pinning (#142). The controls are quiet until the row is hovered or one of them has focus —
+     a permanent column of arrows beside every document makes reordering look like the point of
+     the page, and it is not. A PINNED row keeps its control visible: that is the state, not an
+     affordance, and hiding it would leave nothing to say the order is deliberate. */
+  .pinctl { display:inline-flex; align-items:center; gap:2px; }
+  .pinb { background:none; border:0; padding:4px 6px; cursor:pointer; color:var(--pv-muted);
+          line-height:1; font-size:13px; border-radius:4px; opacity:0; transition:opacity .12s; }
+  .pinb .icon { width:17px; height:17px; }
+  .doc:hover .pinb, .pinb:focus-visible, .doc.ispin .pinb { opacity:1; }
+  .pinb:hover:not([disabled]) { background:var(--pv-surface-3, var(--pv-surface-2)); color:var(--pv-ink); }
+  .pinb[disabled] { opacity:.25; cursor:default; }
+  .doc:hover .pinb[disabled], .doc.ispin .pinb[disabled] { opacity:.25; }
+  .pinb.on { color:var(--pv-accent, var(--pv-ink)); }
+  /* A pinned row is marked on the leading edge rather than tinted: the badge column already
+     carries reach, and a second background colour there would compete with it. */
+  .doc.ispin { box-shadow: inset 3px 0 0 var(--pv-accent, var(--pv-muted)); }
   .doc .body { flex:1; min-width:0; }
   .doc .trow { display:flex; align-items:center; gap:9px; }
   .doc .t { font-size:14.5px; font-weight:500; letter-spacing:-0.2px; color:var(--pv-ink);
@@ -869,13 +885,51 @@ ${ICON_DEFS}
     return '<span class="badge">' + ico(r.icon, "lv-" + r.level) + '<span>' + esc(r.label) + '</span></span>';
   }
 
+  // Pinning (#142). The pin order lives on the PORTAL, as an ordered list of filenames, and the
+  // API primitive is "set the whole order" — so every control here computes the complete array and
+  // sends one PATCH. That is why there is no move endpoint and why a move costs the same as a pin.
+  //
+  // The arithmetic is a few lines rather than a shared module because it CANNOT be shared: this
+  // script is a string inside the Worker, and cli/lib/pins.mjs is Node. Kept trivial for that
+  // reason, and the Worker normalizes whatever arrives anyway — the cap, the de-duplication and
+  // the trim have exactly one implementation, server-side.
+  const pinList = (p) => (p && p.pinned) || [];
+  const pinIdx = (p, d) => pinList(p).findIndex((n) => String(n).toLowerCase() === String(d.name || "").toLowerCase());
+
+  // Pinned first in stored order, then the rest untouched — the same partition the client's portal
+  // index does, so the console shows the page as the client will see it rather than a second order
+  // nobody asked for.
+  function orderByPin(docs, p) {
+    const pins = pinList(p);
+    if (!pins.length) return docs;
+    const pinned = [];
+    for (const n of pins) {
+      const d = docs.find((x) => String(x.name || "").toLowerCase() === String(n).toLowerCase());
+      if (d) pinned.push(d);
+    }
+    const ids = new Set(pinned.map((d) => d.id));
+    return pinned.concat(docs.filter((d) => !ids.has(d.id)));
+  }
+
   function rowHtml(d, portal) {
     const r = reach(d, portal.kind);
     const href = viewPath(portal.kind, portal.slug, d.id);
     const widened = !r.draft && LV_RANK[r.level] > LV_RANK[baseLevel(portal.kind)];
     const dtype = d.sourceKind === "markdown" ? "doc-md" : "doc-html";
+    const at = pinIdx(portal, d);
+    const pins = pinList(portal);
+    // Up/down, not drag. Drag is a convenience over this identical primitive, so it can arrive
+    // later without a rewrite — and on a list capped at 8 it is mostly a way to reorder a live
+    // client portal by accident. Buttons are also the only version a keyboard can reach.
+    const pinCtl = at === -1
+      ? '<button class="pinb" data-act="pin" data-name="' + esc(d.name || "") + '" title="Pin to the top of the client page" aria-label="Pin">' + ico("pin") + '</button>'
+      : '<span class="pinctl">' +
+          '<button class="pinb" data-act="pinup" data-name="' + esc(d.name || "") + '"' + (at === 0 ? " disabled" : "") + ' title="Move up" aria-label="Move up">&#9650;</button>' +
+          '<button class="pinb" data-act="pindown" data-name="' + esc(d.name || "") + '"' + (at === pins.length - 1 ? " disabled" : "") + ' title="Move down" aria-label="Move down">&#9660;</button>' +
+          '<button class="pinb on" data-act="unpin" data-name="' + esc(d.name || "") + '" title="Unpin — back to newest-first" aria-label="Unpin">' + ico("pin") + '</button>' +
+        '</span>';
     return (
-      '<div class="doc" data-id="' + esc(d.id) + '" aria-expanded="false">' +
+      '<div class="doc' + (at === -1 ? "" : " ispin") + '" data-id="' + esc(d.id) + '" aria-expanded="false">' +
         ico(dtype, "dtype") +
         '<span class="body">' +
           '<span class="trow">' +
@@ -884,6 +938,7 @@ ${ICON_DEFS}
           '</span>' +
           (widened ? '<span class="widened">Widened past the portal base</span>' : '') +
         '</span>' +
+        pinCtl +
         badge(r) +
         '<span class="d mono">' + esc((d.updatedAt || "").slice(0, 10)) + '</span>' +
         ico("chev", "chev") +
@@ -1171,7 +1226,7 @@ ${ICON_DEFS}
     let list;
     if (!docs) list = '<p class="empty">Loading&hellip;</p>';
     else if (!docs.length) list = '<p class="empty">No documents yet. Publish one with the button above.</p>';
-    else list = '<div class="doclist">' + docs.map((d) =>
+    else list = '<div class="doclist">' + orderByPin(docs, p).map((d) =>
       '<div class="item" data-item="' + esc(d.id) + '">' + rowHtml(d, p) +
       '<div class="detail" id="dt-' + esc(d.id) + '" data-detail="' + esc(d.id) + '" hidden></div></div>').join("") + '</div>';
 
@@ -1467,6 +1522,36 @@ ${ICON_DEFS}
           if (PORTALS[selected]) PORTALS[selected].docCount = Math.max(0, (PORTALS[selected].docCount || 1) - 1);
           renderNav();
           return;
+        }
+        // Pin, unpin, and the two moves — one PATCH each, carrying the WHOLE order (#142).
+        // Optimistic only in the sense that the response is authoritative: the Worker normalizes
+        // (cap, de-duplication, trim) and we render what it kept, never what we sent.
+        if (a === "pin" || a === "unpin" || a === "pinup" || a === "pindown") {
+          const p = PORTALS[selected];
+          if (!p) return;
+          const name = actEl.dataset.name;
+          const cur = (p.pinned || []).slice();
+          const at = cur.findIndex((n) => String(n).toLowerCase() === String(name).toLowerCase());
+          let next;
+          if (a === "unpin") next = cur.filter((n, i) => i !== at);
+          else if (a === "pin") next = [name].concat(cur.filter((n, i) => i !== at));
+          else {
+            // A move on something not pinned cannot happen — the control is only rendered for a
+            // pinned row — but guard anyway rather than splicing at -1.
+            if (at === -1) return;
+            const to = a === "pinup" ? at - 1 : at + 1;
+            if (to < 0 || to >= cur.length) return;
+            next = cur.slice();
+            next[at] = cur[to];
+            next[to] = cur[at];
+          }
+          const res = await api("/api/portals/" + encodeURIComponent(selected), { method: "PATCH", body: JSON.stringify({ pinned: next }) });
+          // An older Worker ignores the field and answers 200 unchanged. Say so rather than
+          // silently doing nothing — the console is served BY the Worker so this should be
+          // impossible, but a stale cached page against a rolled-back deployment is not.
+          if (next.length && !(res.pinned || []).length) { alert("This deployment has not been upgraded for pinning."); return; }
+          p.pinned = res.pinned || [];
+          renderMain(); return;
         }
         if (a === "add-member") {
           const inp = app.querySelector('[data-member-for="' + actEl.dataset.portal + '"]');
@@ -1883,6 +1968,7 @@ const ICON_DEFS = `<svg class="sprite" aria-hidden="true"><defs>
   <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
   <symbol id="i-signout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></symbol>
   <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5"/><path d="M9 3h6l-1 6 3 3H7l3-3z"/></symbol>
   <symbol id="i-edit" viewBox="0 0 24 24"><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></symbol>
   <symbol id="i-open" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6"/></symbol>
