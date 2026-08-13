@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.38.1] — 2026-08-13
+
+A document that says it is paper gets to be paper.
+
 ### Fixed
 - **A document that declares `@page` now exports as the paper it asked for.** A report carrying
   `@page { size: letter; margin: 0.5in 0.55in }` came out 600 × 1633.92 pt — a 22.7in sheet, three
@@ -1842,7 +1846,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.38.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.38.1...HEAD
+[0.38.1]: https://github.com/danjamk/pagevault/compare/v0.38.0...v0.38.1
 [0.38.0]: https://github.com/danjamk/pagevault/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/danjamk/pagevault/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/danjamk/pagevault/compare/v0.35.4...v0.36.0
