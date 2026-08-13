@@ -17,6 +17,7 @@ Start with the question you came here to answer.
 - [`architecture.md`](architecture.md) — the whole design, in one file.
 - [`adr/`](adr/) — the decision records. The contested calls live here with the reasoning; read the relevant one before overturning it.
 - [`design/onboarding-experience.md`](design/onboarding-experience.md) — the setup-ladder experience and why it's shaped the way it is.
+- [`design/feature-candidates.md`](design/feature-candidates.md) — what might come next, ranked against the thesis rather than against a competitor's feature grid. Thinking, not a roadmap; nothing in it is filed.
 
 ## Run it yourself
 
