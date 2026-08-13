@@ -7,6 +7,24 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **A document that declares `@page` now exports as the paper it asked for.** A report carrying
+  `@page { size: letter; margin: 0.5in 0.55in }` came out 600 × 1633.92 pt — a 22.7in sheet, three
+  pages, dead bands above and below the content on every one. The exporter was making the document's
+  own scroll height the paper size, which is right for an infographic and wrong for anything that
+  says it is paper. It is now two modes off one signal: declare an `@page` size and you get that
+  paper *and* your `@media print` rules; declare nothing and you get the single continuous page
+  sized to content, exactly as before. Same document now exports 612 × 792 across two pages.
+  ([ADR-027](docs/adr/ADR-027-a-declared-page-is-the-document-choosing-paper.md),
+  [#206](../../issues/206))
+
+### Changed
+- **The PDF renderer uses a 1280px viewport instead of Puppeteer's 800 × 600 default.** At 800px a
+  responsive document rendered at its tablet breakpoint, so the PDF disagreed with the viewer — the
+  divergence ADR-022 exists to close. **Continuous-page exports get wider as a result**: an
+  infographic exported before this renders differently after it. Documents that declare `@page` lay
+  out at the page width and are unaffected. ([#206](../../issues/206))
+
 ## [0.38.0] — 2026-08-10
 
 Decide what a client sees first.

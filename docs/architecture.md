@@ -51,7 +51,7 @@ swapping one would change the product.
 | **Workers** | The whole product. Router, authorization, viewer shell, console, MCP server. | On a custom domain the Worker *is* the origin — there is no server behind it to bypass, which is also why a quota fail-open cannot serve an unauthorized document (§12). |
 | **Workers KV** | Every document, portal, member list and public token. | Key **metadata** is the trick: a portal index renders from one `list()` with zero reads. A database would be a second thing to run, back up, and pay for. |
 | **Cloudflare Access** (Zero Trust) | Answers *who are you* on `/v` and `/admin`. One-time PIN, so a client needs no account anywhere. | The alternative is building password auth, email delivery and session management — and asking a client's CFO to make an account, which is the one thing this product says you shouldn't have to do. |
-| **Browser Rendering** | Single-page PDF export. | Headless Chrome without hosting headless Chrome. Optional: delete the binding and the feature degrades off. |
+| **Browser Rendering** | PDF export — one continuous page sized to the content, or the document's own paper when it declares `@page` ([ADR-027](adr/ADR-027-a-declared-page-is-the-document-choosing-paper.md)). | Headless Chrome without hosting headless Chrome. Optional: delete the binding and the feature degrades off. |
 | **Analytics Engine** | View records — who opened what, when (§12). | It has a **separate write quota** from KV: 100k/day against KV's 1,000. A view counter in KV would put reading in competition with publishing and lose. |
 
 Two bindings are optional by design — `BROWSER` and `ANALYTICS`. Remove either and the

@@ -45,7 +45,42 @@ export function mayFetch(url: string, resourceType: string, ownHost?: string): b
 export type BlockedRequest = { url: string; type: string; reason: string };
 
 /**
- * Render an HTML artifact to a single continuous-page PDF, sized to its content.
+ * The two shapes a PDF can take (ADR-027).
+ *
+ * `canvas` is the default and the original behavior: one continuous page sized to the content, so
+ * an infographic is never cut mid-element. `paper` is what a document gets when it declares
+ * `@page` — it has told us it is paper, and we take it at its word.
+ */
+export type PdfMode = "canvas" | "paper";
+
+/**
+ * The `page.pdf()` options for a mode. Pure, so the geometry decision is pinned by tests — the
+ * Browser binding does not exist under vitest, so this is the only half that can be.
+ *
+ * `preferCSSPageSize` is unconditional on purpose. When the document declares no `@page` size it
+ * falls back to `width`/`height`, which is measured canvas mode unchanged — verified against a
+ * real Chromium, not inferred from the docs.
+ *
+ * Margins stay at zero in both modes and are NOT read out of the document. Chromium ignores the
+ * margin parameters entirely whenever `@page { margin }` is declared — a deliberately absurd 2in
+ * override changed nothing — so a declared margin already wins. Where nothing is declared, zero
+ * keeps full-bleed reachable; a default margin invented here would break a full-bleed page in a
+ * way its author could not undo.
+ */
+export function pdfOptions(mode: PdfMode, dims: { w: number; h: number }) {
+  return {
+    // Omitted in paper mode so nothing competes with the declared size. `preferCSSPageSize` would
+    // win regardless, but a width the document never asked for has no business in the call.
+    ...(mode === "canvas" ? { width: `${dims.w}px`, height: `${dims.h}px` } : {}),
+    preferCSSPageSize: true,
+    printBackground: true,
+    margin: { top: "0", right: "0", bottom: "0", left: "0" },
+  };
+}
+
+/**
+ * Render an HTML artifact to a PDF — one continuous page sized to its content, unless the document
+ * declares `@page`, in which case it gets the paper it asked for (ADR-027).
  *
  * 🔴 Prime directive #4: the artifact is hostile. This runs it in a REAL headless browser — not
  * the sandboxed iframe — so the sandbox CSP does not apply. The wall is `mayFetch` above: the
@@ -57,9 +92,9 @@ export type BlockedRequest = { url: string; type: string; reason: string };
  * The session is created per render and always torn down in `finally`.
  *
  * Ported from the infographic-export skill's render.mjs, with the Cloudflare/Puppeteer deltas:
- * `emulateMediaType` (not Playwright's `emulateMedia`), px-string dimensions (a bare number is
- * inches), and NO `format` so the custom width/height win — one page, no pagination that would
- * cut a chart or infographic mid-element.
+ * `emulateMediaType` (not Playwright's `emulateMedia`) and px-string dimensions (a bare number is
+ * inches). No `format` in either mode — canvas sizes the paper to the content so nothing paginates
+ * mid-element, and paper takes its size from the document's own `@page`.
  */
 export async function renderPdf(
   binding: NonNullable<Env["BROWSER"]>,
@@ -70,6 +105,14 @@ export async function renderPdf(
   const browser = await launch(binding);
   try {
     const page = await browser.newPage();
+    // A desktop viewport, matching the skill this was ported from. Puppeteer's default is 800x600,
+    // which lands a responsive document on its tablet breakpoint — the PDF then disagrees with the
+    // viewer, which is the divergence ADR-022 exists to close. Paper mode lays out at the page
+    // width and ignores this; canvas mode measures against it.
+    //
+    // One more Cloudflare/Puppeteer delta: `newPage()` takes no options here, so the viewport is
+    // set on the page rather than passed at construction the way the Playwright original does.
+    await page.setViewport({ width: 1280, height: 900 });
 
     // Allowlist, not a blanket abort (ADR-022). What is refused is collected so the export can say
     // which host did not load — the original complaint was a PDF with holes and no explanation.
@@ -94,8 +137,47 @@ export async function renderPdf(
     });
 
     await page.setContent(html, { waitUntil: "load" });
-    // The artifact's own `@media print` rules must not hijack the output.
-    await page.emulateMediaType("screen");
+
+    // Does the document declare its own paper? (ADR-027.) The walk RECURSES: an `@page` nested in
+    // `@media print` still drives the paper in Chromium, but a flat pass over `sheet.cssRules`
+    // finds nothing — which would leave us rendering screen styles onto the document's own paper,
+    // the exact hybrid this is meant to avoid. `cssRules` throws on a cross-origin stylesheet, so
+    // each sheet is guarded; a missed declaration degrades to canvas, never to an error.
+    const declaresPaper = await page
+      .evaluate(() => {
+        const doc = (globalThis as unknown as { document: { styleSheets: ArrayLike<unknown> } }).document;
+        let found = false;
+        const walk = (rules: ArrayLike<unknown> | undefined) => {
+          for (const rule of Array.from(rules ?? [])) {
+            const r = rule as { constructor?: { name?: string }; style?: { getPropertyValue(p: string): string }; cssText?: string; cssRules?: ArrayLike<unknown> };
+            if (r.constructor?.name === "CSSPageRule") {
+              // `size` is a @page-only property. Chrome does expose it on the rule's style, but
+              // cssText is the belt-and-braces read — this cannot be retried on a deploy cycle.
+              // Anchored so `font-size:` inside the same rule is not read as a paper declaration —
+              // `\bsize` would match it, because the hyphen is a word boundary.
+              const size = r.style?.getPropertyValue("size") ?? "";
+              if (size !== "" || /(^|[;{\s])size\s*:/.test(r.cssText ?? "")) found = true;
+            }
+            if (r.cssRules) walk(r.cssRules); // @media, @supports — grouping rules nest
+          }
+        };
+        for (const sheet of Array.from(doc.styleSheets)) {
+          try {
+            walk((sheet as { cssRules?: ArrayLike<unknown> }).cssRules);
+          } catch {
+            // cross-origin stylesheet — unreadable, not fatal
+          }
+        }
+        return found;
+      })
+      .catch(() => false);
+    const mode: PdfMode = declaresPaper ? "paper" : "canvas";
+
+    // Canvas keeps screen styles: an artifact's `@media print` rules would otherwise hijack an
+    // output it never intended to be paper. A document that declared `@page` DID intend it, and
+    // its print rules are how it expects to fit — honoring the paper while suppressing them is a
+    // hybrid neither the author nor the viewer asked for.
+    await page.emulateMediaType(mode === "paper" ? "print" : "screen");
     // These callbacks run in the browser, not the Worker — the Worker has no DOM lib (by
     // design), so `document` is reached through a cast rather than pulling browser globals in.
     //
@@ -118,12 +200,7 @@ export async function renderPdf(
       return { w: el.scrollWidth, h: el.scrollHeight };
     });
 
-    const pdf = await page.pdf({
-      width: `${dims.w}px`,
-      height: `${dims.h}px`,
-      printBackground: true,
-      margin: { top: "0", right: "0", bottom: "0", left: "0" },
-    });
+    const pdf = await page.pdf(pdfOptions(mode, dims));
     return { pdf, blocked };
   } finally {
     await browser.close();

@@ -36,7 +36,7 @@
     }
   ],
 
-  // Browser Run (Puppeteer) — enables single-page PDF export (#50). Optional: a fork that
+  // Browser Run (Puppeteer) — enables PDF export (#50, ADR-027). Optional: a fork that
   // does not want PDF can delete this binding and disable Browser Run, and the PDF button
   // and endpoint degrade off. Requires Browser Run enabled on the account.
   "browser": {
