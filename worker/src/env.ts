@@ -73,8 +73,9 @@ export interface Env {
   DOC_CSP?: string;
 
   /**
-   * The Browser Run (Puppeteer) binding — optional. Present enables single-page PDF export
-   * (#50); absent means this deployment opted out, and both the PDF button and the endpoint
+   * The Browser Run (Puppeteer) binding — optional. Present enables PDF export (#50; one
+   * continuous page, or the document's own paper when it declares `@page` — ADR-027);
+   * absent means this deployment opted out, and both the PDF button and the endpoint
    * degrade off cleanly. Browser Rendering is generally available on the account (a free-tier
    * allocation), so there is no enablement step to perform — `make provision` detects it and
    * reports whether it looks ready. A fork that never wants PDF leaves the binding out and

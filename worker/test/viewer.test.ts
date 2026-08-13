@@ -219,7 +219,7 @@ describe("viewer chrome — download + share (#49)", () => {
   });
 });
 
-describe("/render?pdf=1 — single-page PDF export (#50)", () => {
+describe("/render?pdf=1 — PDF export (#50, ADR-027)", () => {
   it("🔴 reuses the capability guard — a forged cap 404s before the browser is ever touched", async () => {
     const meta = await publishPublic();
     expect((await SELF.fetch(`${HOST}/render/${meta.id}?cap=notarealtoken&pdf=1`)).status).toBe(404);
