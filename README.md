@@ -264,6 +264,7 @@ lets an agent read it back. That's the claim — not any one row.
 | Look up a CLI command | [`docs/setup/cli-reference.md`](docs/setup/cli-reference.md) |
 | Connect Claude to it | [`docs/setup/connect-mcp.md`](docs/setup/connect-mcp.md) |
 | Back it up | [`docs/setup/backup-and-restore.md`](docs/setup/backup-and-restore.md) |
+| Understand why I built it | ["Markdown for the Machine, HTML for the Humans"](https://medium.com/@dan.jam.kuhn/markdown-for-the-machine-html-for-the-humans-fb9c0c8ad567) — the essay behind the format choice |
 | See how it was built with an agent | [`docs/engineering/how-i-built-this.md`](docs/engineering/how-i-built-this.md) |
 | Contribute | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 
