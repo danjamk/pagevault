@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mayFetch } from "../src/pdf.js";
+import { mayFetch, pdfOptions } from "../src/pdf.js";
 
 /**
  * 🔴 The PDF render's fetch policy (ADR-022).
@@ -56,5 +56,63 @@ describe("what the render may load", () => {
     // the type gate still applies.
     expect(mayFetch("https://cdn.example.com/a.png", "image")).toBe(true);
     expect(mayFetch("https://cdn.example.com/a", "fetch")).toBe(false);
+  });
+});
+
+/**
+ * The paper geometry (ADR-027, #206).
+ *
+ * Same constraint as the fetch policy above: no Browser binding under vitest, so the pure decision
+ * is what gets pinned. The measured half was verified against a real Chromium — the numbers in
+ * these comments are observed output, not intent.
+ */
+const DIMS = { w: 1280, h: 1500 };
+
+describe("what paper the PDF lands on", () => {
+  it("canvas mode keeps the content-sized page", () => {
+    // The original behavior and still the default: one continuous page, so an infographic is not
+    // paginated mid-element. 1280x1500px came out 960 x 1125.12pt — px x 0.75, no scaling.
+    const opts = pdfOptions("canvas", DIMS);
+    expect(opts.width).toBe("1280px");
+    expect(opts.height).toBe("1500px");
+  });
+
+  it("paper mode names no size, so the document's @page is uncontested", () => {
+    const opts = pdfOptions("paper", DIMS);
+    expect(opts.width).toBeUndefined();
+    expect(opts.height).toBeUndefined();
+  });
+
+  it("🔴 preferCSSPageSize is set in BOTH modes", () => {
+    // Load-bearing: it is what makes paper mode work, and in canvas mode it provably falls back to
+    // width/height — a document with no @page measured 1280x1500 still came out 960 x 1125.12pt.
+    // If this ever became paper-only, canvas would depend on the detector being perfect instead of
+    // on a fallback that cannot miss.
+    expect(pdfOptions("paper", DIMS).preferCSSPageSize).toBe(true);
+    expect(pdfOptions("canvas", DIMS).preferCSSPageSize).toBe(true);
+  });
+
+  it("backgrounds are painted in both modes", () => {
+    // A report's tinted panels are the content, not decoration. The seed corpus depends on this.
+    expect(pdfOptions("paper", DIMS).printBackground).toBe(true);
+    expect(pdfOptions("canvas", DIMS).printBackground).toBe(true);
+  });
+
+  it("margins stay at zero and are never read out of the document", () => {
+    // Chromium ignores these whenever `@page { margin }` is declared — a deliberate 2in override
+    // changed the output not at all — so a declared margin already wins and extracting it would be
+    // dead code. Where nothing is declared, zero keeps full-bleed reachable; a default invented
+    // here would put a border on a full-bleed page its author could not remove.
+    for (const mode of ["paper", "canvas"] as const) {
+      expect(pdfOptions(mode, DIMS).margin, mode).toEqual({ top: "0", right: "0", bottom: "0", left: "0" });
+    }
+  });
+
+  it("never sets `format` — neither mode wants a paper we chose", () => {
+    // Letter as a fallback would paginate every infographic, which is what canvas mode exists to
+    // prevent. It was the originally proposed fix and it is the wrong one.
+    for (const mode of ["paper", "canvas"] as const) {
+      expect(pdfOptions(mode, DIMS), mode).not.toHaveProperty("format");
+    }
   });
 });

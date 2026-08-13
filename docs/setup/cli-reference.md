@@ -190,6 +190,13 @@ filename) unless you pass `--title`.
 | `--source-kind html\|markdown` | override the extension-based guess |
 | `--confirm` | required to replace an existing document with the same filename in place |
 
+**Two notes for whoever authors the HTML.** A document that declares `@page { size: … }` exports as
+that paper, with its own `@media print` rules applied; one that declares nothing exports as a single
+continuous page sized to its content, so a chart is never cut in half
+([ADR-027](../adr/ADR-027-a-declared-page-is-the-document-choosing-paper.md)). And webfonts pulled
+from a CDN can fall back to a system face if the fetch is slow or fails during export — the export
+names what did not load, but inlining the font is the only way to be certain.
+
 ### `pagevault list [--portal s] [--tag t] [--json]`
 Your documents, newest first.
 
