@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.39.1] — 2026-08-14
+
+The honest answer still has to render.
+
 ### Fixed
 - **A `/p/` link now actually previews on Slack.** 0.39.0 gave capability links a title and no
   description, on the reasoning that a client's summary must not render into whatever channel the
@@ -1892,7 +1896,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.39.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.39.1...HEAD
+[0.39.1]: https://github.com/danjamk/pagevault/compare/v0.39.0...v0.39.1
 [0.39.0]: https://github.com/danjamk/pagevault/compare/v0.38.2...v0.39.0
 [0.38.2]: https://github.com/danjamk/pagevault/compare/v0.38.1...v0.38.2
 [0.38.1]: https://github.com/danjamk/pagevault/compare/v0.38.0...v0.38.1
