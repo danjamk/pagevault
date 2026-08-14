@@ -354,9 +354,17 @@ derived from `noindex`:
 
 | Surface | Emits | Why |
 |---|---|---|
-| `/pub/*` — documents and the portal index | Title **and** summary | Already readable by anyone who loads the public index. Nothing new leaves. |
-| `/p/{token}` | Title only | Shared deliberately but privately. A card renders to everyone in the channel it lands in — including people the document was never shared with — so the name gets out and the summary does not. |
+| `/pub/*` — documents and the portal index | Title **and** its own summary | Already readable by anyone who loads the public index. Nothing new leaves. |
+| `/p/{token}` | Title, plus a **constant** description | Shared deliberately but privately. A card renders to everyone in the channel it lands in — including people the document was never shared with — so the name gets out and the summary does not. |
 | `/v/*`, `/admin` | Nothing | Access-gated; a bot gets the login page. Saying nothing means we never depend on that. |
+
+**Every surface that unfurls at all emits some `og:description`, because Slack builds no card
+without one.** Measured: a title-only response produces no Slack card whatsoever, while iMessage
+renders one from the identical bytes. So `/p/` — and any `/pub/` document or portal lacking a
+summary of its own — carries `SHARED_LINK_DESCRIPTION`, a fixed string that is byte-identical for
+every document on every deployment and therefore carries no information at all. What varies between
+levels is not *whether* there is description text, but whether that text came from the document.
+Interpolating any per-document value into that constant would turn it back into a disclosure.
 
 The summary is one line the operator wrote for a client index. "Repriced after the
 board pushed back" is a fine index line and a bad Slack card in the wrong channel,

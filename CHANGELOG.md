@@ -7,6 +7,18 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **A `/p/` link now actually previews on Slack.** 0.39.0 gave capability links a title and no
+  description, on the reasoning that a client's summary must not render into whatever channel the
+  link is pasted in. The reasoning holds; the result did not. Slack builds no card at all from a
+  title alone — measured against production, where iMessage rendered a card from the byte-identical
+  response and Slack showed nothing — so the most-shared surface gained nothing on the channel it
+  matters most on. Every unfurling surface now carries description text: `/pub/` documents use their
+  own summary as before, and `/p/` uses a fixed string that is identical for every document on every
+  deployment and says nothing about the content. The summary still never leaves your deployment. The
+  same fallback covers a public document or portal that simply has no summary, which had the same
+  invisible failure. ([#214](../../issues/214))
+
 ## [0.39.0] — 2026-08-14
 
 A shared link finally looks like something.
