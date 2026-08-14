@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { resetJWKSCache } from "../src/auth.js";
 import { handlePortalRoute, handlePublicPortalRoute } from "../src/portal.js";
 import { type DocMeta, type Portal, type PortalKind, putDoc, putMembers, putPortal } from "../src/store.js";
+import { SHARED_LINK_DESCRIPTION, SHARED_PORTAL_DESCRIPTION } from "../src/viewer.js";
 
 /**
  * 🔴 The portal routes — where `canView()` stops being a unit test and becomes a URL.
@@ -549,13 +550,13 @@ describe("🔴 unfurl tags — OpenGraph exposure is per-surface (#210)", () => 
     expect(body).not.toContain('og:url" content="https://share.example.com/v/');
   });
 
-  it("a document with no summary emits no description — no scraped fallback", async () => {
+  it("a document with no summary falls back to the constant — never a scraped body", async () => {
     // The artifact is hostile (prime directive 4). Its body has no business being lifted into a
-    // card that renders on someone else's servers.
+    // card that renders on someone else's servers. But emitting nothing means no Slack card at all
+    // (#214), so the constant fills in.
     const body = await (await SELF.fetch(`${HOST}/pub/marketing/pub333333333`)).text();
     expect(body).toContain('<meta property="og:title" content="No Summary Here">');
-    expect(body).not.toContain("og:description");
-    expect(body).not.toContain("twitter:description");
+    expect(body).toContain(`<meta property="og:description" content="${SHARED_LINK_DESCRIPTION}">`);
   });
 
   it("🔴 an Access-gated /v/ document emits NOTHING — not even a title", async () => {
@@ -576,6 +577,13 @@ describe("🔴 unfurl tags — OpenGraph exposure is per-surface (#210)", () => 
     // supposed to see it. What must not happen is it reaching a card an unfurl bot builds.
     expect(head).not.toContain("Client engagement.");
     expect(body).toContain("Client engagement.");
+  });
+
+  it("a public portal with no description of its own falls back to the constant", async () => {
+    await putPortal(env, portal("plain", "public", "Plain"));
+    const body = await (await SELF.fetch(`${HOST}/pub/plain`)).text();
+    expect(body).toContain('<meta property="og:title" content="Plain">');
+    expect(body).toContain(`<meta property="og:description" content="${SHARED_PORTAL_DESCRIPTION}">`);
   });
 
   it("a public portal index unfurls its OWN name and description", async () => {

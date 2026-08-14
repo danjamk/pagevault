@@ -15,7 +15,7 @@ import {
 } from "./store.js";
 import { log } from "./log.js";
 import { PRODUCT_URL, THEME, showBranding } from "./theme.js";
-import { renderShell } from "./viewer.js";
+import { SHARED_PORTAL_DESCRIPTION, renderShell } from "./viewer.js";
 
 /**
  * `/v/{slug}` and `/v/{slug}/{id}` — the client-facing surface.
@@ -319,16 +319,20 @@ function renderPortalPage(
   // existence to anyone the link is pasted in front of.
   //
   // `og:type` is `website`, not `article` — this is an index, not a document.
+  // A portal with no description of its own still needs description text, or Slack builds no card
+  // at all (#214) — the same bug the document surfaces had. The fallback is a constant that says
+  // nothing about this portal or what is listed on it.
+  const description = portal.description || SHARED_PORTAL_DESCRIPTION;
   const unfurl =
     portal.kind === "public"
       ? `${[
           `<meta property="og:title" content="${esc(portal.name)}">`,
-          ...(portal.description ? [`<meta property="og:description" content="${esc(portal.description)}">`] : []),
+          `<meta property="og:description" content="${esc(description)}">`,
           `<meta property="og:type" content="website">`,
           `<meta property="og:url" content="${esc(canonicalUrl)}">`,
           `<meta name="twitter:card" content="summary">`,
           `<meta name="twitter:title" content="${esc(portal.name)}">`,
-          ...(portal.description ? [`<meta name="twitter:description" content="${esc(portal.description)}">`] : []),
+          `<meta name="twitter:description" content="${esc(description)}">`,
         ].join("\n")}\n`
       : "";
 

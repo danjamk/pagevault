@@ -2,7 +2,7 @@ import { SELF, env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { mintCapability, originAllowed, resetCapabilityKeyCache, verifyCapability } from "../src/capability.js";
 import { type DocMeta, putDoc, putPublicToken } from "../src/store.js";
-import { IFRAME_SANDBOX, docCsp, handleRender, renderShell } from "../src/viewer.js";
+import { IFRAME_SANDBOX, SHARED_LINK_DESCRIPTION, docCsp, handleRender, renderShell } from "../src/viewer.js";
 
 const HOST = "https://share.example.com";
 const HTML = "<!doctype html><h1>Q3</h1><script>console.log(1)</script>";
@@ -227,15 +227,38 @@ describe("🔴 /p/ unfurl — the name, never the summary (#210)", () => {
   //
   // Promoting this to `full` is a disclosure, not a polish item. See ShellOptions.unfurl.
 
-  it("🔴 emits og:title and NO og:description", async () => {
+  it("🔴 emits the document's title, and a description that is NOT its summary", async () => {
+    // The property is the summary's ABSENCE, not the tag's. Slack builds no card without an
+    // og:description at all (#214), so the tag is present and carries a constant instead.
     const meta = await publishPublic({ title: "Q3 Review", summary: "Repriced after the board pushed back." });
     const body = await (await SELF.fetch(`${HOST}/p/${meta.publicToken}`)).text();
 
     expect(body).toContain('<meta property="og:title" content="Q3 Review">');
     expect(body).toContain('<meta name="twitter:title" content="Q3 Review">');
-    expect(body).not.toContain("og:description");
-    expect(body).not.toContain("twitter:description");
+    expect(body).toContain(`<meta property="og:description" content="${SHARED_LINK_DESCRIPTION}">`);
+    // 🔴 The one that matters. Anywhere in the response, not just in a tag.
     expect(body).not.toContain("Repriced after the board pushed back.");
+  });
+
+  it("🔴 the constant is content-independent — two different documents produce the same description", async () => {
+    // If this ever fails, someone interpolated a per-document value into the constant and turned it
+    // back into a disclosure. That is the whole reason it is a constant.
+    const a = await publishPublic({ title: "Alpha", summary: "Secret A" });
+    const bodyA = await (await SELF.fetch(`${HOST}/p/${a.publicToken}`)).text();
+    const b = await publishPublic({
+      id: "zz9zz9zz9zz9",
+      publicToken: "pubtoken3333333333333",
+      title: "Beta",
+      summary: "Secret B",
+      tags: ["confidential"],
+    });
+    const bodyB = await (await SELF.fetch(`${HOST}/p/${b.publicToken}`)).text();
+
+    const description = (body: string) => /<meta property="og:description" content="([^"]*)">/.exec(body)?.[1];
+    expect(description(bodyA)).toBe(SHARED_LINK_DESCRIPTION);
+    expect(description(bodyB)).toBe(SHARED_LINK_DESCRIPTION);
+    expect(bodyA).not.toContain("Secret A");
+    expect(bodyB).not.toContain("Secret B");
   });
 
   it("og:url is the capability URL itself, with no query string carried into it", async () => {

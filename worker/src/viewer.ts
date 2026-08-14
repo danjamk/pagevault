@@ -213,6 +213,35 @@ function pdfError(status: number, error: string): Response {
  */
 export type UnfurlLevel = "none" | "title" | "full";
 
+/**
+ * The description on a card that may not carry the document's own summary (#214).
+ *
+ * 🔴 CONSTANT, and that is the entire security argument. The same bytes for every document on every
+ * deployment, so it carries exactly zero information — identical whether the file is a board deck or
+ * a lunch menu. Nothing about the document reaches Slack, or the channel, or anyone reading over a
+ * shoulder. Interpolating ANY per-document value here (title, tags, portal, byte count, date) turns
+ * a constant into a disclosure and defeats the reason it exists.
+ *
+ * It exists because a title alone is not enough. Measured against production: Slack renders no card
+ * at all from title-only tags, while iMessage renders one from the byte-identical response. Slack
+ * needs description text to build an attachment, so #210's honest `/p/` restraint cost the feature
+ * outright on the channel that matters most. This gives Slack something to render that says nothing.
+ *
+ * The wording deliberately does NOT promise privacy. A capability link is unguessable, not private —
+ * index.ts is careful about exactly that — and a card claiming otherwise would contradict the
+ * product's own language in front of the people least able to check it.
+ */
+export const SHARED_LINK_DESCRIPTION = "A document shared by link. Open it to read.";
+
+/**
+ * The same idea for a public portal index that has no description of its own (`portal.ts`).
+ *
+ * Separate constant because the sentence has to be true: a portal is a collection, not a document.
+ * Same rule applies — it is a constant, and nothing from the portal or its listing may be
+ * interpolated into it.
+ */
+export const SHARED_PORTAL_DESCRIPTION = "A collection of published documents.";
+
 export interface ShellOptions {
   /** The verified viewer, or null for an unauthenticated public view. */
   email: string | null;
@@ -245,12 +274,14 @@ export interface ShellOptions {
    *
    * - `none` — emit nothing. `/v/` is Access-gated, so a bot gets the login page anyway; saying
    *   nothing means we never depend on that.
-   * - `title` — the document's NAME only. `/p/` capability links are shared deliberately but
-   *   privately, so the card gets something to show while the summary stays on this deployment. A
-   *   summary is one line the operator wrote for a client index: "revised after the board pushed
-   *   back" is a fine index line and a bad Slack card in the wrong channel.
-   * - `full` — title AND summary. `/pub/` only, where both are already readable by anyone who
-   *   loads the public portal index. Nothing new leaves.
+   * - `title` — the document's NAME, plus `SHARED_LINK_DESCRIPTION`, which is a constant and says
+   *   nothing about the document (#214). Nothing else from `meta`. `/p/` capability links are shared
+   *   deliberately but privately, so the card gets something to show while the summary stays on
+   *   this deployment. A summary is one line the operator wrote for a client index: "revised after
+   *   the board pushed back" is a fine index line and a bad Slack card in the wrong channel.
+   * - `full` — title AND the document's own summary. `/pub/` only, where both are already readable
+   *   by anyone who loads the public portal index. Nothing new leaves. Falls back to the same
+   *   constant when a document has no summary, so the card still renders.
    *
    * Required, with no default: a surface added later must answer this rather than inherit it.
    */
@@ -497,10 +528,14 @@ ${copyScript}
 /**
  * The OpenGraph / Twitter Card block — or nothing at all (#210).
  *
- * 🔴 `og:description` appears at exactly ONE level, `full`. It is the only tag here carrying
- * content a reader of the card might not be entitled to; everything else is the document's name
- * and its own address. Adding it to the `title` level is the change that turns a `/p/` link pasted
- * into a Slack channel into a disclosure — see `ShellOptions.unfurl` before you do it.
+ * 🔴 The document's own summary appears at exactly ONE level, `full`. It is the only value here a
+ * reader of the card might not be entitled to; everything else is the document's name, its own
+ * address, and a constant. Sourcing the `title` level's description from `meta` — the summary, the
+ * tags, anything per-document — is the change that turns a `/p/` link pasted into a Slack channel
+ * into a disclosure. See `ShellOptions.unfurl` and `SHARED_LINK_DESCRIPTION` before you do it.
+ *
+ * Every level that unfurls at all emits SOME `og:description`, because Slack builds no card without
+ * one (#214). What differs between levels is whether that text came from the document.
  *
  * `twitter:card` is `summary`, not `summary_large_image`: there is no image yet, and claiming the
  * large card without one renders an empty box on the platforms that honor it.
@@ -513,13 +548,15 @@ function unfurlTags(meta: DocMeta, opts: ShellOptions): string {
 
   const tags = [`<meta property="og:title" content="${esc(meta.title)}">`];
 
-  // No invented fallback. A document with no summary gets no description, rather than a scraped
-  // first paragraph — the artifact is hostile (prime directive 4) and its body has no business
-  // being lifted into a card that renders on someone else's servers.
-  const description = opts.unfurl === "full" ? meta.summary : undefined;
-  if (description) {
-    tags.push(`<meta property="og:description" content="${esc(description)}">`);
-  }
+  // The document's own summary ONLY at `full`; everywhere else the constant, which says nothing
+  // (#214). Never a scraped first paragraph as a fallback — the artifact is hostile (prime directive
+  // 4) and its body has no business being lifted into a card that renders on someone else's servers.
+  //
+  // The `??` matters as much as the ternary: a `/pub/` document with no summary would otherwise emit
+  // no description and get no Slack card either — the same bug, on the surface that is allowed to
+  // say everything. Every unfurling surface ends up with description text; only its CONTENT differs.
+  const description = (opts.unfurl === "full" ? meta.summary : undefined) ?? SHARED_LINK_DESCRIPTION;
+  tags.push(`<meta property="og:description" content="${esc(description)}">`);
 
   tags.push(`<meta property="og:type" content="article">`);
   if (opts.canonicalUrl) {
