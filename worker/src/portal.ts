@@ -177,7 +177,7 @@ async function portalIndex(
     .filter((doc) => isOwner || !doc.ownerOnly)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-  return renderPortalPage(env, portal, docs, isOwner);
+  return renderPortalPage(env, portal, docs, isOwner, new URL(portalPath(portal), request.url).toString());
 }
 
 async function portalDocument(
@@ -244,6 +244,14 @@ async function portalDocument(
     // by this same handler is Access-gated, so its URL dead-ends for anyone not already in
     // the portal; no share affordance there. Keyed off kind, not noindex (they differ).
     shareable: portal.kind === "public",
+    // Same predicate as `shareable`, and for once that is the correct coupling rather than the
+    // accidental one: a card may show a document's summary exactly where the URL already opens
+    // for anyone, which on this handler is /pub/ and nowhere else. A /v/ document is Access-gated
+    // — the bot would get a login page — and it says nothing regardless (#210).
+    unfurl: portal.kind === "public" ? "full" : "none",
+    // From the computed path, not `request.url`: this handler is reached with query strings and
+    // (via the rename forwarder) under paths that are not the document's own address.
+    canonicalUrl: new URL(documentPath(portal, meta.id), request.url).toString(),
     pdfEnabled: !!env.BROWSER,
     surface,
     referer: request.headers.get("referer"),
@@ -260,7 +268,13 @@ async function portalDocument(
  * **No PageVault branding above the fold.** The client is looking at your work, not at a
  * SaaS product.
  */
-function renderPortalPage(env: Env, portal: Portal, docs: DocSummary[], isOwner: boolean): Response {
+function renderPortalPage(
+  env: Env,
+  portal: Portal,
+  docs: DocSummary[],
+  isOwner: boolean,
+  canonicalUrl: string,
+): Response {
   // Pinned first, in the operator's order; the rest stays the month-grouped engagement record.
   // Zero pinned documents renders this page exactly as it always has — the empty state of the
   // feature is the old behaviour, which is what makes it safe to ship on live portals.
@@ -295,13 +309,36 @@ function renderPortalPage(env: Env, portal: Portal, docs: DocSummary[], isOwner:
 
   const empty = docs.length === 0 ? `<p class="empty">Nothing here yet.</p>` : "";
 
+  // Unfurl tags — public portals only (#210). A public index is already readable by anyone who
+  // loads it, so its name and description reach a chat card with nothing new disclosed. A private
+  // or restricted index says nothing: it sits behind Access, and a listing of what a client
+  // engagement contains is exactly the shape of thing that must not render into a room.
+  //
+  // 🔴 The portal's OWN name and description, never a document title from `docs`. The rows on this
+  // page include owner-only drafts when `isOwner`, and a card built from them would hand a draft's
+  // existence to anyone the link is pasted in front of.
+  //
+  // `og:type` is `website`, not `article` — this is an index, not a document.
+  const unfurl =
+    portal.kind === "public"
+      ? `${[
+          `<meta property="og:title" content="${esc(portal.name)}">`,
+          ...(portal.description ? [`<meta property="og:description" content="${esc(portal.description)}">`] : []),
+          `<meta property="og:type" content="website">`,
+          `<meta property="og:url" content="${esc(canonicalUrl)}">`,
+          `<meta name="twitter:card" content="summary">`,
+          `<meta name="twitter:title" content="${esc(portal.name)}">`,
+          ...(portal.description ? [`<meta name="twitter:description" content="${esc(portal.description)}">`] : []),
+        ].join("\n")}\n`
+      : "";
+
   const html = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(portal.name)}</title>
-<style>
+${unfurl}<style>
   /* The #67 system, from theme.ts — this page is where it was designed, and every other HTML
      surface now draws the same tokens. No webfont, no logo: a portal is still the client's work,
      not our product, ABOVE THE FOLD. Attribution lives in the footer, and in the viewer's control

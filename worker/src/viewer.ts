@@ -208,6 +208,11 @@ function pdfError(status: number, error: string): Response {
   });
 }
 
+/**
+ * How much a surface may tell an unfurl bot. See `ShellOptions.unfurl` (#210).
+ */
+export type UnfurlLevel = "none" | "title" | "full";
+
 export interface ShellOptions {
   /** The verified viewer, or null for an unauthenticated public view. */
   email: string | null;
@@ -230,6 +235,32 @@ export interface ShellOptions {
   backLabel?: string;
   /** `/p/` and `/pub/` must never be indexed. An unguessable URL is not a private one. */
   noindex: boolean;
+  /**
+   * How much this surface may tell an unfurl bot — Slack, iMessage, Discord, LinkedIn (#210).
+   *
+   * 🔴 NOT derivable from `noindex`, and deliberately not a boolean. `X-Robots-Tag: noindex` binds
+   * search *indexers*; an unfurl bot is not one and ignores it entirely. The two questions are "may
+   * Google list this?" and "may a chat app render its contents into a room?", and they have
+   * different blast radii — the second reaches people who cannot open the document at all.
+   *
+   * - `none` — emit nothing. `/v/` is Access-gated, so a bot gets the login page anyway; saying
+   *   nothing means we never depend on that.
+   * - `title` — the document's NAME only. `/p/` capability links are shared deliberately but
+   *   privately, so the card gets something to show while the summary stays on this deployment. A
+   *   summary is one line the operator wrote for a client index: "revised after the board pushed
+   *   back" is a fine index line and a bad Slack card in the wrong channel.
+   * - `full` — title AND summary. `/pub/` only, where both are already readable by anyone who
+   *   loads the public portal index. Nothing new leaves.
+   *
+   * Required, with no default: a surface added later must answer this rather than inherit it.
+   */
+  unfurl: UnfurlLevel;
+  /**
+   * Absolute URL of this surface, for `og:url`. Built at the call site from `request.url` — the
+   * shell never receives the request. Absent → no `og:url`, which unfurls perfectly well; a
+   * *wrong* canonical is worse than none, so this is never guessed here.
+   */
+  canonicalUrl?: string;
   /**
    * Show the share (copy-URL) control. True ONLY where the current URL is self-authorizing —
    * `/p/{token}` and `/pub/{slug}`. On a `/v/` document the URL opens for no one outside the
@@ -383,7 +414,7 @@ export async function renderShell(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(meta.title)}</title>
-<style nonce="${nonce}">
+${unfurlTags(meta, opts)}<style nonce="${nonce}">
 ${THEME}
   *, *::before, *::after { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
@@ -461,6 +492,47 @@ ${copyScript}
   if (opts.noindex) headers["X-Robots-Tag"] = "noindex, nofollow";
 
   return new Response(html, { headers });
+}
+
+/**
+ * The OpenGraph / Twitter Card block — or nothing at all (#210).
+ *
+ * 🔴 `og:description` appears at exactly ONE level, `full`. It is the only tag here carrying
+ * content a reader of the card might not be entitled to; everything else is the document's name
+ * and its own address. Adding it to the `title` level is the change that turns a `/p/` link pasted
+ * into a Slack channel into a disclosure — see `ShellOptions.unfurl` before you do it.
+ *
+ * `twitter:card` is `summary`, not `summary_large_image`: there is no image yet, and claiming the
+ * large card without one renders an empty box on the platforms that honor it.
+ *
+ * Every value goes through `esc()`, same as `<title>` — a title containing a quote would otherwise
+ * close the `content="…"` attribute and inject markup into our own trusted shell.
+ */
+function unfurlTags(meta: DocMeta, opts: ShellOptions): string {
+  if (opts.unfurl === "none") return "";
+
+  const tags = [`<meta property="og:title" content="${esc(meta.title)}">`];
+
+  // No invented fallback. A document with no summary gets no description, rather than a scraped
+  // first paragraph — the artifact is hostile (prime directive 4) and its body has no business
+  // being lifted into a card that renders on someone else's servers.
+  const description = opts.unfurl === "full" ? meta.summary : undefined;
+  if (description) {
+    tags.push(`<meta property="og:description" content="${esc(description)}">`);
+  }
+
+  tags.push(`<meta property="og:type" content="article">`);
+  if (opts.canonicalUrl) {
+    tags.push(`<meta property="og:url" content="${esc(opts.canonicalUrl)}">`);
+  }
+
+  tags.push(`<meta name="twitter:card" content="summary">`);
+  tags.push(`<meta name="twitter:title" content="${esc(meta.title)}">`);
+  if (description) {
+    tags.push(`<meta name="twitter:description" content="${esc(description)}">`);
+  }
+
+  return `${tags.join("\n")}\n`;
 }
 
 const esc = (s: string): string =>

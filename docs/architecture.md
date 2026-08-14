@@ -343,7 +343,25 @@ stripping attribution from a deployment that never asked to, not the reverse.
 
 **Public does not mean unsandboxed.** `/p/*` and `/pub/*` go through the same shell.
 A public artifact is *more* exposed, not less. `X-Robots-Tag: noindex, nofollow` on
-both.
+both — and on `/v/*`, the portal index, and the console: every HTML surface this
+Worker serves.
+
+**`noindex` and "does not unfurl" are different guarantees.** `X-Robots-Tag` binds
+search *indexers*. The bot that builds a link preview when someone pastes a URL into
+Slack, iMessage, Discord or LinkedIn is not one, and ignores it. So what a link is
+allowed to *say* is decided per surface, in `ShellOptions.unfurl`, and it is not
+derived from `noindex`:
+
+| Surface | Emits | Why |
+|---|---|---|
+| `/pub/*` — documents and the portal index | Title **and** summary | Already readable by anyone who loads the public index. Nothing new leaves. |
+| `/p/{token}` | Title only | Shared deliberately but privately. A card renders to everyone in the channel it lands in — including people the document was never shared with — so the name gets out and the summary does not. |
+| `/v/*`, `/admin` | Nothing | Access-gated; a bot gets the login page. Saying nothing means we never depend on that. |
+
+The summary is one line the operator wrote for a client index. "Repriced after the
+board pushed back" is a fine index line and a bad Slack card in the wrong channel,
+which is the whole reason the `/p/` level stops at the title. Promoting it is a
+disclosure decision, not a polish item. See [#210](../../issues/210).
 
 ## 8. Credentials
 

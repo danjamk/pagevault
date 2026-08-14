@@ -212,10 +212,37 @@ describe("viewer chrome — download + share (#49)", () => {
   it("🔴 an Access-gated (non-shareable) shell hides share but keeps download", async () => {
     // A /v/ URL only opens for people already in the portal, so a share affordance there
     // would hand out a link that dead-ends at the Access wall. Download stays.
-    const secure = await renderShell(env, doc(), { email: "cto@realplus.com", noindex: true, shareable: false, surface: "portal" });
+    const secure = await renderShell(env, doc(), { email: "cto@realplus.com", noindex: true, shareable: false, unfurl: "none", surface: "portal" });
     const body = await secure.text();
     expect(body).not.toContain('id="share"');
     expect(body).toContain(">Download<");
+  });
+});
+
+describe("🔴 /p/ unfurl — the name, never the summary (#210)", () => {
+  // A /p/ link is shared deliberately but PRIVATELY. Pasting one into a channel renders whatever
+  // we emit to every member of that channel — including people the document was never shared
+  // with — and sends it to the platform doing the unfurling. The title gives the card something
+  // to show. The summary is one line the operator wrote for a client index, and it stays here.
+  //
+  // Promoting this to `full` is a disclosure, not a polish item. See ShellOptions.unfurl.
+
+  it("🔴 emits og:title and NO og:description", async () => {
+    const meta = await publishPublic({ title: "Q3 Review", summary: "Repriced after the board pushed back." });
+    const body = await (await SELF.fetch(`${HOST}/p/${meta.publicToken}`)).text();
+
+    expect(body).toContain('<meta property="og:title" content="Q3 Review">');
+    expect(body).toContain('<meta name="twitter:title" content="Q3 Review">');
+    expect(body).not.toContain("og:description");
+    expect(body).not.toContain("twitter:description");
+    expect(body).not.toContain("Repriced after the board pushed back.");
+  });
+
+  it("og:url is the capability URL itself, with no query string carried into it", async () => {
+    const meta = await publishPublic();
+    const body = await (await SELF.fetch(`${HOST}/p/${meta.publicToken}?utm_source=slack`)).text();
+    expect(body).toContain(`<meta property="og:url" content="${HOST}/p/${meta.publicToken}">`);
+    expect(body).not.toContain("utm_source");
   });
 });
 
@@ -245,14 +272,14 @@ describe("/render?pdf=1 — PDF export (#50, ADR-027)", () => {
 
 describe("viewer chrome — PDF control (#50)", () => {
   it("shows the PDF button and grants connect-src 'self' only when PDF is enabled", async () => {
-    const res = await renderShell(env, doc(), { email: null, noindex: true, pdfEnabled: true, surface: "link" });
+    const res = await renderShell(env, doc(), { email: null, noindex: true, unfurl: "title", pdfEnabled: true, surface: "link" });
     const body = await res.text();
     expect(body).toContain('id="pdf"');
     expect(res.headers.get("Content-Security-Policy")).toContain("connect-src 'self'");
   });
 
   it("🔴 hides the PDF button and keeps the tight CSP when PDF is disabled", async () => {
-    const res = await renderShell(env, doc(), { email: null, noindex: true, pdfEnabled: false, surface: "link" });
+    const res = await renderShell(env, doc(), { email: null, noindex: true, unfurl: "title", pdfEnabled: false, surface: "link" });
     const body = await res.text();
     expect(body).not.toContain('id="pdf"');
     // No fetch means no reason to widen the shell's CSP.
@@ -262,7 +289,7 @@ describe("viewer chrome — PDF control (#50)", () => {
 
 describe("viewer chrome — copy-as-rich-text (#93)", () => {
   it("shows the Copy control and grants connect-src 'self' for a markdown document", async () => {
-    const res = await renderShell(env, doc({ sourceKind: "markdown" }), { email: null, noindex: true, pdfEnabled: false, surface: "link" });
+    const res = await renderShell(env, doc({ sourceKind: "markdown" }), { email: null, noindex: true, unfurl: "title", pdfEnabled: false, surface: "link" });
     const body = await res.text();
     expect(body).toContain('id="copy"');
     expect(body).toContain(">Copy<");
@@ -272,7 +299,7 @@ describe("viewer chrome — copy-as-rich-text (#93)", () => {
   });
 
   it("🔴 hides the Copy control for an HTML document — it would paste as a blank rectangle", async () => {
-    const res = await renderShell(env, doc({ sourceKind: "html" }), { email: null, noindex: true, pdfEnabled: false, surface: "link" });
+    const res = await renderShell(env, doc({ sourceKind: "html" }), { email: null, noindex: true, unfurl: "title", pdfEnabled: false, surface: "link" });
     const body = await res.text();
     expect(body).not.toContain('id="copy"');
     // No copy control and no PDF → nothing fetches, so the CSP stays tight.
@@ -280,7 +307,7 @@ describe("viewer chrome — copy-as-rich-text (#93)", () => {
   });
 
   it("🔴 the copy control never introduces allow-same-origin (ADR-007)", async () => {
-    const res = await renderShell(env, doc({ sourceKind: "markdown" }), { email: null, noindex: true, pdfEnabled: true, surface: "link" });
+    const res = await renderShell(env, doc({ sourceKind: "markdown" }), { email: null, noindex: true, unfurl: "title", pdfEnabled: true, surface: "link" });
     expect(await res.text()).not.toContain("allow-same-origin");
   });
 });

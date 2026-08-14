@@ -7,6 +7,19 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **A shared link now previews as a card, not a bare URL.** Paste a PageVault link into Slack,
+  iMessage, Discord or LinkedIn and it renders the document's name — and, where the content is
+  already public, its summary. Nothing was emitted before, so every link looked broken in the one
+  place every reader meets it. What a surface is allowed to say is decided per surface and is
+  deliberately not tied to `noindex`: an unfurl bot is not a search indexer and ignores
+  `X-Robots-Tag`, and a card renders to everyone in whatever channel the link was pasted into —
+  including people who cannot open the document. So a `/pub/` document and a public portal index
+  carry title *and* summary, both already readable by anyone who loads that index; a `/p/`
+  capability link carries the **title only**, keeping the summary on your deployment; and
+  Access-gated `/v/` documents and the console emit nothing at all.
+  ([#210](../../issues/210))
+
 ## [0.38.2] — 2026-08-14
 
 The install command is on every front door.
