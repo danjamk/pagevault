@@ -18,7 +18,8 @@
     --maxw:1080px;
   }
   *{box-sizing:border-box}
-  html{-webkit-text-size-adjust:100%}
+  html{-webkit-text-size-adjust:100%; scroll-behavior:smooth}
+  section[id]{scroll-margin-top:14px}
   body{margin:0; background:var(--ink); color:var(--paper); font-family:var(--sans); line-height:1.6; font-size:17px; letter-spacing:.005em;
     background-image:radial-gradient(1100px 560px at 82% -10%, rgba(200,162,83,.09), transparent 60%), radial-gradient(900px 500px at 6% 4%, rgba(87,190,185,.045), transparent 55%);}
   .wrap{max-width:var(--maxw); margin:0 auto; padding:0 22px}
@@ -40,6 +41,9 @@
   .fieldstrip .kicker{margin-bottom:12px}
   .chips{display:flex; flex-wrap:wrap; gap:8px}
   .chip{font-family:var(--mono); font-size:12px; color:var(--muted); border:1px solid var(--line); background:var(--ink2); border-radius:6px; padding:6px 10px}
+  .toc{margin-top:30px; padding-top:18px; border-top:1px solid var(--line); display:flex; flex-wrap:wrap; gap:6px 22px; align-items:baseline}
+  .toc a{font-family:var(--mono); font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); border-bottom:0}
+  .toc a:hover{color:var(--brass-hi)}
 
   .qgrid{margin-top:24px; display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:14px}
   .qcard{border:1px solid var(--line); border-radius:12px; background:var(--ink2); padding:20px 22px; display:flex; flex-direction:column}
@@ -107,6 +111,17 @@
   .mapdetail{grid-column:2; margin-top:12px; font-family:var(--mono); font-size:12.5px; color:var(--faint); min-height:20px}
   .mapdetail b{color:var(--paper); font-weight:700}
 
+  .velocity .intro{color:var(--muted); font-size:16.5px; max-width:72ch; margin-top:16px}
+  .surfaces{margin-top:26px; border:1px solid var(--line); border-radius:12px; overflow:hidden}
+  .srow{display:grid; grid-template-columns:190px 1fr; gap:18px; padding:14px 18px; background:var(--ink2); border-bottom:1px solid var(--line)}
+  .srow:last-child{border-bottom:0}
+  .srow .sn{font-family:var(--mono); font-size:13px; color:var(--paper)}
+  .srow .sv{font-size:14.5px; color:var(--muted)}
+  .srow .sv b{color:var(--paper); font-weight:600}
+  .srow code{font-family:var(--mono); font-size:12.5px; color:var(--teal)}
+  .entrants{margin-top:12px; display:flex; flex-wrap:wrap; gap:8px}
+  .entrants a{font-family:var(--mono); font-size:12.5px; color:var(--brass-hi); border:1px solid var(--line); background:var(--ink2); border-radius:6px; padding:6px 11px}
+  .entrants a:hover{border-color:var(--brass-dim)}
   .reveal{border-top:1px solid var(--brass-dim)}
   .reveal .eyebrow{color:var(--brass)}
   .reveal p{max-width:70ch; color:var(--muted)}
@@ -141,8 +156,9 @@
     .xaxis,.mapcap,.mapdetail{grid-column:1}
     .route-row{grid-template-columns:1fr} .route-row .pick{text-align:left}
     table.cmp{font-size:14px} table.cmp thead th.col,table.cmp td.mark{width:auto}
+    .srow{grid-template-columns:1fr; gap:5px} .toc{gap:6px 16px}
   }
-  @media (prefers-reduced-motion:reduce){ *{transition:none!important; animation:none!important} }
+  @media (prefers-reduced-motion:reduce){ html{scroll-behavior:auto} *{transition:none!important; animation:none!important} }
 </style>
 </head>
 <body>
@@ -156,9 +172,17 @@
       <p class="kicker">The field, at a glance</p>
       <div class="chips" id="chips"></div>
     </div>
+    <nav class="toc" aria-label="Sections">
+      <a href="#start">Start here</a>
+      <a href="#compare">Compare two</a>
+      <a href="#map">The map</a>
+      <a href="#velocity">What's changing</a>
+      <a href="#fit">Where we fit</a>
+      <a href="#directory">Every tool</a>
+    </nav>
   </section>
 
-  <section class="answer">
+  <section class="answer" id="start">
     <p class="eyebrow">Start here</p>
     <h2 class="big">Find the situation that sounds like yours.</h2>
     <div class="qgrid">
@@ -191,7 +215,7 @@
     <p class="subtle">Most of these overlap on the basics — a link, a password, HTML that renders. The differences that decide it are below.</p>
   </section>
 
-  <section class="h2h">
+  <section class="h2h" id="compare">
     <p class="eyebrow">Compare</p>
     <h2 class="big">Put any two side by side.</h2>
     <div class="pickpair">
@@ -209,7 +233,7 @@
     <p class="cmpnote" id="cmpnote"></p>
   </section>
 
-  <section class="map">
+  <section class="map" id="map">
     <p class="eyebrow">The map</p>
     <h2 class="big">Change what matters. Watch the leader change.</h2>
     <p class="kicker" style="margin-top:14px">What are you optimizing for?</p>
@@ -226,7 +250,34 @@
     </div>
   </section>
 
-  <section class="reveal">
+  <section class="velocity" id="velocity">
+    <p class="eyebrow">What's changing</p>
+    <h2 class="big">The place you drop the file has started rendering it.</h2>
+    <p class="intro">Every tool above exists because a recipient opened an HTML file and saw markup. That premise is eroding — unevenly, and only inside the walls of whatever app you dropped it in.</p>
+
+    <div class="surfaces">
+      <div class="srow"><div class="sn">Slack</div><div class="sv"><b>Both, inline.</b> Attached HTML started rendering as a page in mid-June 2026, and Markdown files now render too. Neither is documented — it is a gradual rollout, so the same file can render in one workspace and download in another. Canvas has handled Markdown all along, and Slackbot became an MCP client in June, so a publish tool can be called from the channel itself.</div></div>
+      <div class="srow"><div class="sn">OneDrive · SharePoint</div><div class="sv"><b>Markdown, natively</b> — view, edit and split-pane preview, generally available April 2026. HTML, no.</div></div>
+      <div class="srow"><div class="sn">Box</div><div class="sv"><b>Markdown, natively</b> — a built-in editor with preview and split modes since May 2026. HTML previews as code.</div></div>
+      <div class="srow"><div class="sn">Google Drive</div><div class="sv"><b>Neither.</b> A <code>.md</code> file is raw text and an <code>.html</code> file is markup or a download — which is why there is now a cottage industry of extensions selling the missing preview.</div></div>
+      <div class="srow"><div class="sn">Dropbox</div><div class="sv"><b>Neither.</b> Two hundred–odd previewable formats, and your Markdown is still hashes and asterisks.</div></div>
+    </div>
+
+    <p class="intro" style="margin-top:20px">Two things follow. Markdown is quietly becoming a first-class citizen nearly everywhere; interactive HTML still is not, except in Slack, which now renders both. And none of it produces an <em>address</em> — a rendered file in a channel or a drive has no URL a client outside it can open, no gate you set, and no place it accumulates. Rendering is a viewer. That is a different job from sharing, and a different job again from keeping.</p>
+
+    <p class="kicker" style="margin-top:26px">Entrants since this guide was researched</p>
+    <div class="entrants">
+      <a href="https://useshareable.com" target="_blank" rel="noopener noreferrer">Shareable</a>
+      <a href="https://canvaslink.app" target="_blank" rel="noopener noreferrer">CanvasLink</a>
+      <a href="https://dropthis.app" target="_blank" rel="noopener noreferrer">dropthis</a>
+      <a href="https://htmlinslack.com" target="_blank" rel="noopener noreferrer">HTML in Slack</a>
+      <a href="https://www.zite.com" target="_blank" rel="noopener noreferrer">Zite</a>
+      <a href="https://www.jotform.com/ai/portal-builder/" target="_blank" rel="noopener noreferrer">Jotform AI Portal Builder</a>
+    </div>
+    <p class="subtle">Listed, not assessed. This section will be the first part of this page to go stale.</p>
+  </section>
+
+  <section class="reveal" id="fit">
     <p class="eyebrow">Where we fit</p>
     <h2 class="big">This guide was made by PageVault. Here's our hand, face up.</h2>
     <p class="big-p" style="margin-top:18px">On the map above, PageVault leads two frames — <b style="color:var(--brass-hi)">the collection</b> and <b style="color:var(--brass-hi)">artifact handling</b> — and sits mid-pack or lower on every other one. We're not the most private (Stacktree is), the most accountable (Peony is), or the most collaborative (sharehtml is). That's fine. We're aiming at a different square.</p>
@@ -236,7 +287,7 @@
         <h3>What's genuinely rare here</h3>
         <ul>
           <li><b>The whole combination.</b> Free, self-hosted on your own domain, renders the artifact <em>and</em> Markdown, keeps it as a per-client collection, open-source enough to read in a sitting. Any one piece you can find elsewhere; the set is the gap.</li>
-          <li><b>Your AI reads the collection back.</b> An MCP server lets Claude search and read a client's whole corpus later — "what did we decide about the CDC migration in March?" The nearest rival, Peony, has a bidirectional MCP, but it's a $30+/mo data room, not a free deliverable portal.</li>
+          <li><b>Your AI reads the collection back.</b> An MCP server lets Claude search and read a client's whole corpus later — "what did we decide about the CDC migration in March?" The nearest rival, Peony, has a bidirectional MCP and a free tier we were wrong to gloss over — but it reads a deal room, which is a different object from a running record of what you handed a client.</li>
         </ul>
       </div>
       <div class="rc skip">
@@ -250,10 +301,10 @@
         </ul>
       </div>
     </div>
-    <p style="margin-top:22px">Free, MIT-licensed, self-hosted on Cloudflare's free tier. Publishing over MCP works the same from Claude Code and the hosted chat surfaces — claude.ai, Claude Desktop and mobile all connect over OAuth. <a href="https://danjamk.github.io/pagevault">danjamk.github.io/pagevault →</a> · <a href="https://github.com/danjamk/pagevault">source on GitHub</a></p>
+    <p style="margin-top:22px">Free, MIT-licensed, self-hosted on Cloudflare's free tier. Publishing over MCP works the same from Claude Code and the hosted chat surfaces — claude.ai, Claude Desktop and mobile all connect over OAuth. <a href="https://danjamk.github.io/pagevault" target="_blank" rel="noopener noreferrer">danjamk.github.io/pagevault →</a> · <a href="https://github.com/danjamk/pagevault" target="_blank" rel="noopener noreferrer">source on GitHub</a></p>
   </section>
 
-  <section class="dir">
+  <section class="dir" id="directory">
     <p class="eyebrow">Every tool in this guide</p>
     <div class="links" id="links"></div>
   </section>
@@ -266,9 +317,9 @@
       <div class="k">A note on this page</div>
       <p>It's a single self-contained HTML file — inline styles, inline script, no build step, no external assets, no tracking. It happens to be exactly what PageVault serves into its sandbox, so it doubles as a working sample.</p>
       <p>Written in a conversation, not a terminal, and handed over as a link.</p>
-      <p>PageVault is free, MIT-licensed and self-hosted. <a href="https://danjamk.github.io/pagevault">danjamk.github.io/pagevault →</a> · <a href="https://github.com/danjamk/pagevault">source on GitHub</a></p>
+      <p>PageVault is free, MIT-licensed and self-hosted. <a href="https://danjamk.github.io/pagevault" target="_blank" rel="noopener noreferrer">danjamk.github.io/pagevault →</a> · <a href="https://github.com/danjamk/pagevault" target="_blank" rel="noopener noreferrer">source on GitHub</a></p>
     </div>
-    <p class="fine">Landscape researched July 2026, last verified 28 July 2026, drawing on public product, pricing and docs pages. Categories here move fast — verify current details on each vendor's own site.</p>
+    <p class="fine">Landscape researched July 2026. Re-verified 14 August 2026 against public product, pricing and docs pages: Peony, Stacktree, jonesphillip/sharehtml, Anthropic's artifact sharing, and the chat and drive surfaces above. Slack's inline rendering is observed behaviour during an incomplete rollout, not a published spec. Every other entry still carries its 28 July reading. Categories here move fast — verify current details on each vendor's own site.</p>
   </div>
 </footer>
 
@@ -280,15 +331,15 @@
     {key:"collection", label:"A per-client collection", xlow:"one-off link", xhigh:"durable collection",
       lead:"Only PageVault sits in the extreme top-right: AI-native and built around a durable per-client collection. Data rooms (Peony) and portal suites (SuiteDash, Clinked) have collections too, but they're on the manual half — they don't take an AI assistant, and most won't render your artifact."},
     {key:"artifact", label:"Artifact handling", xlow:"hosts a file", xhigh:"renders & exports it",
-      lead:"PageVault and sharehtml lead: both render HTML and Markdown and hand the file back, instead of just hosting it. PageVault also exports a document as a single continuous PDF. Most link tools do HTML only; the portal suites don't render artifacts at all."},
+      lead:"PageVault and sharehtml lead: both render HTML and Markdown and hand the file back, instead of just hosting it. PageVault also exports the document as a PDF. Stacktree renders both now too; most other link tools are HTML only, and the portal suites don't render artifacts at all."},
     {key:"privacy", label:"Privacy", xlow:"open link", xhigh:"host-blind",
       lead:"Stacktree leads — client-side AES-GCM, so the host stores only ciphertext. PageVault gates by email but still reads your document: an honestly weaker guarantee."},
     {key:"collab", label:"Collaboration", xlow:"read-only", xhigh:"live comments",
       lead:"jonesphillip/sharehtml leads with threaded comments, reactions and live presence. PageVault has none of it, on purpose."},
     {key:"ownership", label:"You own it (free, self-hosted)", xlow:"hosted SaaS", xhigh:"free & self-hosted",
-      lead:"sharehtml and PageVault lead — both free, self-hosted, open-source, on your own domain. Stacktree self-hosts too, but as a $999 one-time build. Most of the field is hosted SaaS you don't control."},
+      lead:"sharehtml and PageVault lead — both free, self-hosted, open-source, on your own domain. Stacktree is source-available and can run on your own Cloudflare account, but it is a paid product first. Most of the field is hosted SaaS you don't control."},
     {key:"accountability", label:"Accountability", xlow:"anonymous", xhigh:"audit trail",
-      lead:"Peony leads: per-viewer watermarks, NDA gates, named verified who-viewed logs. PageVault records who opened a secured document and when — a real log, but a rolling three-month one, with no watermark and nothing a lawyer would call evidence."}
+      lead:"Peony leads: per-viewer watermarks, NDA gates, named verified who-viewed logs. PageVault records who opened a secured document and when, and keeps counts and referrers past the 90-day source window — a real log, but no watermark and nothing a lawyer would call evidence."}
   ];
 
   var tools = [
@@ -304,21 +355,21 @@
     {id:"shareduo", name:"ShareDuo", url:"https://shareduo.com", y:76,
       s:{collection:14,artifact:56,privacy:50,collab:10,ownership:34,accountability:55},
       blurb:"Free, no signup. Password, expiry, aggregate analytics, and a six-tool MCP server that publishes from inside Claude. It even runs CDN-loaded Chart.js/D3. The frictionless pick for one-off links."},
-    {id:"stacktree", name:"Stacktree", url:"https://stacktr.ee", y:64,
-      s:{collection:10,artifact:55,privacy:95,collab:5,ownership:62,accountability:28},
-      blurb:"The privacy maximalist: client-side AES-GCM, key in the URL fragment, host sees only ciphertext. Seven-tool MCP that reaches Claude Code, claude.ai, Cursor and Codex; a $999 one-time self-hosted build exists. No named viewer identity."},
+    {id:"stacktree", name:"Stacktree", url:"https://stacktr.ee", y:82,
+      s:{collection:12,artifact:58,privacy:95,collab:5,ownership:62,accountability:28},
+      blurb:"The privacy maximalist, now also the most aggressive about where publishing happens from: client-side AES-GCM with the key in the URL fragment, plus a multi-tool MCP reaching Claude Code, claude.ai, Cursor and Codex, agent skills, and a Slack app wired to Slackbot's MCP client. Renders HTML and Markdown. Source-available self-hosting on your own Cloudflare account. No named viewer identity, no collection."},
     {id:"peony", name:"Peony", url:"https://peony.ink", y:62,
       s:{collection:58,artifact:60,privacy:78,collab:35,ownership:18,accountability:92},
-      blurb:"A data room that renders your artifact live inside an accountability layer: per-viewer watermarks, NDA gates, named who-viewed logs, instant revoke, bidirectional MCP. From ~$30/admin/mo. No encryption, no self-host."},
+      blurb:"A data room that renders your artifact live inside an accountability layer: per-viewer watermarks, NDA gates, named who-viewed logs, instant revoke, bidirectional MCP. Starts free; page analytics from $30/admin/mo, live-render plus watermarks at $52. Viewers are always free. No encryption, no self-host."},
     {id:"livesend", name:"LiveSend", url:"https://livesend.io", y:40,
       s:{collection:20,artifact:48,privacy:42,collab:8,ownership:18,accountability:55},
       blurb:"Permanent, professional links with open-tracking, aimed at consultants sending client reports. The link never expires; you get opens, read-time and country. The 'watermark' is a brand badge and the custom URL is a slug, not your domain."},
     {id:"htmlshare", name:"HTML Share", url:"https://chromewebstore.google.com/detail/html-share/cclmbanndghfflnoecgomkdlegifnmga", y:52,
       s:{collection:25,artifact:52,privacy:60,collab:66,ownership:15,accountability:66},
       blurb:"A browser extension with access control + Google OAuth, version history, inline comments and view analytics. No collection, no self-host."},
-    {id:"publish", name:"Anthropic Publish", url:"https://support.claude.com/en/articles/9547008-publish-and-share-artifacts", y:58,
-      s:{collection:6,artifact:42,privacy:8,collab:6,ownership:40,accountability:8},
-      blurb:"Native to Claude, free on every plan, link stays current when you revise. But it's all-or-nothing public, may be indexed, and stays anonymous — no gating, no idea if it landed."},
+    {id:"publish", name:"Anthropic Publish", url:"https://support.claude.com/en/articles/9547008-publish-and-share-artifacts", y:72,
+      s:{collection:6,artifact:46,privacy:8,collab:50,ownership:40,accountability:8},
+      blurb:"Native to Claude and free on every plan, and it moved in July 2026: artifacts now share to a public link that opens with no Claude sign-in, and can be co-edited by other people and by your own Claude Code sessions. Still all-or-nothing public, possibly indexed, anonymous — no gate, no analytics, and unpublishing is one-way."},
     {id:"diy", name:"Vercel / Netlify / Pages", url:"https://vercel.com/docs/deployment-protection", y:10,
       s:{collection:6,artifact:30,privacy:20,collab:2,ownership:55,accountability:6},
       blurb:"Not really competitors — the reason the category exists. Vercel's password protection is a $150/mo add-on, Netlify's is ~$19/mo, Pages and Gists are public-only."},
@@ -372,11 +423,11 @@
     pv:{who:"Many artifacts for one client, made in chat",
       verdict:"Free, self-hosted per-client portals that render HTML and Markdown, with an MCP server an AI assistant can publish into and read back. No collaboration, no encryption, not a CRM — it keeps the collection, and handles the awkward formats, better than it does anything else.",
       v:{s_emails:1,s_public:1,s_modes:1,a_html:1,a_md:1,a_export:1,a_sandbox:1,a_noacct:1,w_mcp:1,w_readback:1,c_collection:1,c_overwrite:1,o_selfhost:1,o_oss:1,o_export:1,x_collab:0,x_e2e:0,x_audit:1,x_crm:0},
-      notes:{a_md:"renders Markdown to styled HTML at publish",a_export:"raw source back, or the whole document as one continuous PDF",w_mcp:"Claude Code and the hosted surfaces — claude.ai, Desktop, mobile — over OAuth",w_readback:"search_portal / read_document across the client's whole corpus",x_audit:"named who-viewed log on Secured docs; rolling 90 days, no watermark",o_export:"human-readable full export"}},
+      notes:{a_html:"remote images, fonts and CDN scripts run in the sandbox and survive into the PDF",a_md:"renders Markdown to styled HTML at publish",a_export:"raw source back, or a PDF — continuous for an infographic, real paper when the document declares @page",w_mcp:"Claude Code and the hosted surfaces — claude.ai, Desktop, mobile — over OAuth",w_readback:"search_portal / read_document across the client's whole corpus",x_audit:"named who-viewed log on Secured docs, plus counts and referrers that accumulate past the 90-day source window. No watermark, nothing a lawyer would call evidence",o_export:"human-readable full export"}},
     sharehtml:{who:"Inline feedback, if you live in a terminal",
-      verdict:"The closest analog and genuinely good — same Cloudflare design, plus live comments, reactions and presence, and it renders Markdown and code. Its assistant integration only works where there's a shell, and link-shared views still burn an Access seat.",
+      verdict:"The closest analog and genuinely good — same Cloudflare design, plus live comments, reactions and presence, and it renders Markdown and code. Sharing is by link or by adding emails. Its assistant integration is a skill rather than an MCP server, so it only works where there is a shell, and link-shared views still burn an Access seat.",
       v:{s_emails:1,s_public:0,s_modes:.5,a_html:1,a_md:1,a_export:.5,a_sandbox:.5,a_noacct:1,w_mcp:0,w_readback:0,c_collection:0,c_overwrite:1,o_selfhost:1,o_oss:1,o_export:.5,x_collab:1,x_e2e:0,x_audit:0,x_crm:0},
-      notes:{s_public:"link-shared docs still burn an Access seat",a_export:"pull the raw file; no PDF",a_sandbox:"iframe attribute only, no CSP header",w_mcp:"CLI skill — terminal only",c_overwrite:"diff before overwrite",x_collab:"comments, reactions, presence"}},
+      notes:{s_public:"link-shared docs still burn an Access seat",a_export:"pull the raw file; no PDF",a_sandbox:"sandboxed iframe; a trusted viewer shell holds the privileged endpoints behind signed short-lived tokens",w_mcp:"agent skill for Claude Code, Codex and OpenCode — wherever there is a shell",c_overwrite:"diff before overwrite",x_collab:"comments, reactions, presence"}},
     sharehtmlcom:{who:"An AI rewriting one URL across a chat",
       verdict:"Ships an MCP server with edit tokens — a model can iterate on the same URL across a conversation. That's write access; it can't read a collection back and isn't self-hosted.",
       v:{s_emails:.5,s_public:1,s_modes:.5,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:1,w_mcp:1,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:0,x_e2e:0,x_audit:0,x_crm:0},
@@ -386,13 +437,13 @@
       v:{s_emails:.5,s_public:1,s_modes:.5,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:1,w_mcp:1,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:0,x_e2e:0,x_audit:.5,x_crm:0},
       notes:{s_emails:"one shared password, not per-viewer",w_mcp:"publishes from inside Claude",a_html:"even runs CDN-loaded Chart.js/D3",x_audit:"aggregate open-counts, not named"}},
     stacktree:{who:"The host must never see your plaintext",
-      verdict:"The privacy pick, and it beats everyone here on that axis: client-side AES-GCM, key in the URL fragment, server stores only ciphertext. Seven-tool MCP across Claude Code, claude.ai, Cursor and Codex; self-hostable for $999 one-time. No named viewer, no collection.",
-      v:{s_emails:.5,s_public:1,s_modes:.5,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:1,w_mcp:1,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:.5,o_oss:0,o_export:0,x_collab:0,x_e2e:1,x_audit:0,x_crm:0},
-      notes:{s_emails:"unguessable link is the credential, not a named allowlist",w_mcp:"seven-tool MCP; Claude Code, claude.ai, Cursor, Codex",o_selfhost:"$999 one-time self-hosted build",x_e2e:"host stores only ciphertext",c_overwrite:"replace content in place, same URL"}},
+      verdict:"The privacy pick, and it beats everyone here on that axis: client-side AES-GCM, key in the URL fragment, server stores only ciphertext. Also the busiest on distribution — MCP across Claude Code, claude.ai, Cursor and Codex, agent skills, and a Slack app that publishes straight off a message. Self-hosting is source-available on your own Cloudflare account. No named viewer, no collection.",
+      v:{s_emails:.5,s_public:1,s_modes:.5,a_html:1,a_md:1,a_export:0,a_sandbox:.5,a_noacct:1,w_mcp:1,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:.5,o_oss:0,o_export:0,x_collab:0,x_e2e:1,x_audit:0,x_crm:0},
+      notes:{s_emails:"unguessable link is the credential, with a password or email-domain gate on top — not a named allowlist",w_mcp:"MCP across Claude Code, claude.ai, Cursor and Codex, plus Slackbot",o_selfhost:"source-available; runs on your own Cloudflare account",x_e2e:"host stores only ciphertext",c_overwrite:"replace content in place, same URL"}},
     peony:{who:"A confidential doc going to named people",
-      verdict:"A data room that renders your artifact inside an accountability layer: per-viewer watermarks, NDA gate, named verified page analytics, instant revoke, bidirectional MCP. The most expensive to start, no encryption, no self-host — but nothing here matches it on control after the open.",
+      verdict:"A data room that renders your artifact inside an accountability layer: per-viewer watermarks, NDA gate, named verified page analytics, instant revoke, bidirectional MCP. It starts free and viewers never cost anything; the accountability stack is $30–$52 per admin per month. No encryption, no self-host — but nothing here matches it on control after the open.",
       v:{s_emails:1,s_public:1,s_modes:1,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:.5,w_mcp:1,w_readback:.5,c_collection:1,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:.5,x_e2e:0,x_audit:1,x_crm:0},
-      notes:{a_noacct:"NDA gate / named viewers add a step",w_mcp:"bidirectional MCP, push from chat",w_readback:"MCP reads room contents, but it's a data room — not a searchable deliverable memory",c_collection:"per-deal rooms, granular per-file permissions",s_modes:"granular per-file permissions",x_audit:"named, verified, page-by-page"}},
+      notes:{a_noacct:"NDA gate / named viewers add a step",o_selfhost:"free tier exists; $30/admin/mo for page analytics, $52 for live render plus watermarks",w_mcp:"bidirectional MCP, push from chat",w_readback:"MCP reads room contents, but it's a data room — not a searchable deliverable memory",c_collection:"per-deal rooms, granular per-file permissions",s_modes:"granular per-file permissions",x_audit:"named, verified, page-by-page"}},
     livesend:{who:"Permanent tracked links for many client reports",
       verdict:"Permanent, professional links with open-tracking, for consultants. The link never expires; you get opens, read-time and country. But the 'watermark' is just LiveSend's badge, the custom URL is a slug not your domain, and viewer identity is an unverified email.",
       v:{s_emails:.5,s_public:1,s_modes:.5,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:1,w_mcp:0,w_readback:0,c_collection:.5,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:0,x_e2e:0,x_audit:.5,x_crm:0},
@@ -402,9 +453,9 @@
       v:{s_emails:1,s_public:.5,s_modes:.5,a_html:1,a_md:0,a_export:0,a_sandbox:.5,a_noacct:.5,w_mcp:0,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:1,x_e2e:0,x_audit:1,x_crm:0},
       notes:{s_emails:"access control via Google OAuth",a_noacct:"viewers sign in with Google",w_mcp:"browser extension, no API for an assistant",c_overwrite:"version history",x_collab:"inline comments",x_audit:"view link analytics"}},
     publish:{who:"The link that's already inside Claude",
-      verdict:"Zero setup, free on every plan, embeddable, link stays current when you revise. But all-or-nothing public, possibly indexed, and anonymous — no gating, no idea if it landed.",
-      v:{s_emails:0,s_public:1,s_modes:0,a_html:1,a_md:.5,a_export:.5,a_sandbox:.5,a_noacct:1,w_mcp:0,w_readback:0,c_collection:0,c_overwrite:.5,o_selfhost:0,o_oss:0,o_export:0,x_collab:0,x_e2e:0,x_audit:0,x_crm:0},
-      notes:{s_emails:"all-or-nothing public",a_md:"renders formatted docs in-app",a_export:"copy the source",c_overwrite:"updating in place is unreliable; unpublishing is one-way",w_mcp:"a manual button, not a tool an AI can call"}},
+      verdict:"Zero setup, free on every plan, embeddable, and since July 2026 a public link anyone can open plus multiplayer editing — including from your own Claude Code sessions. Still all-or-nothing public, possibly indexed, and anonymous — no gate, no analytics, and unpublishing is one-way.",
+      v:{s_emails:0,s_public:1,s_modes:0,a_html:1,a_md:.5,a_export:.5,a_sandbox:.5,a_noacct:1,w_mcp:0,w_readback:0,c_collection:0,c_overwrite:1,o_selfhost:0,o_oss:0,o_export:0,x_collab:.5,x_e2e:0,x_audit:0,x_crm:0},
+      notes:{s_emails:"all-or-nothing public; Claude Design's share link is the other extreme, visible only inside your org",a_md:"renders formatted docs in-app",a_export:"copy the source",c_overwrite:"a shared artifact updates in place; unpublishing is one-way",w_mcp:"a manual button, not a tool an AI can call",x_collab:"multiplayer editing since July 2026, for people with a Claude account"}},
     suitedash:{who:"Invoicing and a CRM, not just a host",
       verdict:"A genuine per-client portal with a full business suite for $19/mo flat. But it's a file host — it won't render your interactive HTML, isn't AI-native, and the client has to make an account and learn a UI.",
       v:{s_emails:1,s_public:0,s_modes:.5,a_html:0,a_md:0,a_export:.5,a_sandbox:0,a_noacct:0,w_mcp:0,w_readback:0,c_collection:1,c_overwrite:0,o_selfhost:0,o_oss:0,o_export:.5,x_collab:1,x_e2e:0,x_audit:.5,x_crm:1},
@@ -438,7 +489,7 @@
       hA=document.getElementById("hA"),hB=document.getElementById("hB"),cmpnote=document.getElementById("cmpnote");
   function mark(v){return v===1?'<span class="m-yes">✓</span>':v===.5?'<span class="m-part">~</span>':'<span class="m-no">✕</span>';}
   function vcard(id){var t=toolById[id],p=prof[id];
-    return '<div class="vcard"><div class="vn">'+esc(t.name)+'</div><div class="who">Best when — '+esc(p.who)+'</div><p>'+esc(p.verdict)+'</p><a href="'+t.url+'">'+pretty(t.url)+' →</a></div>';}
+    return '<div class="vcard"><div class="vn">'+esc(t.name)+'</div><div class="who">Best when — '+esc(p.who)+'</div><p>'+esc(p.verdict)+'</p><a href="'+t.url+'" target="_blank" rel="noopener noreferrer">'+pretty(t.url)+' →</a></div>';}
   function renderCmp(){
     Array.prototype.forEach.call(document.querySelectorAll('.selbtn[data-side="A"]'),function(b){b.classList.toggle("active",b.dataset.id===A);});
     Array.prototype.forEach.call(document.querySelectorAll('.selbtn[data-side="B"]'),function(b){b.classList.toggle("active",b.dataset.id===B);});
@@ -484,7 +535,7 @@
     b.addEventListener("mouseenter",show);b.addEventListener("mouseleave",hide);b.addEventListener("focus",show);b.addEventListener("blur",hide);
     b.addEventListener("click",function(){
       pts.forEach(function(p){p.classList.remove("sel");}); b.classList.add("sel");
-      mapdetail.innerHTML='<b>'+esc(t.name)+'</b> — '+esc(t.blurb)+' &nbsp;<a href="'+t.url+'" style="font-size:12px">'+pretty(t.url)+' →</a>';
+      mapdetail.innerHTML='<b>'+esc(t.name)+'</b> — '+esc(t.blurb)+' &nbsp;<a href="'+t.url+'" target="_blank" rel="noopener noreferrer" style="font-size:12px">'+pretty(t.url)+' →</a>';
     });
     plot.appendChild(b);pts.push(b);
   });
@@ -503,7 +554,7 @@
 
   // DIRECTORY
   var links=document.getElementById("links");
-  tools.forEach(function(t){var a=document.createElement("a");a.className="lk";a.href=t.url;
+  tools.forEach(function(t){var a=document.createElement("a");a.className="lk";a.href=t.url;a.target="_blank";a.rel="noopener noreferrer";
     a.innerHTML='<div class="n">'+esc(t.name)+'</div><div class="u">'+pretty(t.url)+'</div><div class="d">'+esc(t.blurb.split(".")[0])+'.</div>'; links.appendChild(a);});
 })();
 </script>
