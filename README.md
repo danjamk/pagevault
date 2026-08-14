@@ -13,6 +13,16 @@ nothing and signs up for nothing — no account, on any platform.
 ![License: MIT](https://img.shields.io/badge/License-MIT-34507A) &nbsp;
 ![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-34507A)
 
+**Install it now** — [`pagevault` on npm](https://www.npmjs.com/package/pagevault):
+
+```bash
+npm install -g pagevault && pagevault init
+```
+
+That's the whole install. `init` takes a Cloudflare API token and stands PageVault up on
+your own account in about ten minutes — no clone, no build. Details in
+[Install — pick a path](#install--pick-a-path).
+
 > This README is the setup guide. The product argument lives on the
 > [product page](https://danjamk.github.io/pagevault), and there's a
 > [live showcase](https://pagevault.danjamkuhn.com/pub/showcase) running on PageVault

@@ -1,5 +1,9 @@
 # pagevault
 
+**[What it is and why](https://danjamk.github.io/pagevault)** ·
+**[See it live](https://pagevault.danjamkuhn.com/pub/showcase)** ·
+**[Source and setup guide](https://github.com/danjamk/pagevault)**
+
 Stand up, publish to, and operate your own [PageVault](https://github.com/danjamk/pagevault)
 deployment from the terminal. `pagevault init` provisions and deploys PageVault onto your own
 Cloudflare account — Access, KV, and the Worker — with no repo clone; the package carries a prebuilt
