@@ -216,10 +216,17 @@ async function handlePublicToken(request: Request, env: Env, token: string): Pro
 
   // A /p/ capability link is self-authorizing — anyone with the URL can open it — so the
   // share control belongs here.
+  // 🔴 `title`, never `full`. A /p/ link is shared deliberately but PRIVATELY, and an unfurl
+  // renders whatever we emit to every member of the channel it lands in — including people this
+  // document was never shared with — plus the platform doing the unfurling. The name gives the
+  // card something to show; the summary stays here. See ShellOptions.unfurl (#210).
+  const canonical = new URL(request.url);
   return renderShell(env, meta, {
     email: null,
     noindex: true,
     shareable: true,
+    unfurl: "title",
+    canonicalUrl: new URL(canonical.pathname, canonical).toString(),
     pdfEnabled: !!env.BROWSER,
     surface: "link",
     referer: request.headers.get("referer"),

@@ -514,6 +514,97 @@ describe("🔴 /pub/{slug} — the public tier lives OFF the Access path", () =>
 });
 
 /**
+ * 🔴 Unfurl tags — what a link preview is allowed to say (#210).
+ *
+ * `X-Robots-Tag: noindex` binds search indexers. An unfurl bot is not one and ignores it, so
+ * "we send noindex" is NOT the thing keeping a summary out of a Slack card — these assertions are.
+ * A card renders to everyone in whatever channel the link is pasted into, including people who
+ * cannot open the document, so the rule is per-surface and it is tested per-surface.
+ */
+describe("🔴 unfurl tags — OpenGraph exposure is per-surface (#210)", () => {
+  beforeEach(async () => {
+    await putPortal(env, { ...portal("marketing", "public", "Marketing"), description: "Things we published." });
+    await seedDoc("marketing", "pub111111111", { title: "How It Works", summary: "The short version." });
+    await seedDoc("marketing", "pub333333333", { title: "No Summary Here" });
+    await seedDoc("marketing", "pub222222222", { title: "Unfinished Draft", ownerOnly: true });
+
+    await putPortal(env, { ...portal("realplus", "restricted", "RealPlus"), description: "Client engagement." });
+    await putMembers(env, "realplus", [REALPLUS_CTO]);
+    await seedDoc("realplus", "rp1111111111", { title: "Architecture Review", summary: "CDC on V2" });
+  });
+
+  it("a /pub/ document emits title AND summary — both are already public on the index", async () => {
+    const body = await (await SELF.fetch(`${HOST}/pub/marketing/pub111111111`)).text();
+    expect(body).toContain('<meta property="og:title" content="How It Works">');
+    expect(body).toContain('<meta property="og:description" content="The short version.">');
+    expect(body).toContain('<meta name="twitter:description" content="The short version.">');
+    expect(body).toContain('<meta name="twitter:card" content="summary">');
+    // Not summary_large_image — there is no image, and claiming the large card renders an empty box.
+    expect(body).not.toContain("summary_large_image");
+  });
+
+  it("og:url is the canonical /pub/ address, never the /v/ one that would burn a seat", async () => {
+    const body = await (await SELF.fetch(`${HOST}/pub/marketing/pub111111111`)).text();
+    expect(body).toContain(`<meta property="og:url" content="${HOST}/pub/marketing/pub111111111">`);
+    expect(body).not.toContain('og:url" content="https://share.example.com/v/');
+  });
+
+  it("a document with no summary emits no description — no scraped fallback", async () => {
+    // The artifact is hostile (prime directive 4). Its body has no business being lifted into a
+    // card that renders on someone else's servers.
+    const body = await (await SELF.fetch(`${HOST}/pub/marketing/pub333333333`)).text();
+    expect(body).toContain('<meta property="og:title" content="No Summary Here">');
+    expect(body).not.toContain("og:description");
+    expect(body).not.toContain("twitter:description");
+  });
+
+  it("🔴 an Access-gated /v/ document emits NOTHING — not even a title", async () => {
+    const body = await (
+      await SELF.fetch(`${HOST}/v/realplus/rp1111111111`, { headers: await as(REALPLUS_CTO) })
+    ).text();
+    expect(body).toContain("Architecture Review"); // the page itself still renders
+    expect(body).not.toContain("og:");
+    expect(body).not.toContain("twitter:");
+  });
+
+  it("🔴 a restricted portal INDEX emits nothing — a client's document list is not a card", async () => {
+    const body = await (await SELF.fetch(`${HOST}/v/realplus`, { headers: await as(REALPLUS_CTO) })).text();
+    const head = body.slice(0, body.indexOf("</head>"));
+    expect(head).not.toContain("og:");
+    expect(head).not.toContain("twitter:");
+    // The description still renders in the page body — the member looking at their own portal is
+    // supposed to see it. What must not happen is it reaching a card an unfurl bot builds.
+    expect(head).not.toContain("Client engagement.");
+    expect(body).toContain("Client engagement.");
+  });
+
+  it("a public portal index unfurls its OWN name and description", async () => {
+    const body = await (await SELF.fetch(`${HOST}/pub/marketing`)).text();
+    expect(body).toContain('<meta property="og:title" content="Marketing">');
+    expect(body).toContain('<meta property="og:description" content="Things we published.">');
+    // An index, not a document.
+    expect(body).toContain('<meta property="og:type" content="website">');
+    expect(body).toContain(`<meta property="og:url" content="${HOST}/pub/marketing">`);
+  });
+
+  it("🔴 the index card is built from the PORTAL, never from a document — a draft cannot leak into it", async () => {
+    // The owner sees ownerOnly rows on this page. A card assembled from the listing would hand a
+    // draft's existence to everyone in whatever channel the portal link was pasted into.
+    const body = await (await SELF.fetch(`${HOST}/pub/marketing`, { headers: await as(OWNER) })).text();
+    const head = body.slice(0, body.indexOf("</head>"));
+    expect(head).not.toContain("Unfinished Draft");
+    expect(head).not.toContain("How It Works");
+  });
+
+  it("escapes a title that would otherwise break out of the content attribute", async () => {
+    await seedDoc("marketing", "pub444444444", { title: 'Q3 "Review" <script>', summary: "Fine." });
+    const body = await (await SELF.fetch(`${HOST}/pub/marketing/pub444444444`)).text();
+    expect(body).toContain('content="Q3 &quot;Review&quot; &lt;script&gt;"');
+    expect(body).not.toContain('content="Q3 "Review"');
+  });
+});
+
+/**
  * 🔴 ADR-023, decision 6 — the portal index is a recorded event carrying no identity.
  *
  * analytics.test.ts proves `recordPortalView` cannot write a viewer, because it has no
