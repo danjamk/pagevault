@@ -7,6 +7,23 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.38.2] — 2026-08-14
+
+The install command is on every front door.
+
+### Changed
+- **The npm install path leads on both front doors.** The README carries
+  `npm install -g pagevault && pagevault init` directly under the badges, and the product page puts
+  npm in the nav and a copyable install command in both the hero and the closing CTA. The version
+  badge was the only npm signal there, and a badge does not read as an install path.
+- **The npm package page points back at the product page and the live showcase.** `cli/README.md`
+  is what npmjs.com renders and it pointed only at GitHub. That listing only re-renders on publish,
+  which is what this release is for. ([#209](../../pull/209))
+- **The field guide example matches the published document again.**
+  `examples/pagevault-comparison.html` had fallen behind `/pub/showcase/72i8672763d7`: the live
+  version was re-verified 14 August 2026 and gained a section on which surfaces now render HTML and
+  Markdown natively. No code changed.
+
 ## [0.38.1] — 2026-08-13
 
 A document that says it is paper gets to be paper.
@@ -1846,7 +1863,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.38.1...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.38.2...HEAD
+[0.38.2]: https://github.com/danjamk/pagevault/compare/v0.38.1...v0.38.2
 [0.38.1]: https://github.com/danjamk/pagevault/compare/v0.38.0...v0.38.1
 [0.38.0]: https://github.com/danjamk/pagevault/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/danjamk/pagevault/compare/v0.36.0...v0.37.0
