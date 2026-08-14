@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.39.0] — 2026-08-14
+
+A shared link finally looks like something.
+
 ### Added
 - **A shared link now previews as a card, not a bare URL.** Paste a PageVault link into Slack,
   iMessage, Discord or LinkedIn and it renders the document's name — and, where the content is
@@ -1876,7 +1880,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.38.2...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.39.0...HEAD
+[0.39.0]: https://github.com/danjamk/pagevault/compare/v0.38.2...v0.39.0
 [0.38.2]: https://github.com/danjamk/pagevault/compare/v0.38.1...v0.38.2
 [0.38.1]: https://github.com/danjamk/pagevault/compare/v0.38.0...v0.38.1
 [0.38.0]: https://github.com/danjamk/pagevault/compare/v0.37.0...v0.38.0
