@@ -56,7 +56,8 @@ const anchors = new Map(
 // --- 1 · internal links and anchors resolve ---------------------------------------------------
 for (const f of prose) {
   for (const [, target] of read(f).matchAll(/\]\(([^)\s]+)\)/g)) {
-    if (/^(https?:|mailto:)/.test(target) || target.startsWith("../../issues")) continue;
+    // ../../issues/N and ../../pull/N are GitHub-relative refs, not files on disk.
+    if (/^(https?:|mailto:)/.test(target) || /^\.\.\/\.\.\/(issues|pull)\//.test(target)) continue;
     const [path, frag] = target.split("#");
     const dest = path ? resolve(dirname(f), path) : f;
     if (path && !existsSync(dest)) { add("link", rel(f), `missing file → ${target}`); continue; }
