@@ -1110,7 +1110,18 @@ function buildServer(env: Env, origin: string): McpServer {
         total: z.object({ views: z.number(), surfaces: z.object({ link: z.number(), public: z.number(), portal: z.number() }) }),
         byDoc: z.array(z.object({ id: z.string(), portal: z.string(), title: z.string(), views: z.number() })),
         byPortal: z.array(z.object({ portal: z.string(), views: z.number(), docs: z.number() })),
-        byDay: z.array(z.object({ key: z.string(), granularity: z.string(), views: z.number() })),
+        // `surfaces` and `topDocs` are per BUCKET, and they are the only per-day breakdown that can
+        // exist: referrers carry no date (ADR-023 §5), so `byReferrer` below is all-time and cannot
+        // be narrowed to a day by this or any other caller.
+        byDay: z.array(
+          z.object({
+            key: z.string(),
+            granularity: z.string(),
+            views: z.number(),
+            surfaces: z.object({ link: z.number(), public: z.number(), portal: z.number() }),
+            topDocs: z.array(z.object({ id: z.string(), title: z.string(), views: z.number() })),
+          }),
+        ),
         byReferrer: z.array(z.object({ host: z.string(), views: z.number() })),
         syncRisk: z.object({ state: z.string(), uncapturedDays: z.number(), daysUntilLoss: z.number().nullable() }),
       },
@@ -1184,7 +1195,12 @@ function buildServer(env: Env, origin: string): McpServer {
           lead === "portal"
             ? r.byPortal.map((p) => `  ${p.portal}: ${p.views} across ${p.docs} document${p.docs === 1 ? "" : "s"}`)
             : lead === "day"
-              ? r.byDay.map((d) => `  ${d.key}${d.granularity === "month" ? " (month)" : ""}: ${d.views}`)
+              ? // Name what drove each bucket. "2026-08-08: 8" invites a follow-up question the
+                // structured output could already have answered; the top page usually IS the answer.
+                r.byDay.map((d) => {
+                  const top = d.topDocs.length ? ` — ${d.topDocs.map((t) => `${t.title} ${t.views}`).join(", ")}` : "";
+                  return `  ${d.key}${d.granularity === "month" ? " (month)" : ""}: ${d.views}${top}`;
+                })
               : lead === "referrer"
                 ? r.byReferrer.map((s) => `  ${s.host || "direct"}: ${s.views}`)
                 : lead === "surface"

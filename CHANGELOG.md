@@ -7,6 +7,17 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **The traffic chart says what it is measuring.** The by-day chart gains a y-axis, gridlines, and a
+  value above each column when the window is short enough to read them. Hovering a column now names
+  the surface split for *that day* and the pages that drove it, rather than just repeating the total.
+  A new **Top pages** section sits below By portal. Compacted months render lighter than days, since
+  a month column covers thirty days and is a different kind of number, not a bigger one.
+  ([#164](../../issues/164))
+- **`traffic` over MCP reports the same per-day detail**, in both its prose and its structured
+  output — leading with `by: "day"` now names the busiest page in each bucket instead of a bare
+  count.
+
 ### Changed
 - **A new install no longer asks your clients to log in every day.** `init` created both Access
   applications with a 24-hour session — Cloudflare's own default, mirrored without an argument
