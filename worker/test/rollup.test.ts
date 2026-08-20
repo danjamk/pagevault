@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type DocIndexEntry, rollup } from "../src/rollup.js";
+import { type DocIndexEntry, MAX_DAY_DOCS, rollup } from "../src/rollup.js";
 import { SUMMARY_VERSION, type SyncRisk, type ViewSummary } from "../src/views.js";
 
 //
@@ -131,6 +131,65 @@ describe("totals and breakdowns", () => {
     const r = roll();
     expect(r.byDay.map((d) => d.key)).toEqual(["2026-08-07", "2026-08-08", "2026-08-09"]);
     expect(r.byDay.find((d) => d.key === "2026-08-08")!.views).toBe(8); // 3 roadmap + 5 primer
+  });
+});
+
+describe("what a single bucket says about itself", () => {
+  // These feed the console's day tooltip. They are per-bucket answers to "what drove this column",
+  // and they exist because the obvious answer — referrers — provably cannot be one (see below).
+
+  it("carries the surface split for that bucket, not the window's", () => {
+    const d = roll().byDay.find((x) => x.key === "2026-08-08")!;
+    // roadmap {link:2, pub:1} + primer {pub:5} on this day alone.
+    expect(d.surfaces).toEqual({ link: 2, public: 6, portal: 0 });
+    // The window total is larger — 08-07 is 4 portal views and 08-09 is 3, neither of which
+    // belongs to this bucket.
+    expect(roll().total.surfaces.portal).toBe(7);
+    expect(d.surfaces.portal).toBe(0);
+  });
+
+  it("names the documents that drove it, largest first", () => {
+    const d = roll().byDay.find((x) => x.key === "2026-08-08")!;
+    expect(d.topDocs.map((t) => [t.title, t.views])).toEqual([
+      ["Technical Primer", 5],
+      ["2027 Platform Roadmap", 3],
+    ]);
+  });
+
+  it("🔴 a document with no views that day is not named in it", () => {
+    // "Never Opened" is measured and present in the index, and belongs in byDoc at zero. A "top
+    // pages" list that includes it is answering a different question than the one asked.
+    const d = roll().byDay.find((x) => x.key === "2026-08-09")!;
+    expect(d.topDocs.map((t) => t.title)).toEqual(["Globex Brief"]);
+    expect(roll().byDoc.some((x) => x.title === "Never Opened" && x.views === 0)).toBe(true);
+  });
+
+  it("caps how many documents a bucket names", () => {
+    const busy: ViewSummary = {
+      ...SUMMARY,
+      docs: Object.fromEntries(
+        ["a", "b", "c", "d", "e"].map((k, i) => [`doc-${k}`, { "2026-08-08": { pub: 10 - i } }]),
+      ),
+    };
+    const docs: DocIndexEntry[] = ["a", "b", "c", "d", "e"].map((k) => ({
+      id: `doc-${k}`,
+      portal: "acme",
+      title: `Doc ${k.toUpperCase()}`,
+      createdAt: "2026-03-01T00:00:00.000Z",
+    }));
+    const d = roll(busy, docs).byDay.find((x) => x.key === "2026-08-08")!;
+    expect(d.topDocs).toHaveLength(MAX_DAY_DOCS);
+    expect(d.topDocs.map((t) => t.title)).toEqual(["Doc A", "Doc B", "Doc C"]);
+  });
+
+  it("🔴 a bucket never carries referrers — they have no date to be narrowed by", () => {
+    // ADR-023 §5 stores referrer hosts per portal, all-time, precisely so a host cannot be
+    // correlated with a reader on a given day. Attaching byReferrer to a bucket would render an
+    // all-time total under a day's label. The surface split above is the honest substitute, and
+    // this test exists so nobody "improves" the tooltip by reaching for the wrong field.
+    const d = roll().byDay.find((x) => x.key === "2026-08-08")!;
+    expect(Object.keys(d).sort()).toEqual(["granularity", "key", "surfaces", "topDocs", "views"]);
+    expect(roll().scope.referrers).toBe("all-time");
   });
 });
 

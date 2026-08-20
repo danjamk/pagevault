@@ -358,10 +358,28 @@ function page(session: string, nonce: string, owner: string, version: string, de
   .tstat span { color:var(--pv-muted); font-size:12px; }
   .tsec { margin:18px 0; }
   .tsec .ulabel { display:block; margin-bottom:8px; }
+  /* The chart is a flex row: a fixed y-axis column, then the plot. The axis is HTML rather than
+     <text> inside the SVG because the plot uses preserveAspectRatio="none" to fill the panel, which
+     would stretch any glyph in it out of shape. Nothing here is positioned, so nothing needs an
+     inline style attribute the nonced CSP would drop. */
+  .chart { display:flex; align-items:stretch; gap:8px; }
+  .yaxis { flex:0 0 auto; display:flex; flex-direction:column; justify-content:space-between;
+           align-items:flex-end; height:64px; min-width:22px;
+           color:var(--pv-faint); font-size:11px; font-variant-numeric:tabular-nums; line-height:1; }
+  .plot { flex:1 1 auto; min-width:0; }
   .spark { display:block; width:100%; height:64px;
            border-bottom:1px solid var(--pv-border-2); }
-  .spark rect { fill:var(--pv-accent); opacity:.85; }
-  .spark rect:hover { opacity:1; }
+  .spark .bar { fill:var(--pv-accent); opacity:.85; }
+  .spark .bar:hover { opacity:1; }
+  /* A compacted month is a different KIND of number, not a smaller one — it covers 30 days rather
+     than one. Lighter so a reader asks why, and the hint under the chart answers. */
+  .spark .bar.mo { opacity:.45; }
+  .spark .grid { stroke:var(--pv-border-2); stroke-width:.5; vector-effect:non-scaling-stroke; }
+  /* One span per column, evenly distributed — the same even distribution the bars get from their
+     fixed step, so they line up without either knowing about the other. */
+  .dvals { display:flex; margin-top:3px; }
+  .dvals span { flex:1 1 0; min-width:0; text-align:center; color:var(--pv-muted);
+                font-size:10.5px; font-variant-numeric:tabular-nums; }
   .srange { display:flex; justify-content:space-between; color:var(--pv-faint); font-size:11.5px; margin-top:4px; }
   .trow { display:flex; align-items:center; gap:10px; padding:3px 0; font-size:13px; }
   .tname { flex:0 0 168px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -1144,20 +1162,91 @@ ${ICON_DEFS}
 
     const peakDay = Math.max.apply(null, [1].concat(r.byDay.map((d) => d.views)));
     const peakPortal = Math.max.apply(null, [1].concat(r.byPortal.map((p) => p.views)));
+    const peakDoc = Math.max.apply(null, [1].concat(r.byDoc.map((d) => d.views)));
 
-    // Same reason as trafficBar: rect attributes, never inline style. One column per day, drawn in
-    // a 100-unit-tall viewBox and stretched to the panel width.
+    // The tooltip. A multi-line SVG <title> rather than a positioned hover card, because the
+    // console's CSP is nonced and drops style attributes — a card would need CSSOM positioning to
+    // work at all, and a tooltip that silently lands at 0,0 is worse than the browser's own.
+    // Native <title> also reaches a screen reader for free.
+    //
+    // 🔴 No referrers here, and there is no version of this that can have them. Referrer hosts are
+    // stored per portal, ALL-TIME, with no date dimension at all (ADR-023 §5, so a host can never
+    // be correlated with a reader on a given day). Putting byReferrer in a per-day tooltip would
+    // render the identical list under every bar — an all-time total wearing a day's label. The
+    // surface split below is the honest per-day answer to the same question.
+    function dayTip(d) {
+      const lines = [d.key + (d.granularity === "month" ? " (whole month)" : "") + " — " + d.views +
+        (d.views === 1 ? " view" : " views")];
+
+      const s = d.surfaces || { link: 0, public: 0, portal: 0 };
+      const parts = [];
+      if (s.link) parts.push(s.link + " via link");
+      if (s.public) parts.push(s.public + " public");
+      if (s.portal) parts.push(s.portal + " portal");
+      if (parts.length) lines.push(parts.join(" · "));
+
+      if (d.topDocs && d.topDocs.length) {
+        lines.push("");
+        lines.push(d.topDocs.length === 1 ? "Page" : "Top pages");
+        d.topDocs.forEach((t) => { lines.push("  " + t.title + " — " + t.views); });
+      }
+      // 🔴 Double-escaped on purpose. This string sits inside the TypeScript template literal that
+      // BUILDS the console script, so a single backslash-n is resolved by tsc into a real newline —
+      // a syntax error inside the browser's own string literal. make check-console catches it, and
+      // did. (No backticks in this comment either: it ships inside the template literal too.)
+      return lines.join("\\n");
+    }
+
+    // Same reason as trafficBar: rect attributes, never inline style. One column per bucket, drawn
+    // in a 100-unit-tall viewBox and stretched to the panel width.
+    //
+    // 🔴 preserveAspectRatio="none" is what makes the bars fill the panel, and it is also why no
+    // <text> goes inside this SVG: the stretch would distort it. The y-axis and the value labels are
+    // HTML siblings, laid out by flex so they line up with evenly-spaced columns without a single
+    // positioned element.
     const step = r.byDay.length ? 100 / r.byDay.length : 100;
+    // Value labels on every column stop being readable well before a month of them. Past the
+    // threshold the axis and the tooltips carry it, which is what they are for.
+    const showValues = r.byDay.length > 0 && r.byDay.length <= 14;
+    const mid = Math.round(peakDay / 2);
     const days = r.byDay.length
-      ? '<svg class="spark" viewBox="0 0 100 100" preserveAspectRatio="none">' +
-        r.byDay.map((d, i) => {
-          const h = Math.max(2, Math.round((d.views / peakDay) * 100));
-          return '<rect x="' + (i * step + step * 0.15).toFixed(2) + '" y="' + (100 - h) +
-            '" width="' + (step * 0.7).toFixed(2) + '" height="' + h + '">' +
-            '<title>' + esc(d.key) + ': ' + d.views + (d.granularity === "month" ? " (month)" : "") + '</title></rect>';
-        }).join("") + '</svg>' +
-        '<div class="srange"><span>' + esc(r.byDay[0].key) + '</span><span>' + esc(r.byDay[r.byDay.length - 1].key) + '</span></div>'
+      ? '<div class="chart">' +
+          '<div class="yaxis" aria-hidden="true"><span>' + peakDay + '</span><span>' + mid + '</span><span>0</span></div>' +
+          '<div class="plot">' +
+            '<svg class="spark" viewBox="0 0 100 100" preserveAspectRatio="none">' +
+              // Gridlines at the peak and the midpoint. A horizontal line stretched horizontally is
+              // still a horizontal line, so these survive preserveAspectRatio="none" intact.
+              '<line class="grid" x1="0" y1="0" x2="100" y2="0"/>' +
+              '<line class="grid" x1="0" y1="50" x2="100" y2="50"/>' +
+              r.byDay.map((d, i) => {
+                const h = Math.max(2, Math.round((d.views / peakDay) * 100));
+                return '<rect class="' + (d.granularity === "month" ? "bar mo" : "bar") + '" x="' +
+                  (i * step + step * 0.15).toFixed(2) + '" y="' + (100 - h) +
+                  '" width="' + (step * 0.7).toFixed(2) + '" height="' + h + '">' +
+                  '<title>' + esc(dayTip(d)) + '</title></rect>';
+              }).join("") +
+            '</svg>' +
+            (showValues
+              ? '<div class="dvals">' + r.byDay.map((d) => '<span>' + d.views + '</span>').join("") + '</div>'
+              : "") +
+            '<div class="srange"><span>' + esc(r.byDay[0].key) + '</span><span>' + esc(r.byDay[r.byDay.length - 1].key) + '</span></div>' +
+          '</div>' +
+        '</div>' +
+        (r.scope && r.scope.monthlyBuckets
+          ? '<p class="dhint">Lighter columns are whole months: daily detail is kept for 90 days, then compacted.</p>'
+          : "") +
+        '<p class="dhint">Hover a column for its surface split and the pages that drove it.</p>'
       : '<p class="dhint">No day in this window recorded a view.</p>';
+
+    // Top pages (#164 follow-up). byDoc arrives sorted by views, so this is a slice — but filter
+    // zeros first: a measured document with no views in the window is a real and useful row in a
+    // full listing, and noise in a "top" list.
+    const topDocs = r.byDoc.filter((d) => d.views > 0).slice(0, 5);
+    const docRows = topDocs.length
+      ? topDocs.map((d) =>
+          '<div class="trow"><span class="tname" title="' + esc(d.title + " — " + d.portal) + '">' + esc(d.title) + '</span>' +
+          trafficBar(d.views, peakDoc) + '<span class="tnum">' + d.views + '</span></div>').join("")
+      : '<p class="dhint">No document recorded a view in this window.</p>';
 
     const portalRows = r.byPortal.length
       ? r.byPortal.map((p) =>
@@ -1182,6 +1271,7 @@ ${ICON_DEFS}
       '</div>' +
       '<div class="tsec"><span class="ulabel">By day</span>' + days + '</div>' +
       '<div class="tsec"><span class="ulabel">By portal</span>' + portalRows + '</div>' +
+      '<div class="tsec"><span class="ulabel">Top pages</span>' + docRows + '</div>' +
       // All-time, and it has to say so: referrers carry no date (ADR-023), so labelling them with
       // the window above would be a wrong number rather than a narrow one.
       '<div class="tsec"><span class="ulabel">Sources</span>' + refRows +

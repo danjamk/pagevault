@@ -72,11 +72,36 @@ export interface PortalRollup {
   docs: number;
 }
 
+/** One document's contribution to a single bucket. See `DayRollup.topDocs`. */
+export interface DayDocRollup {
+  id: string;
+  title: string;
+  views: number;
+}
+
+/**
+ * How many documents a bucket names. Three, because this feeds a tooltip: the question it answers
+ * is "what drove that spike", and the fourth-busiest document has never been the answer to it. It
+ * also bounds the payload — this rides on every bucket in the window.
+ */
+export const MAX_DAY_DOCS = 3;
+
 export interface DayRollup {
   /** `YYYY-MM-DD`, or `YYYY-MM` once the bucket has been compacted past 90 days. */
   key: string;
   granularity: "day" | "month";
   views: number;
+  /**
+   * The surface split for THIS bucket.
+   *
+   * Unlike `byReferrer`, this genuinely carries a date: surfaces are stored per document per day
+   * (`Bucket`), so narrowing them to a bucket is a real answer rather than an all-time total wearing
+   * a day's label. It is the honest substitute for the referrer breakdown a per-day view cannot have
+   * — see `Rollup.scope.referrers`.
+   */
+  surfaces: SurfaceCounts;
+  /** The busiest documents in this bucket, largest first, capped at `MAX_DAY_DOCS`. */
+  topDocs: DayDocRollup[];
 }
 
 export interface ReferrerRollup {
@@ -187,7 +212,7 @@ const addSurfaces = (into: SurfaceCounts, b: Bucket): void => {
 /** One document's buckets, folded over the window. Returns null when nothing landed in it. */
 function foldHistory(history: DocHistory, from: string, to: string) {
   const surfaces = emptySurfaces();
-  const byDay = new Map<string, { granularity: "day" | "month"; views: number }>();
+  const byDay = new Map<string, { granularity: "day" | "month"; views: number; surfaces: SurfaceCounts }>();
   let owner: number | null = null;
   let monthly = 0;
   let lastKey = "";
@@ -205,8 +230,14 @@ function foldHistory(history: DocHistory, from: string, to: string) {
     if (granularity === "month") monthly += 1;
     const views = bucketViews(bucket);
     const seen = byDay.get(key);
-    if (seen) seen.views += views;
-    else byDay.set(key, { granularity, views });
+    if (seen) {
+      seen.views += views;
+      addSurfaces(seen.surfaces, bucket);
+    } else {
+      const daySurfaces = emptySurfaces();
+      addSurfaces(daySurfaces, bucket);
+      byDay.set(key, { granularity, views, surfaces: daySurfaces });
+    }
     if (key > lastKey) {
       lastKey = key;
       lastTime = bucket.t ?? "";
@@ -270,7 +301,12 @@ export function rollup(
 
   const byDoc: DocRollup[] = [];
   const portals = new Map<string, PortalRollup>();
-  const days = new Map<string, { granularity: "day" | "month"; views: number }>();
+  // `docs` is per bucket, keyed by document id so a document contributes once per bucket. It is
+  // dropped on the way out — only the top few survive into `topDocs`.
+  const days = new Map<
+    string,
+    { granularity: "day" | "month"; views: number; surfaces: SurfaceCounts; docs: Map<string, DayDocRollup> }
+  >();
   const total = { views: 0, surfaces: emptySurfaces(), owner: null as number | null };
   let monthlyBuckets = 0;
 
@@ -307,10 +343,20 @@ export function rollup(
 
     if (folded) {
       monthlyBuckets += folded.monthlyBuckets;
+      const title = doc.title || doc.name || doc.id;
       for (const [key, entry] of folded.byDay) {
-        const seen = days.get(key);
-        if (seen) seen.views += entry.views;
-        else days.set(key, { ...entry });
+        let seen = days.get(key);
+        if (!seen) {
+          seen = { granularity: entry.granularity, views: 0, surfaces: emptySurfaces(), docs: new Map() };
+          days.set(key, seen);
+        }
+        seen.views += entry.views;
+        seen.surfaces.link += entry.surfaces.link;
+        seen.surfaces.public += entry.surfaces.public;
+        seen.surfaces.portal += entry.surfaces.portal;
+        // Zero-view buckets do not exist (`mergeBuckets` drops them), but a document that only
+        // appears at zero has nothing to say about what drove the day either way.
+        if (entry.views > 0) seen.docs.set(doc.id, { id: doc.id, title, views: entry.views });
       }
     }
   }
@@ -340,7 +386,15 @@ export function rollup(
     // Chronological, not by size: this one is a series, and a sparkline sorted by magnitude is a bar
     // chart with the x-axis thrown away.
     byDay: [...days.entries()]
-      .map(([key, v]) => ({ key, granularity: v.granularity, views: v.views }))
+      .map(([key, v]) => ({
+        key,
+        granularity: v.granularity,
+        views: v.views,
+        surfaces: v.surfaces,
+        topDocs: [...v.docs.values()]
+          .sort((a, b) => b.views - a.views || a.title.localeCompare(b.title))
+          .slice(0, MAX_DAY_DOCS),
+      }))
       .sort((a, b) => a.key.localeCompare(b.key)),
     byReferrer: [...referrers.entries()]
       .map(([host, views]) => ({ host, views }))
