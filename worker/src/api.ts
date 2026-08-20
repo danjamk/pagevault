@@ -310,6 +310,11 @@ async function getViewsHandler(request: Request, env: Env): Promise<Response> {
 
   const portal = params.get("portal") ?? undefined;
   const doc = params.get("doc") ?? undefined;
+  // Unrecognised values fall back to `day` rather than erroring: this is a presentation preference,
+  // and a typo in a query string should not deny an operator their traffic. The rollup reports what
+  // it actually grouped by, so a caller can always tell what it got.
+  const groupRaw = params.get("group");
+  const group = groupRaw === "week" || groupRaw === "month" ? groupRaw : "day";
 
   // The document index the rollup needs: a document's portal is not in the summary, and cannot be
   // (a document can move between portals — ADR-017 makes identity `(portal, filename)`).
@@ -327,6 +332,7 @@ async function getViewsHandler(request: Request, env: Env): Promise<Response> {
       to,
       portal,
       doc,
+      group,
       recording,
       risk: syncRisk(summary, now.toISOString(), recording),
     }),

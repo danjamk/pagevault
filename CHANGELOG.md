@@ -7,6 +7,19 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **Choose the traffic window, and how it is bucketed.** The console's Traffic panel gains a range
+  picker — 1 week · 1 month · 3 months · YTD · 12 months — and daily / weekly / monthly grouping.
+  `pagevault views --group day|week|month` and the MCP `traffic` tool take the same thing, so all
+  three surfaces answer the same question the same way.
+
+  **A window reaching past 90 days is reported by month whatever you ask for**, and says so. Daily
+  buckets are compacted to monthly when they age out, and that is not reversible — so a 12-month
+  chart grouped "daily" cannot exist. Rather than quietly mixing thirty days of traffic into one
+  column beside single days at the same visual weight, the whole window degrades to months and the
+  panel explains why. `grouping.requested` and `grouping.effective` carry it in the API and MCP
+  output too, so a caller can always tell what it got. ([#218](../../issues/218))
+
 ## [0.40.0] — 2026-08-20
 
 The chart says what it is measuring.

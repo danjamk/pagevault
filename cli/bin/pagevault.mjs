@@ -1279,6 +1279,12 @@ async function views(flags) {
     if (flags.days) params.set("days", String(flags.days));
     if (flags.portal) params.set("portal", flags.portal);
     if (flags.doc) params.set("doc", flags.doc);
+    if (flags.group) {
+      if (!["day", "week", "month"].includes(flags.group)) {
+        throw new PvError(`--group must be day, week or month, got "${flags.group}".`);
+      }
+      params.set("group", flags.group);
+    }
     let rolled;
     try {
       rolled = await api(cfg, "GET", `/views/summary?${params}`);

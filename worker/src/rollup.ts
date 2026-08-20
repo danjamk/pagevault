@@ -86,10 +86,24 @@ export interface DayDocRollup {
  */
 export const MAX_DAY_DOCS = 3;
 
+/**
+ * How buckets are grouped for reporting.
+ *
+ * 🔴 `week` and `day` are only ever available inside the daily-retention horizon. Past it the stored
+ * buckets ARE months (`compact()`, ADR-023 decision 2) and the day detail is gone, not hidden — so a
+ * window reaching back that far cannot be grouped finer than the data it is made of. See
+ * `Rollup.grouping` for what happens when a caller asks anyway.
+ */
+export type Grouping = "day" | "week" | "month";
+
 export interface DayRollup {
-  /** `YYYY-MM-DD`, or `YYYY-MM` once the bucket has been compacted past 90 days. */
+  /**
+   * `YYYY-MM-DD` for a day, `YYYY-MM` for a month, and the **Monday** of the week (as `YYYY-MM-DD`)
+   * for a week. Monday rather than an ISO `YYYY-Www` label because it still sorts lexicographically
+   * and a reader can tell what it means without knowing ISO 8601 week numbering.
+   */
   key: string;
-  granularity: "day" | "month";
+  granularity: Grouping;
   views: number;
   /**
    * The surface split for THIS bucket.
@@ -132,6 +146,20 @@ export interface Rollup {
   byDoc: DocRollup[];
   byPortal: PortalRollup[];
   byDay: DayRollup[];
+  /**
+   * What grouping was asked for, and what `byDay` is actually in.
+   *
+   * 🔴 They differ when the window reaches past the daily-retention horizon and the caller asked for
+   * `day` or `week`. Those buckets are already months and cannot be split back, so honouring the
+   * request literally would return a chart that is daily at one end and monthly at the other — 30
+   * days of traffic sitting in one column beside single days, at the same visual weight. That is a
+   * misleading picture, not a narrow one.
+   *
+   * So the whole window degrades to `month` and says so here. Every caller must surface the
+   * difference: silently returning something other than what was asked for is the ADR-024 failure
+   * mode, and a formatter that ignores this field reintroduces it.
+   */
+  grouping: { requested: Grouping; effective: Grouping };
   byReferrer: ReferrerRollup[];
   /**
    * What the numbers above cannot honour, stated rather than implied. A report whose provenance is
@@ -164,6 +192,8 @@ export interface RollupOptions {
   portal?: string | undefined;
   /** Restrict to one document. */
   doc?: string | undefined;
+  /** How to group `byDay`. Defaults to `day` — the finest the stored data can offer. */
+  group?: Grouping | undefined;
   /** Does the deployment bind Analytics Engine? Required, for the reason `statsFor` gives. */
   recording: boolean;
   /** The sync-risk verdict, computed by the caller against the same summary. */
@@ -172,6 +202,31 @@ export interface RollupOptions {
 
 /** Sum a bucket's three surfaces. */
 const bucketViews = (b: Bucket): number => (b.link ?? 0) + (b.pub ?? 0) + (b.portal ?? 0);
+
+/**
+ * The Monday of the week a `YYYY-MM-DD` key falls in, as `YYYY-MM-DD`.
+ *
+ * All UTC. The stored keys were produced in UTC (`dayKey`), so doing the arithmetic in local time
+ * would shift a view across a week boundary for anyone west of Greenwich — a silent off-by-one that
+ * only appears for some readers, which is the worst kind.
+ */
+function weekStart(key: string): string {
+  const ms = Date.parse(`${key}T00:00:00.000Z`);
+  if (!Number.isFinite(ms)) return key;
+  const dow = new Date(ms).getUTCDay(); // 0 = Sunday
+  // ISO weeks start Monday, so Sunday is 6 days into its week, not 0.
+  const backToMonday = (dow + 6) % 7;
+  return new Date(ms - backToMonday * 86_400_000).toISOString().slice(0, 10);
+}
+
+/** Which grouped bucket a stored key belongs to, and what that bucket is. */
+function groupKey(key: string, granularity: Grouping, group: Grouping): { key: string; granularity: Grouping } {
+  // Already a month: it cannot be split back into anything finer, whatever was asked for.
+  if (granularity === "month") return { key, granularity: "month" };
+  if (group === "month") return { key: key.slice(0, 7), granularity: "month" };
+  if (group === "week") return { key: weekStart(key), granularity: "week" };
+  return { key, granularity: "day" };
+}
 
 /**
  * Does a bucket key fall inside the window?
@@ -284,6 +339,10 @@ export function rollup(
       byDoc: [],
       byPortal: [],
       byDay: [],
+      // Nothing was measured, so nothing was degraded — report the request honoured rather than a
+      // default, or a never-synced deployment shows a "grouped by month instead" note about an
+      // empty chart.
+      grouping: { requested: opts.group ?? "day", effective: opts.group ?? "day" },
       byReferrer: [],
       scope: { ...scope },
     };
@@ -361,6 +420,38 @@ export function rollup(
     }
   }
 
+  // Grouping, decided from the DATA rather than the calendar. The daily-retention horizon moves
+  // with every sync, so "does this window already contain a month bucket" is the only reliable
+  // question — a fixed 90-days-ago cutoff would disagree with the summary the moment a sync ran
+  // late. Asking for day or week across one of those degrades the whole window; `Rollup.grouping`
+  // carries the reason.
+  const requested: Grouping = opts.group ?? "day";
+  const hasMonthly = [...days.values()].some((d) => d.granularity === "month");
+  const effective: Grouping = requested !== "month" && hasMonthly ? "month" : requested;
+
+  const grouped = new Map<
+    string,
+    { granularity: Grouping; views: number; surfaces: SurfaceCounts; docs: Map<string, DayDocRollup> }
+  >();
+  for (const [key, v] of days) {
+    const g = groupKey(key, v.granularity, effective);
+    let into = grouped.get(g.key);
+    if (!into) {
+      into = { granularity: g.granularity, views: 0, surfaces: emptySurfaces(), docs: new Map() };
+      grouped.set(g.key, into);
+    }
+    into.views += v.views;
+    into.surfaces.link += v.surfaces.link;
+    into.surfaces.public += v.surfaces.public;
+    into.surfaces.portal += v.surfaces.portal;
+    // A document can appear in several source buckets that merge into one — sum, never replace.
+    for (const [id, d] of v.docs) {
+      const seen = into.docs.get(id);
+      if (seen) seen.views += d.views;
+      else into.docs.set(id, { ...d });
+    }
+  }
+
   // Referrers are per portal and all-time — the window cannot narrow them, only `--portal` can.
   const referrers = new Map<string, number>();
   for (const [portal, hosts] of Object.entries(summary.portals)) {
@@ -385,7 +476,8 @@ export function rollup(
     byPortal: [...portals.values()].sort((a, b) => b.views - a.views || a.portal.localeCompare(b.portal)),
     // Chronological, not by size: this one is a series, and a sparkline sorted by magnitude is a bar
     // chart with the x-axis thrown away.
-    byDay: [...days.entries()]
+    grouping: { requested, effective },
+    byDay: [...grouped.entries()]
       .map(([key, v]) => ({
         key,
         granularity: v.granularity,
