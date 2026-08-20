@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.41.0] — 2026-08-20
+
+Ask the traffic panel a narrower question.
+
 ### Added
 - **Choose the traffic window, and how it is bucketed.** The console's Traffic panel gains a range
   picker — 1 week · 1 month · 3 months · YTD · 12 months — and daily / weekly / monthly grouping.
@@ -1936,7 +1940,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.40.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.41.0...HEAD
+[0.41.0]: https://github.com/danjamk/pagevault/compare/v0.40.0...v0.41.0
 [0.40.0]: https://github.com/danjamk/pagevault/compare/v0.39.1...v0.40.0
 [0.39.1]: https://github.com/danjamk/pagevault/compare/v0.39.0...v0.39.1
 [0.39.0]: https://github.com/danjamk/pagevault/compare/v0.38.2...v0.39.0
