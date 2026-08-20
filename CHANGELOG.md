@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.40.0] — 2026-08-20
+
+The chart says what it is measuring.
+
 ### Added
 - **The traffic chart says what it is measuring.** The by-day chart gains a y-axis, gridlines, and a
   value above each column when the window is short enough to read them. Hovering a column now names
@@ -1919,7 +1923,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.39.1...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.40.0...HEAD
+[0.40.0]: https://github.com/danjamk/pagevault/compare/v0.39.1...v0.40.0
 [0.39.1]: https://github.com/danjamk/pagevault/compare/v0.39.0...v0.39.1
 [0.39.0]: https://github.com/danjamk/pagevault/compare/v0.38.2...v0.39.0
 [0.38.2]: https://github.com/danjamk/pagevault/compare/v0.38.1...v0.38.2
