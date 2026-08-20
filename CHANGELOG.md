@@ -7,6 +7,18 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Changed
+- **A new install no longer asks your clients to log in every day.** `init` created both Access
+  applications with a 24-hour session — Cloudflare's own default, mirrored without an argument
+  behind it — so every viewer got an email code daily to reread a document already shared with them.
+  New deployments now get 30 days on `/v` and 7 days on `/admin`. The two differ because they guard
+  different things: `/v` is a client reading a deliverable that `canView()` already scoped to them,
+  while the console can publish, revoke and change membership. A longer session does not weaken
+  revocation — removing someone from the viewers group locks them out immediately, whatever their
+  session length. **Existing deployments are unaffected:** the session length is set when the Access
+  app is created, so change it in the Cloudflare dashboard, and `provision` now prints the live
+  value when it differs from what this build would create. ([#216](../../issues/216))
+
 ## [0.39.1] — 2026-08-14
 
 The honest answer still has to render.

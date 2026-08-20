@@ -31,6 +31,29 @@ const CONFIG_OUT = generatedConfigPath();
 const LEGACY_STATE = ".pagevault-provision.json";
 const GROUP_NAME = "pagevault-viewers";
 
+/**
+ * How long an Access login lasts before the viewer is asked for another email code (#216).
+ *
+ * The two apps get different answers because ADR-001 made them different applications, and they
+ * guard different things. `/v` is a client reading a deliverable that `canView()` already scoped to
+ * them — an OTP email every day is friction on someone else's time and buys almost nothing. `/admin`
+ * can publish, revoke, rotate public links and change portal membership; a week is comfortable on
+ * your own machine without leaving the console open indefinitely.
+ *
+ * 🔴 A long session does NOT weaken revocation. Membership is the gate: removing someone from the
+ * viewers group locks them out immediately, whatever their session length. What a longer session
+ * actually costs is a lost or borrowed device staying logged in longer.
+ *
+ * Cloudflare takes a Go duration string and documents one month as the ceiling, so 720h (30 days)
+ * is used rather than 730h to stay unambiguously inside it. 24h was never a decision here — it was
+ * Cloudflare's own default, mirrored without an argument behind it.
+ *
+ * 🔴 These apply at CREATE only. An existing deployment keeps whatever it was provisioned with —
+ * see `ensureApp` and #216.
+ */
+const SESSION_DURATION_DOCS = "720h";
+const SESSION_DURATION_ADMIN = "168h";
+
 // `resolveAnalytics` moved to context.mjs in #190 so rung 1–2 can reach it without importing this
 // module. Re-exported because it is part of this module's tested surface and the ADR-024 work
 // (#187) refers to it here.
@@ -316,11 +339,17 @@ export async function provisionAccess(opts = {}) {
 
   // --- The two Access apps (ADR-001): path-scoped, per-audience --------------
 
-  async function ensureApp({ label, domain, policyName, include }) {
+  async function ensureApp({ label, domain, policyName, include, sessionDuration }) {
     const apps = (await cfApi(`/accounts/${account.id}/access/apps`)).result ?? [];
     const existing = apps.find((a) => a.domain === domain);
     if (existing) {
       ok(`Access app exists: ${label} ${c.dim(domain)}`);
+      // 🔴 `session_duration` is sent on CREATE only. An app that already exists keeps whatever it
+      // was made with, so changing the constants above does nothing for a live deployment — the
+      // dashboard is currently the only way to move it. See #216 for making this reconcilable.
+      if (existing.session_duration && existing.session_duration !== sessionDuration) {
+        info(`  Session duration is ${existing.session_duration} (this build would create it at ${sessionDuration}).`);
+      }
       return existing.aud;
     }
     const r = await cfApi(`/accounts/${account.id}/access/apps`, {
@@ -329,7 +358,7 @@ export async function provisionAccess(opts = {}) {
         name: `PageVault — ${label}`,
         type: "self_hosted",
         domain,
-        session_duration: "24h",
+        session_duration: sessionDuration,
         // The AUD comes back on this response, so nothing is copied out of a dashboard.
         policies: [{ name: policyName, decision: "allow", include, precedence: 1 }],
       }),
@@ -344,12 +373,14 @@ export async function provisionAccess(opts = {}) {
     domain: `${host}/v`,
     policyName: "pagevault-viewers",
     include: [{ group: { id: group.id } }],
+    sessionDuration: SESSION_DURATION_DOCS,
   });
   const audAdmin = await ensureApp({
     label: "console",
     domain: `${host}/admin`,
     policyName: "pagevault-owner",
     include: [{ email: { email: ownerEmail } }],
+    sessionDuration: SESSION_DURATION_ADMIN,
   });
 
   // --- The scoped runtime token (#24) ----------------------------------------
