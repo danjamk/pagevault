@@ -358,6 +358,18 @@ function page(session: string, nonce: string, owner: string, version: string, de
   .tstat span { color:var(--pv-muted); font-size:12px; }
   .tsec { margin:18px 0; }
   .tsec .ulabel { display:block; margin-bottom:8px; }
+  /* Range + grouping (#218). Segmented buttons, not a <select>: the current choice stays visible
+     without opening anything, which matters because the degraded-to-monthly note points at it. */
+  .tctl { display:flex; gap:10px; flex-wrap:wrap; margin:14px 0 4px; }
+  /* Lowercase and un-tracked, so it reads as a qualifier on the label rather than part of it. */
+  .uwarn { text-transform:none; letter-spacing:0; font-weight:400; color:var(--pv-warn); }
+  .seg { display:inline-flex; border:1px solid var(--pv-border); border-radius:7px; overflow:hidden; }
+  .segb { font:inherit; font-size:12px; padding:4px 10px; cursor:pointer;
+          background:var(--pv-surface); color:var(--pv-muted); border:0;
+          border-right:1px solid var(--pv-border); }
+  .seg .segb:last-child { border-right:0; }
+  .segb:hover { background:var(--pv-accent-soft); color:var(--pv-ink); }
+  .segb.on { background:var(--pv-accent); color:#fff; }
   /* The chart is a flex row: a fixed y-axis column, then the plot. The axis is HTML rather than
      <text> inside the SVG because the plot uses preserveAspectRatio="none" to fill the panel, which
      would stretch any glyph in it out of shape. Nothing here is positioned, so nothing needs an
@@ -796,7 +808,36 @@ ${ICON_DEFS}
   // slugs are alphanumerics and hyphens — so no real portal can ever collide with it. A deployment
   // with a portal literally called "traffic" is not hypothetical; this one has "traffic-check".
   const TRAFFIC_VIEW = "!traffic";
-  let TRAFFIC = null;      // the rollup, cached until Refresh
+  let TRAFFIC = null;      // the rollup, cached until Refresh or a control changes
+
+  // Traffic window and grouping (#218). The ranges the operator asked for, no custom range.
+  // "ytd" is computed rather than fixed, so it means the same thing in January and December.
+  const TRANGES = [
+    { id: "7", label: "1 week", days: 7 },
+    { id: "30", label: "1 month", days: 30 },
+    { id: "90", label: "3 months", days: 90 },
+    { id: "ytd", label: "YTD", days: 0 },
+    { id: "365", label: "12 months", days: 365 },
+  ];
+  const TGROUPS = [
+    { id: "day", label: "Daily" },
+    { id: "week", label: "Weekly" },
+    { id: "month", label: "Monthly" },
+  ];
+  let TRANGE = "30";
+  let TGROUP = "day";
+
+  function rangeDays() {
+    if (TRANGE !== "ytd") {
+      const r = TRANGES.filter((x) => x.id === TRANGE)[0];
+      return r ? r.days : 30;
+    }
+    // Whole days since 1 January, inclusive of today. UTC throughout, matching the stored keys.
+    const now = new Date();
+    const jan1 = Date.UTC(now.getUTCFullYear(), 0, 1);
+    const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    return Math.max(1, Math.round((today - jan1) / 86400000) + 1);
+  }
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const ico = (id, cls) => '<svg class="icon' + (cls ? ' ' + cls : '') + '" aria-hidden="true"><use href="#i-' + id + '"/></svg>';
 
@@ -1260,9 +1301,30 @@ ${ICON_DEFS}
           '<span class="tnum">' + s.views + '</span></div>').join("")
       : '<p class="dhint">Nothing recorded a referrer.</p>';
 
+    // The range and grouping controls. Buttons rather than a <select>, so the current choice is
+    // visible without opening anything — and so the degraded state below has something to point at.
+    const seg = (name, items, current) =>
+      '<div class="seg" role="group" data-seg="' + name + '">' +
+        items.map((o) =>
+          '<button type="button" class="segb' + (o.id === current ? " on" : "") + '" data-' + name + '="' +
+          esc(o.id) + '"' + (o.id === current ? ' aria-current="true"' : "") + '>' + esc(o.label) + '</button>').join("") +
+      '</div>';
+
+    // 🔴 Say it when the answer is not the question. The rollup degrades day/week to month once the
+    // window reaches a compacted bucket, and a chart that silently changed meaning is exactly the
+    // failure ADR-024 names. The note explains the 90-day rule to someone who has never read an ADR.
+    const g = r.grouping || { requested: TGROUP, effective: TGROUP };
+    const degraded = g.requested !== g.effective
+      ? '<p class="dhint">Showing <b>monthly</b> — you asked for ' + esc(g.requested === "week" ? "weekly" : "daily") +
+        ', but this window reaches past the 90 days of daily detail PageVault keeps. Older buckets ' +
+        'were compacted to months when they aged out, and cannot be split back.</p>'
+      : "";
+
     app.innerHTML =
       '<div class="card"><div class="chead"><h2>Traffic</h2>' +
       '<span class="fresh" title="These numbers come from the last sync, not from live traffic">As of ' + esc(when) + '</span></div>' +
+      '<div class="tctl">' + seg("trange", TRANGES, TRANGE) + seg("tgroup", TGROUPS, TGROUP) + '</div>' +
+      degraded +
       banner +
       '<div class="tgrid">' +
         '<div class="tstat"><b>' + r.total.views + '</b><span>views</span></div>' +
@@ -1274,9 +1336,13 @@ ${ICON_DEFS}
       '<div class="tsec"><span class="ulabel">Top pages</span>' + docRows + '</div>' +
       // All-time, and it has to say so: referrers carry no date (ADR-023), so labelling them with
       // the window above would be a wrong number rather than a narrow one.
-      '<div class="tsec"><span class="ulabel">Sources</span>' + refRows +
-        '<p class="dhint">All-time per portal &mdash; referrers carry no date, so the window above does not apply. ' +
-        'The linking host only, never the page it linked from.</p></div>' +
+      // 🔴 The caveat has to be louder now that a RANGE PICKER sits at the top of this panel. Before
+      // #218 the window was fixed and invisible; a visible control actively invites the reader to
+      // believe it applies to everything below it, and here it does not — referrers carry no date at
+      // all (ADR-023 §5). Hence the label saying so, not just the footnote.
+      '<div class="tsec"><span class="ulabel">Sources <span class="uwarn">&mdash; all-time, ignores the range</span></span>' + refRows +
+        '<p class="dhint">Referrers are stored per portal with no date, so the range above does not narrow them ' +
+        'and never can. The linking host only, never the page it linked from.</p></div>' +
       '<p class="dhint">Not live. These are the numbers from your last ' + sync + ' &mdash; the Worker cannot read ' +
       'Analytics Engine itself, so nothing here updates on its own.</p>' +
       '</div>';
@@ -1364,7 +1430,7 @@ ${ICON_DEFS}
     renderMain();
     if (TRAFFIC) return;
     try {
-      TRAFFIC = await api("/api/views/summary?days=30");
+      TRAFFIC = await api("/api/views/summary?days=" + rangeDays() + "&group=" + encodeURIComponent(TGROUP));
     } catch (e) {
       // A deployment older than this console has no such route. Say which it is — "failed to load"
       // sends someone looking at their network tab for a problem that is a version number.
@@ -1568,6 +1634,27 @@ ${ICON_DEFS}
   }
 
   const patch = (id, body) => api("/api/docs/" + encodeURIComponent(id), { method: "PATCH", body: JSON.stringify(body) });
+
+  // Traffic range / grouping (#218). Delegated, because renderTraffic replaces the whole panel on
+  // every change and directly-bound handlers would not survive it.
+  app.addEventListener("click", async (ev) => {
+    const rangeEl = ev.target.closest("[data-trange]");
+    const groupEl = ev.target.closest("[data-tgroup]");
+    if (!rangeEl && !groupEl) return;
+    ev.stopPropagation();
+
+    const nextRange = rangeEl ? rangeEl.dataset.trange : TRANGE;
+    const nextGroup = groupEl ? groupEl.dataset.tgroup : TGROUP;
+    if (nextRange === TRANGE && nextGroup === TGROUP) return;
+    TRANGE = nextRange;
+    TGROUP = nextGroup;
+
+    // 🔴 Drop the cache, or the panel re-renders the OLD window under the new label — a chart that
+    // says "12 months" over 30 days of data. Every control change is a new request by definition.
+    TRAFFIC = null;
+    renderMain();                       // paint the loading state with the new selection showing
+    await selectTraffic();
+  });
 
   app.addEventListener("click", async (ev) => {
     const actEl = ev.target.closest("[data-act]");

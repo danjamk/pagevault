@@ -608,7 +608,7 @@ export function formatRollup(r, c, { by = "doc" } = {}) {
     // numbers makes the reader do that work themselves.
     day: () =>
       r.byDay.map((d) => [
-        d.granularity === "month" ? `${d.key}    ${dim("(month)")}` : d.key,
+        d.granularity === "day" ? d.key : `${d.key}    ${dim(`(${d.granularity})`)}`,
         String(d.views),
         dim("▇".repeat(Math.max(1, Math.round((d.views / peak) * 24)))),
       ]),
@@ -662,6 +662,15 @@ export function formatRollup(r, c, { by = "doc" } = {}) {
     // Provenance, every time. A number whose source and staleness are unstated is the ADR-024
     // failure mode one domain over — it reads as current at exactly the moment it is not.
     dim(`Source: the stored summary, synced ${asOf}. Not live — run \`pagevault sync-views\` to refresh.`),
+    // Same rule as the referrer caveat above: when the answer is not the question, say so where the
+    // numbers are read. A degraded series under a "--group day" heading is a wrong label (#218).
+    ...(r.grouping && r.grouping.requested !== r.grouping.effective
+      ? [
+          dim(
+            `Grouped by ${r.grouping.effective}, not ${r.grouping.requested}: this window reaches past the 90 days of daily detail, and older buckets were compacted.`,
+          ),
+        ]
+      : []),
     ...(r.scope.monthlyBuckets
       ? [dim(`${plural(r.scope.monthlyBuckets, "bucket")} older than 90 days are monthly, so those views carry no day.`)]
       : []),

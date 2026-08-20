@@ -1092,6 +1092,14 @@ function buildServer(env: Env, origin: string): McpServer {
       ].join("\n"),
       inputSchema: {
         days: z.number().int().positive().max(3650).optional().describe("Window, in days. Default 30."),
+        group: z
+          .enum(["day", "week", "month"])
+          .optional()
+          .describe(
+            "How to bucket the by-day series. Default day. A window reaching past the 90 days of " +
+              "daily detail PageVault keeps is reported by month whatever is asked for — those buckets " +
+              "were compacted and cannot be split back. `grouping` in the output says what you got.",
+          ),
         portal: z.string().optional().describe("One client. Omit for the whole deployment."),
         doc: z.string().optional().describe("One document id. Referrers are omitted — they aggregate per portal."),
         by: z
@@ -1123,6 +1131,9 @@ function buildServer(env: Env, origin: string): McpServer {
           }),
         ),
         byReferrer: z.array(z.object({ host: z.string(), views: z.number() })),
+        // 🔴 Report what the series is ACTUALLY bucketed by, not what was asked for. A model that
+        // reads `byDay` without this will describe monthly totals as daily ones.
+        grouping: z.object({ requested: z.string(), effective: z.string() }),
         syncRisk: z.object({ state: z.string(), uncapturedDays: z.number(), daysUntilLoss: z.number().nullable() }),
       },
     },
@@ -1167,6 +1178,7 @@ function buildServer(env: Env, origin: string): McpServer {
           to,
           portal: args.portal,
           doc: args.doc,
+          group: args.group,
           recording,
           risk: syncRisk(summary, now.toISOString(), recording),
         });
@@ -1225,6 +1237,13 @@ function buildServer(env: Env, origin: string): McpServer {
             // Referrers carry no date (ADR-023 §5), so they ignore the window. Said in the prose
             // because a model that repeats a windowed heading over them states a wrong number.
             ...(lead === "referrer" ? ["Referrer counts are ALL-TIME per portal and ignore the window above."] : []),
+            // Same reasoning as the referrer line: a model told "by day" that receives months will
+            // describe monthly totals as daily ones unless the prose contradicts the heading.
+            ...(r.grouping.requested !== r.grouping.effective
+              ? [
+                  `NOTE: grouped by ${r.grouping.effective}, not ${r.grouping.requested} — this window reaches past the 90 days of daily detail PageVault keeps, and older buckets were compacted to months.`,
+                ]
+              : []),
             // #165's warning belongs wherever the numbers are read, not only in the CLI.
             ...(risky
               ? [
@@ -1410,6 +1429,7 @@ const trafficOut = (r: Rollup) => ({
   byDoc: r.byDoc.map((d) => ({ id: d.id, portal: d.portal, title: d.title, views: d.views })),
   byPortal: r.byPortal.map((p) => ({ portal: p.portal, views: p.views, docs: p.docs })),
   byDay: r.byDay,
+  grouping: r.grouping,
   byReferrer: r.byReferrer,
   syncRisk: { state: r.risk.state, uncapturedDays: r.risk.uncapturedDays, daysUntilLoss: r.risk.daysUntilLoss },
 });

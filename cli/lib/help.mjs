@@ -389,7 +389,7 @@ reports that there is no group, which is expected.
   ),
 
   views: H(
-    "Usage: pagevault views [--by doc|portal|day|surface|referrer] [--days 30] [--portal s] [--doc id] [--live] [--who] [--json]",
+    "Usage: pagevault views [--by doc|portal|day|surface|referrer] [--days 30] [--group day|week|month] [--portal s] [--doc id] [--live] [--who] [--json]",
     `
 How much your documents were read. Reads the summary stored in your deployment — so it needs only
 your PageVault bearer, no Cloudflare token and no account id, and it works from any machine that
@@ -402,6 +402,10 @@ current as your last \`pagevault sync-views\` — the output says when that was,
   --by <what>      doc (default) · portal · day · surface · referrer. One table each. \`day\` draws the shape,
                    which is the question a column of numbers makes you answer yourself.
   --days <n>       window for the document counts. Default 30.
+  --group <how>    how \`--by day\` buckets the series: day (default) · week · month. A window
+                   reaching past the 90 days of daily detail is reported by MONTH whatever you ask
+                   for — those buckets were compacted when they aged out and cannot be split back.
+                   The output says so when it happens.
   --portal <slug>  one client.
   --doc <id>       one document. Referrers are dropped, not narrowed: they aggregate per portal
                    (ADR-023), so printing them under one document would be a wrong answer.

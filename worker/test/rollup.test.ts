@@ -193,6 +193,84 @@ describe("what a single bucket says about itself", () => {
   });
 });
 
+describe("grouping — and what the 90-day wall does to it (#218)", () => {
+  // The window here is inside the daily-retention horizon, so every stored bucket is a day and any
+  // grouping is available. 08-07 (4), 08-08 (8), 08-09 (3) — all in the same ISO week, which starts
+  // Monday 2026-08-03.
+
+  it("defaults to day, one bucket per stored key", () => {
+    const r = roll();
+    expect(r.grouping).toEqual({ requested: "day", effective: "day" });
+    expect(r.byDay.map((d) => d.key)).toEqual(["2026-08-07", "2026-08-08", "2026-08-09"]);
+  });
+
+  it("groups into weeks, keyed by the Monday", () => {
+    const r = roll(SUMMARY, DOCS, { group: "week" });
+    expect(r.grouping).toEqual({ requested: "week", effective: "week" });
+    expect(r.byDay).toHaveLength(1);
+    expect(r.byDay[0]!.key).toBe("2026-08-03");
+    expect(r.byDay[0]!.granularity).toBe("week");
+    expect(r.byDay[0]!.views).toBe(15);
+  });
+
+  it("merges the surface split and the top documents across the merged buckets", () => {
+    const r = roll(SUMMARY, DOCS, { group: "week" });
+    const w = r.byDay[0]!;
+    // 08-07 portal:4 · 08-08 link:2 pub:1 + pub:5 · 08-09 portal:3
+    expect(w.surfaces).toEqual({ link: 2, public: 6, portal: 7 });
+    // The roadmap appears in TWO source buckets (4 on 08-07, 3 on 08-08) and must be summed, not
+    // replaced — 7 total, which makes it the busiest of the week.
+    expect(w.topDocs.map((t) => [t.title, t.views])).toEqual([
+      ["2027 Platform Roadmap", 7],
+      ["Technical Primer", 5],
+      ["Globex Brief", 3],
+    ]);
+  });
+
+  it("groups into months", () => {
+    const r = roll(SUMMARY, DOCS, { group: "month" });
+    expect(r.byDay.map((d) => [d.key, d.views])).toEqual([["2026-08", 15]]);
+    expect(r.byDay[0]!.granularity).toBe("month");
+  });
+
+  it("🔴 a window containing a compacted month degrades day and week to month, and says so", () => {
+    // 2026-04 is a month bucket — the day detail is gone, not hidden. Honouring `day` literally
+    // would put 30 days of April in one column beside single days at the same visual weight.
+    const wide = { from: "2026-04-01", to: "2026-08-09" };
+    const r = roll(SUMMARY, DOCS, { ...wide, group: "day" });
+
+    expect(r.grouping).toEqual({ requested: "day", effective: "month" });
+    expect(r.byDay.map((d) => d.key)).toEqual(["2026-04", "2026-08"]);
+    expect(r.byDay.every((d) => d.granularity === "month")).toBe(true);
+
+    const asWeek = roll(SUMMARY, DOCS, { ...wide, group: "week" });
+    expect(asWeek.grouping).toEqual({ requested: "week", effective: "month" });
+  });
+
+  it("asking for month over that same window is not a degradation", () => {
+    const r = roll(SUMMARY, DOCS, { from: "2026-04-01", to: "2026-08-09", group: "month" });
+    expect(r.grouping).toEqual({ requested: "month", effective: "month" });
+  });
+
+  it("🔴 grouping never changes the totals — only how they are bucketed", () => {
+    const day = roll(SUMMARY, DOCS, { group: "day" });
+    const week = roll(SUMMARY, DOCS, { group: "week" });
+    const month = roll(SUMMARY, DOCS, { group: "month" });
+    const sum = (r: typeof day) => r.byDay.reduce((n, d) => n + d.views, 0);
+
+    expect(sum(day)).toBe(day.total.views);
+    expect(sum(week)).toBe(day.total.views);
+    expect(sum(month)).toBe(day.total.views);
+    expect(week.total).toEqual(day.total);
+  });
+
+  it("a never-synced deployment reports the grouping it was asked for, not a degradation", () => {
+    // Otherwise an empty chart carries a "shown by month instead" note about nothing at all.
+    const r = rollup(null, DOCS, { ...WINDOW, group: "week", recording: true, risk: OK_RISK });
+    expect(r.grouping).toEqual({ requested: "week", effective: "week" });
+  });
+});
+
 describe("what the shape cannot honour, stated rather than implied", () => {
   it("🔴 owner is null when unknown and a number when known — never zero for unknown", () => {
     const r = roll();
