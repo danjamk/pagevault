@@ -98,6 +98,12 @@ export interface Bucket {
 /** A document's history: sparse buckets keyed by date. Never deleted by a sync. */
 export type DocHistory = Record<string, Bucket>;
 
+/**
+ * One portal's referrer hosts, keyed by day (or month, once compacted) and then by host.
+ * `""` is direct — a measurement, not a gap. See `ViewSummary.refs`.
+ */
+export type PortalRefs = Record<string, Record<string, number>>;
+
 export interface Coverage {
   /** Inclusive, `YYYY-MM-DD`. */
   from: string;
@@ -110,8 +116,29 @@ export interface ViewSummary {
   /** The window the last sync could see. Every sync declares its own; see `mergeSummary`. */
   coverage: Coverage;
   docs: Record<string, DocHistory>;
-  /** Referrer hosts per portal. `""` is direct. Not per document per day — see ADR-023 §5. */
+  /**
+   * Referrer hosts per portal, undated.
+   *
+   * 🔴 Superseded by `refs`, and kept only so an older Worker reading a newer payload — or a newer
+   * Worker reading a summary written before `refs` existed — still has something to report. It is
+   * NOT all-time despite what every surface used to call it: `mergeSummary` replaces a portal's map
+   * wholesale from each payload, and a payload only ever covers the sync window, so this holds the
+   * last sync's window and silently drops anything older. That is the bug `refs` fixes.
+   */
   portals: Record<string, Record<string, number>>;
+  /**
+   * Referrer hosts per portal PER DAY — the dated series.
+   *
+   * Optional, and added WITHOUT a `v` bump on purpose. Bumping would make `mergeSummary` treat every
+   * stored summary as foreign and discard the document history it exists to keep, which is a far
+   * worse outcome than one field being absent for a sync. Absent means "written before this
+   * existed", never "no referrers".
+   *
+   * ADR-023 §5 rules out per-document-per-day on size — host cardinality × document × day. This is
+   * host × PORTAL × day: portals are one per client, buckets are sparse, and it compacts to months
+   * on the same 90-day horizon as everything else. Different product, same rule.
+   */
+  refs?: Record<string, PortalRefs>;
 }
 
 /** The shape MCP and `/api` report, derived from buckets. Unchanged by v2, deliberately. */
@@ -320,13 +347,60 @@ export function mergeSummary(stored: ViewSummary | null, incoming: ViewSummary):
       syncedAt: incoming.syncedAt,
       coverage: widen(base?.coverage, incoming.coverage),
       docs,
-      // Referrers are a rollup with no time dimension, so there is no window to clear by. The
-      // payload's view of a portal replaces the stored one; a portal it does not mention keeps
-      // what it had. Per ADR-023 §5 these answer "where is traffic coming from", not "when".
+      // The undated map has no window to clear by, so the payload's view of a portal replaces the
+      // stored one. That is why it is NOT all-time and loses anything older than the sync window —
+      // kept only as the fallback for a deployment with no dated series yet. `refs` is the fix.
       portals: { ...(base?.portals ?? {}), ...incoming.portals },
+      // The dated series merges by WINDOW, exactly like document history: drop what this payload
+      // claims to know about, keep everything outside it, then add. That is what makes referrers
+      // accumulate across syncs instead of being overwritten by the newest window.
+      ...mergedRefs(base, incoming),
     },
     incoming.syncedAt,
   );
+}
+
+/**
+ * Merge the dated referrer series, or omit the key entirely when neither side has one.
+ *
+ * Returned as a spreadable fragment rather than a value so an absent series stays absent —
+ * `refs: undefined` would serialize as a missing key anyway, but it would also defeat the
+ * `exactOptionalPropertyTypes` contract the rest of this file is written against.
+ */
+function mergedRefs(
+  base: ViewSummary | null,
+  incoming: ViewSummary,
+): { refs?: Record<string, PortalRefs> } {
+  if (!base?.refs && !incoming.refs) return {};
+  const { from, to } = incoming.coverage;
+  const out: Record<string, PortalRefs> = Object.create(null);
+
+  for (const [slug, byDay] of Object.entries(base?.refs ?? {})) {
+    const kept: PortalRefs = Object.create(null);
+    for (const [key, hosts] of Object.entries(byDay)) {
+      // Same rule and the same helper as document history: a monthly bucket overlapping the window
+      // is KEPT, because a payload speaking in days cannot restate a month it only partly covers.
+      if (!coveredByWindow(key, from, to)) kept[key] = hosts;
+    }
+    if (Object.keys(kept).length > 0) out[slug] = kept;
+  }
+
+  for (const [slug, byDay] of Object.entries(incoming.refs ?? {})) {
+    const target = out[slug] ?? (out[slug] = Object.create(null));
+    for (const [key, hosts] of Object.entries(byDay)) {
+      const existing = target[key];
+      if (!existing) {
+        target[key] = hosts;
+        continue;
+      }
+      const merged: Record<string, number> = { ...existing };
+      for (const [host, n] of Object.entries(hosts)) merged[host] = (merged[host] ?? 0) + n;
+      target[key] = merged;
+    }
+    if (Object.keys(target).length === 0) delete out[slug];
+  }
+
+  return Object.keys(out).length > 0 ? { refs: out } : {};
 }
 
 /**
@@ -407,7 +481,27 @@ export function compact(summary: ViewSummary, now: string): ViewSummary {
     if (Object.keys(next).length > 0) docs[id] = next;
   }
 
-  return { ...summary, docs };
+  if (!summary.refs) return { ...summary, docs };
+
+  // The dated referrer series ages on the SAME horizon as document history. Letting it stay daily
+  // forever is how host cardinality × day eventually stops fitting in one KV value — the exact
+  // failure ADR-023 §5 names, arriving by a slower road.
+  const refs: Record<string, PortalRefs> = Object.create(null);
+  for (const [slug, byDay] of Object.entries(summary.refs)) {
+    const next: PortalRefs = Object.create(null);
+    for (const [key, hosts] of Object.entries(byDay)) {
+      const target = key.length !== 10 || key >= cutoff ? key : key.slice(0, 7);
+      const existing = next[target];
+      if (!existing) {
+        next[target] = { ...hosts };
+        continue;
+      }
+      for (const [host, n] of Object.entries(hosts)) existing[host] = (existing[host] ?? 0) + n;
+    }
+    if (Object.keys(next).length > 0) refs[slug] = next;
+  }
+
+  return { ...summary, docs, refs };
 }
 
 /** `YYYY-MM-DD` for an epoch-ms instant, or "" when the input was not a date. */
@@ -580,8 +674,13 @@ export function parseViewSummary(body: unknown): ViewSummary {
   }
 
   const portals = parsePortals(body["portals"]);
+  const refs = parseRefs(body["refs"]);
 
   const summary: ViewSummary = { v: SUMMARY_VERSION, syncedAt, coverage, docs, portals };
+  // Only when present. An absent `refs` must stay absent rather than become an empty object: the
+  // rollup reads absence as "this deployment has not synced a dated series yet" and falls back to
+  // the undated `portals`, which an empty object would suppress.
+  if (Object.keys(refs).length > 0) summary.refs = refs;
 
   // Measured on the REBUILT object — the number that matters is what we would write, not what
   // arrived. Refusing beats storing a truncation: a summary quietly missing half a portal reports
@@ -621,6 +720,37 @@ function parseCoverage(raw: unknown): Coverage {
     throw new BadRequest("invalid_field", `"coverage.from" must not be after "coverage.to"`);
   }
   return { from: from as string, to: to as string };
+}
+
+/**
+ * Validate the dated referrer series. Same shape rules as `parsePortals`, one level deeper, and
+ * the bucket keys are checked with the SAME `isBucketKey` the document history uses — a referrer
+ * bucket and a document bucket compact on the same horizon and must agree on what a key looks like.
+ */
+function parseRefs(raw: unknown): Record<string, PortalRefs> {
+  const out: Record<string, PortalRefs> = Object.create(null);
+  if (raw === undefined || raw === null) return out;
+  if (!isRecord(raw)) throw new BadRequest("invalid_field", `"refs" must be an object keyed by portal slug`);
+
+  for (const [slug, days] of Object.entries(raw)) {
+    if (!isRecord(days)) throw new BadRequest("invalid_field", `refs["${slug}"] must be an object`);
+    const byDay: PortalRefs = Object.create(null);
+    for (const [key, hosts] of Object.entries(days)) {
+      if (!isBucketKey(key)) {
+        throw new BadRequest("invalid_field", `refs["${slug}"] key "${key}" must be YYYY-MM-DD or YYYY-MM`);
+      }
+      if (!isRecord(hosts)) throw new BadRequest("invalid_field", `refs["${slug}"]["${key}"] must be an object`);
+      const bucket: Record<string, number> = Object.create(null);
+      for (const [host, value] of Object.entries(hosts)) {
+        const n = count(value, `refs["${slug}"]["${key}"]["${host}"]`);
+        if (n > 0) bucket[host] = n;
+      }
+      // Sparse means sparse, exactly as for document buckets.
+      if (Object.keys(bucket).length > 0) byDay[key] = bucket;
+    }
+    if (Object.keys(byDay).length > 0) out[slug] = byDay;
+  }
+  return out;
 }
 
 function parsePortals(raw: unknown): Record<string, Record<string, number>> {

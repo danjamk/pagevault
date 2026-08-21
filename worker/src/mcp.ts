@@ -1128,12 +1128,17 @@ function buildServer(env: Env, origin: string): McpServer {
             views: z.number(),
             surfaces: z.object({ link: z.number(), public: z.number(), portal: z.number() }),
             topDocs: z.array(z.object({ id: z.string(), title: z.string(), views: z.number() })),
+            topReferrers: z.array(z.object({ host: z.string(), views: z.number() })),
+            direct: z.number(),
           }),
         ),
         byReferrer: z.array(z.object({ host: z.string(), views: z.number() })),
         // 🔴 Report what the series is ACTUALLY bucketed by, not what was asked for. A model that
         // reads `byDay` without this will describe monthly totals as daily ones.
         grouping: z.object({ requested: z.string(), effective: z.string() }),
+        // Likewise for referrers: `windowed` means byReferrer honours the window; `undated` means
+        // it does not, because this deployment has not synced a dated series yet.
+        referrerScope: z.string().describe("windowed | undated"),
         syncRisk: z.object({ state: z.string(), uncapturedDays: z.number(), daysUntilLoss: z.number().nullable() }),
       },
     },
@@ -1236,7 +1241,13 @@ function buildServer(env: Env, origin: string): McpServer {
             `As of the last sync, ${String(r.syncedAt).slice(0, 10)} — not live.`,
             // Referrers carry no date (ADR-023 §5), so they ignore the window. Said in the prose
             // because a model that repeats a windowed heading over them states a wrong number.
-            ...(lead === "referrer" ? ["Referrer counts are ALL-TIME per portal and ignore the window above."] : []),
+            // Only when it is actually true. Saying it unconditionally is what made this claim wrong
+            // for so long — the undated map was never all-time either, just the last sync's window.
+            ...(lead === "referrer" && r.scope.referrers === "undated"
+              ? [
+                  "Referrer counts here IGNORE the window: this deployment has not synced a dated referrer series yet, so these are whatever its last sync saw. Tell the operator to run `pagevault sync-views`.",
+                ]
+              : []),
             // Same reasoning as the referrer line: a model told "by day" that receives months will
             // describe monthly totals as daily ones unless the prose contradicts the heading.
             ...(r.grouping.requested !== r.grouping.effective
@@ -1431,6 +1442,7 @@ const trafficOut = (r: Rollup) => ({
   byDay: r.byDay,
   grouping: r.grouping,
   byReferrer: r.byReferrer,
+  referrerScope: r.scope.referrers,
   syncRisk: { state: r.risk.state, uncapturedDays: r.risk.uncapturedDays, daysUntilLoss: r.risk.daysUntilLoss },
 });
 

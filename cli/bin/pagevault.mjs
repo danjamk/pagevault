@@ -18,7 +18,7 @@ import { parseArgs, splitList, deriveTitle, sourceKindFor, truncate, table } fro
 import { applyPin, applyUnpin } from "../lib/pins.mjs";
 import { helpText, usageError } from "../lib/help.mjs";
 import { buildExport } from "../lib/export.mjs";
-import { formatReferrers, formatRollup, formatViews, plural, queryBuckets, queryReferrers, queryViews, summarizeReferrers, summarizeViews } from "../lib/views.mjs";
+import { formatReferrers, formatRollup, formatViews, plural, queryBuckets, queryReferrers, queryViews, summarizeReferrers, summarizeReferrersByDay, summarizeViews } from "../lib/views.mjs";
 
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
@@ -1395,7 +1395,10 @@ async function syncViews(flags) {
   let sources;
   try {
     result = await queryBuckets(creds, { days, limit, now: syncedAt });
-    sources = await queryReferrers(creds, { days, limit: 200 });
+    // Dated, for the series the Worker now stores per portal per day (#221). The limit is higher
+    // than the undated query's because the same hosts recur across days — 200 rows is a handful of
+    // sites, not a handful of site-days.
+    sources = await queryReferrers(creds, { days, limit: 2000, byDay: true });
   } catch (err) {
     throw new PvError(err.message);
   }
@@ -1411,6 +1414,10 @@ async function syncViews(flags) {
   // Where this machine does not hold a build record, `ownerEmail` is empty and the split is
   // ABSENT rather than guessed, which the Worker reads as "not measured" rather than as zero.
   const { summary, skipped } = summarizeViews(result, { syncedAt, knownIds, ownerEmail: ctx.ownerEmail ?? "" });
+  // Both shapes, deliberately. `refs` is what this Worker will use; `portals` keeps a Worker older
+  // than #221 reporting something it understands rather than an empty Sources panel. The undated
+  // one is derived from the same dated rows, so they cannot disagree.
+  summary.refs = summarizeReferrersByDay(sources);
   summary.portals = summarizeReferrers(sources);
 
   // `--reset` is the one named destructive path (ADR-023 §3). Append-only with no way out is how a

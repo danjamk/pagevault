@@ -61,6 +61,20 @@ const SELECT = [
 const REFERRER_SELECT = ["index1 AS portal", "blob6 AS referrer", "sum(_sample_interval) AS views"].join(", ");
 
 /**
+ * The sync's referrer query: the same rows, split by DAY (#221).
+ *
+ * `toDate(timestamp)` yields exactly the `YYYY-MM-DD` the summary uses as a bucket key — the same
+ * trick and the same reason as the document query above, so the two cannot disagree about what a
+ * day is.
+ */
+const REFERRER_DAY_SELECT = [
+  "index1 AS portal",
+  "blob6 AS referrer",
+  "toDate(timestamp) AS day",
+  "sum(_sample_interval) AS views",
+].join(", ");
+
+/**
  * The sync's query: the same rows, split by DAY (#161).
  *
  * `toDate(timestamp)` yields exactly the `YYYY-MM-DD` the summary uses as a bucket key, so there is
@@ -153,13 +167,17 @@ export async function queryReferrers(creds, opts = {}) {
   const where = [`timestamp > NOW() - INTERVAL '${days}' DAY`, "blob5 != ''"];
   if (opts.portal) where.push(`index1 = ${sqlString(opts.portal)}`);
 
+  // `byDay` splits the same rows per date, for the dated series the summary stores (#221). The
+  // undated form is still what `views --live` reads, where a single ranked table is the answer.
+  const byDay = opts.byDay === true;
+
   const parsed = await runQuery(
     creds,
     [
-      `SELECT ${REFERRER_SELECT}`,
+      `SELECT ${byDay ? REFERRER_DAY_SELECT : REFERRER_SELECT}`,
       `FROM ${DATASET}`,
       `WHERE ${where.join(" AND ")}`,
-      "GROUP BY portal, referrer",
+      byDay ? "GROUP BY portal, referrer, day" : "GROUP BY portal, referrer",
       "ORDER BY views DESC",
       `LIMIT ${Math.floor(limit)}`,
       "FORMAT JSON",
@@ -170,6 +188,7 @@ export async function queryReferrers(creds, opts = {}) {
     days,
     sources: (parsed.data ?? []).map((r) => ({
       portal: r.portal ?? "",
+      ...(byDay ? { day: String(r.day ?? "").slice(0, 10) } : {}),
       // null, not "": the reader labels it "direct", and a null cannot be mistaken for a host
       // whose name happens to be empty.
       referrer: r.referrer || null,
@@ -375,10 +394,34 @@ export function summarizeViews({ coverage, rows }, { syncedAt, knownIds = null, 
 const BUCKET_SURFACE = { link: "link", public: "pub", portal: "portal" };
 
 /**
- * Fold referrer rows into the summary's per-portal rollup (ADR-023 §5).
+ * Fold DATED referrer rows into the summary's per-portal-per-day series (#221).
  *
- * Portal granularity, never per document per day — host cardinality multiplied by document
- * multiplied by day is how one KV value stops fitting in one KV value.
+ * 🔴 Portal × day, never document × day. ADR-023 §5 rules the latter out on size — host cardinality
+ * multiplied by DOCUMENT multiplied by day is how one KV value stops fitting in one KV value. A
+ * portal is one per client, so dropping the document dimension is what makes the date affordable.
+ *
+ * Rows with no `day` are skipped rather than dated to today: a guessed date would merge into a
+ * bucket it does not belong to, and the merge is by window.
+ */
+export function summarizeReferrersByDay({ sources = [] } = {}) {
+  const refs = Object.create(null);
+  for (const s of sources) {
+    if (!s.portal || !s.views || !s.day) continue;
+    const byDay = (refs[s.portal] ??= Object.create(null));
+    const hosts = (byDay[s.day] ??= Object.create(null));
+    const host = s.referrer ?? "";
+    hosts[host] = (hosts[host] ?? 0) + s.views;
+  }
+  return refs;
+}
+
+/**
+ * Fold referrer rows into the summary's undated per-portal rollup.
+ *
+ * 🔴 Kept only as the fallback for a Worker that predates the dated series. This shape is NOT
+ * all-time: the Worker replaces a portal's map wholesale from each payload, and a payload only
+ * covers the sync window, so it holds the last window and drops anything older. `refs` is the fix,
+ * and both are written so an older Worker still gets something it understands.
  */
 export function summarizeReferrers({ sources = [] } = {}) {
   const portals = Object.create(null);
@@ -657,7 +700,13 @@ export function formatRollup(r, c, { by = "doc" } = {}) {
     // (ADR-023 §5), so a windowed heading over them would be a wrong number rather than a narrow
     // one. This is the breakdown where the mistake would be easiest to make.
     ...(by === "referrer"
-      ? [dim(`${plural(r.total.views, "view")} in the window; the sources above are ALL-TIME and ignore it.`)]
+      ? [
+          dim(
+            r.scope.referrers === "windowed"
+              ? `${plural(r.total.views, "view")} in the window; the sources above cover the same window.`
+              : `${plural(r.total.views, "view")} in the window; the sources above IGNORE it — no dated referrer series has been synced yet.`,
+          ),
+        ]
       : [dim(`${plural(r.total.views, "view")} across ${plural(r.byDoc.filter((d) => d.views > 0).length, "document")}, ${window}.`)]),
     // Provenance, every time. A number whose source and staleness are unstated is the ADR-024
     // failure mode one domain over — it reads as current at exactly the moment it is not.
