@@ -338,7 +338,7 @@ const rollupFixture = (over = {}) => ({
     { key: "2026-08-09", granularity: "day", views: 3 },
   ],
   byReferrer: [{ host: "", views: 6 }, { host: "news.ycombinator.com", views: 4 }],
-  scope: { referrers: "all-time", monthlyBuckets: 1, portalIndex: "not-stored" },
+  scope: { referrers: "undated", monthlyBuckets: 1, portalIndex: "not-stored" },
   ...over,
 });
 
@@ -390,13 +390,23 @@ test("--by day draws the shape, and labels a compacted bucket as a month", () =>
   assert.equal(Math.max(...bars), bars[0], "the month at 30 views is the peak");
 });
 
-test("🔴 --by referrer refuses to imply the window applies to it", () => {
-  // Referrers are stored per portal with no date (ADR-023 §5). A windowed heading over them would
-  // be a wrong number rather than a narrow one — and this is the breakdown where that is easiest.
+test("🔴 --by referrer refuses to imply the window applies to an UNDATED series", () => {
+  // A summary with no dated referrer series has nothing to filter on, so a windowed heading over it
+  // would be a wrong number rather than a narrow one — the breakdown where that is easiest to do.
   const out = formatRollup(rollupFixture(), null, { by: "referrer" });
-  assert.match(out, /ALL-TIME and ignore it/);
-  assert.doesNotMatch(out, /2026-08-01 to 2026-08-09\./, "no windowed total beside all-time sources");
+  assert.match(out, /IGNORE it/);
+  assert.doesNotMatch(out, /2026-08-01 to 2026-08-09\./, "no windowed total beside undated sources");
   assert.match(out, /6 +direct/, "an absent referrer is 'direct' — measured, not missing");
+});
+
+test("🔴 --by referrer drops the warning once the series IS dated", () => {
+  // Conditional, not decoration. Printing it unconditionally is how the old ALL-TIME claim stayed
+  // wrong about its own data for so long (#221).
+  const r = rollupFixture();
+  r.scope.referrers = "windowed";
+  const out = formatRollup(r, null, { by: "referrer" });
+  assert.doesNotMatch(out, /IGNORE it/);
+  assert.match(out, /cover the same window/);
 });
 
 test("the sources block rides along under --by doc only", () => {

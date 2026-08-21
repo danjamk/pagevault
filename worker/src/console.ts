@@ -1210,26 +1210,44 @@ ${ICON_DEFS}
     // work at all, and a tooltip that silently lands at 0,0 is worse than the browser's own.
     // Native <title> also reaches a screen reader for free.
     //
-    // 🔴 No referrers here, and there is no version of this that can have them. Referrer hosts are
-    // stored per portal, ALL-TIME, with no date dimension at all (ADR-023 §5, so a host can never
-    // be correlated with a reader on a given day). Putting byReferrer in a per-day tooltip would
-    // render the identical list under every bar — an all-time total wearing a day's label. The
-    // surface split below is the honest per-day answer to the same question.
+    // Referrers ARE per-bucket now (#221). They were not before, and the reason recorded here used
+    // to be a privacy one — that was wrong: ADR-023 §5 rules out per-DOCUMENT-per-day referrers on
+    // SIZE, and says nothing about withholding dates. Per-portal-per-day is a much smaller thing and
+    // is what the summary stores, so a column can name the sites that drove it.
+    //
+    // Direct is excluded from the list and shown as its own line: for a link pasted into Slack or an
+    // email it is usually the majority, and it is not a site anyone can act on.
     function dayTip(d) {
       const lines = [d.key + (d.granularity === "month" ? " (whole month)" : "") + " — " + d.views +
         (d.views === 1 ? " view" : " views")];
 
+      // 🔴 Each door named by what it MEANS, never by its raw key. "6 public" was read as
+      // "direct" by the first person who saw it, and reasonably: the word public already means a
+      // /p/ capability link everywhere else in this console (Share link, "Anyone with this link"),
+      // while here it meant the /pub/ listed page — one word, two doors. The CLI and MCP have
+      // always glossed these; the tooltip is the surface that forgot to.
+      //
+      // Direct is a different axis entirely and lives under Sources: it means no referrer header.
+      // A view can be on a public portal page AND direct at the same time.
       const s = d.surfaces || { link: 0, public: 0, portal: 0 };
       const parts = [];
-      if (s.link) parts.push(s.link + " via link");
-      if (s.public) parts.push(s.public + " public");
-      if (s.portal) parts.push(s.portal + " portal");
-      if (parts.length) lines.push(parts.join(" · "));
+      if (s.portal) parts.push("  " + s.portal + " signed in");
+      if (s.link) parts.push("  " + s.link + " by shared link, no login");
+      if (s.public) parts.push("  " + s.public + " on a public portal page");
+      if (parts.length) lines.push(parts.join("\\n"));
 
       if (d.topDocs && d.topDocs.length) {
         lines.push("");
         lines.push(d.topDocs.length === 1 ? "Page" : "Top pages");
         d.topDocs.forEach((t) => { lines.push("  " + t.title + " — " + t.views); });
+      }
+
+      const refs = d.topReferrers || [];
+      if (refs.length || d.direct) {
+        lines.push("");
+        lines.push("Came from");
+        refs.forEach((x) => { lines.push("  " + x.host + " — " + x.views); });
+        if (d.direct) lines.push("  direct (no referrer) — " + d.direct);
       }
       // 🔴 Double-escaped on purpose. This string sits inside the TypeScript template literal that
       // BUILDS the console script, so a single backslash-n is resolved by tsc into a real newline —
@@ -1295,6 +1313,10 @@ ${ICON_DEFS}
           '<span class="tnum">' + p.views + '</span></div>').join("")
       : '<p class="dhint">No portal recorded traffic in this window.</p>';
 
+    // scope.referrers is the rollup's own statement about what it just returned — never inferred
+    // from whether the list happens to be empty. (No backticks in here: this comment ships inside
+    // the template literal that builds the console script, and one would end it early.)
+    const windowedRefs = r.scope && r.scope.referrers === "windowed";
     const refRows = r.byReferrer.length
       ? r.byReferrer.slice(0, 8).map((s) =>
           '<div class="trow"><span class="tname">' + (s.host ? esc(s.host) : '<em>direct</em>') + '</span>' +
@@ -1336,13 +1358,16 @@ ${ICON_DEFS}
       '<div class="tsec"><span class="ulabel">Top pages</span>' + docRows + '</div>' +
       // All-time, and it has to say so: referrers carry no date (ADR-023), so labelling them with
       // the window above would be a wrong number rather than a narrow one.
-      // 🔴 The caveat has to be louder now that a RANGE PICKER sits at the top of this panel. Before
-      // #218 the window was fixed and invisible; a visible control actively invites the reader to
-      // believe it applies to everything below it, and here it does not — referrers carry no date at
-      // all (ADR-023 §5). Hence the label saying so, not just the footnote.
-      '<div class="tsec"><span class="ulabel">Sources <span class="uwarn">&mdash; all-time, ignores the range</span></span>' + refRows +
-        '<p class="dhint">Referrers are stored per portal with no date, so the range above does not narrow them ' +
-        'and never can. The linking host only, never the page it linked from.</p></div>' +
+      // Sources now honours the range — but only on a deployment that has synced the dated series.
+      // The two states must look different: a windowed list and an undated one are different claims,
+      // and showing the second under a range picker is the mislabel this section used to carry.
+      '<div class="tsec"><span class="ulabel">Sources' +
+        (windowedRefs ? "" : ' <span class="uwarn">&mdash; not yet windowed</span>') + '</span>' + refRows +
+        (windowedRefs
+          ? '<p class="dhint">In the selected range. The linking host only, never the page it linked from.</p>'
+          : '<p class="dhint">These ignore the range: this deployment has not yet synced dated referrers. ' +
+            'Run <code class="cmd">pagevault sync-views</code> and they will follow the range like everything else.</p>') +
+      '</div>' +
       '<p class="dhint">Not live. These are the numbers from your last ' + sync + ' &mdash; the Worker cannot read ' +
       'Analytics Engine itself, so nothing here updates on its own.</p>' +
       '</div>';

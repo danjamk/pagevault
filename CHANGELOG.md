@@ -7,6 +7,27 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Added
+- **Traffic now shows where readers came from, in the period you are looking at.** Referrer hosts
+  are stored per portal **per day**, so the Sources list narrows to the selected range and every
+  column in the chart names the top linking sites that drove it — put a link on LinkedIn and you can
+  see the week it landed. Direct is reported apart from the ranked sites rather than competing with
+  them: for a link pasted into Slack or an email it is usually the majority, and it is not a site
+  anyone can act on. ([#221](../../issues/221))
+
+### Fixed
+- **Referrer counts were never "all-time", despite four surfaces saying so.** Each sync replaced a
+  portal's referrer map wholesale, and a sync only covers its own window — so the numbers were
+  whatever the last sync saw, and everything older was silently dropped on every run. The dated
+  series merges by window like document history, so referrers accumulate instead of being
+  overwritten. Until you run `pagevault sync-views` once, the console, CLI and MCP all say plainly
+  that their referrer numbers ignore the range rather than implying they honour it.
+  ([#221](../../issues/221))
+- **The traffic tooltip named each door by its raw key.** "6 public" was read as "direct" — fairly,
+  since *public link* means a `/p/` capability URL everywhere else in the console, while there it
+  meant a `/pub/` listed page. Each door is now named by what it means: signed in · by shared link,
+  no login · on a public portal page. Direct is a different axis entirely and lives under Sources.
+
 ## [0.41.0] — 2026-08-20
 
 Ask the traffic panel a narrower question.

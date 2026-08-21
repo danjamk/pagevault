@@ -161,6 +161,27 @@ arrives rather than discarding what does.
 Referrers are aggregated at **portal** granularity, not per document per day. Host cardinality
 multiplied by document multiplied by day is how one KV value stops fitting in one KV value.
 
+> **Amended 2026-08-21 (#221): per portal *per day*.**
+>
+> The sentence above rules out `host × document × day` on size. It was read for a while as ruling
+> out the date itself, and a privacy rationale that appears nowhere in this ADR — "so a host can
+> never be correlated with a reader on a specific day" — propagated into code comments and an issue
+> body. That was never the decision. The privacy argument in this section is about the referrer
+> **path**, which is still discarded before anything is written.
+>
+> `host × PORTAL × day` is a different and much smaller product: a portal is one per client rather
+> than one per document, buckets are sparse, and the series compacts to months on the same 90-day
+> horizon as document history. It fits, and it is what `ViewSummary.refs` now stores.
+>
+> Per-**document**-per-day referrers remain out of scope, on the original size grounds.
+>
+> This also fixes a defect the undated shape was hiding. `mergeSummary` replaces a portal's referrer
+> map wholesale from each payload, and a payload only ever covers the sync window — so the undated
+> map held *the last sync's window* while every surface labelled it ALL-TIME, and silently dropped
+> anything older on each sync. The dated series merges by window like document history, so referrers
+> accumulate instead. `ViewSummary.portals` is kept, unchanged, purely so a Worker older than this
+> amendment still has something it understands.
+
 **6. The portal index is a recorded event, and it carries no identity.**
 
 `/pub/{slug}` and `/v/{slug}` landing views are recorded, so portal traffic is measurable without

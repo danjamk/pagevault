@@ -47,6 +47,25 @@ const SUMMARY: ViewSummary = {
   },
 };
 
+/**
+ * The same summary with the DATED referrer series (#221) — per portal, per day.
+ *
+ * 08-08 and 08-09 deliberately have different linking sites, so a per-bucket list that wrongly
+ * returned the window's total would show identical rows under both and fail loudly.
+ */
+const DATED: ViewSummary = {
+  ...SUMMARY,
+  refs: {
+    acme: {
+      "2026-08-08": { "linkedin.com": 5, "news.ycombinator.com": 2, "": 3 },
+      "2026-08-09": { "t.co": 4 },
+      // Outside WINDOW — proves the window actually narrows the dated series.
+      "2026-05-02": { "linkedin.com": 99 },
+    },
+    globex: { "2026-08-09": { "": 2 } },
+  },
+};
+
 const DOCS: DocIndexEntry[] = [
   { id: "acme-roadmap", portal: "acme", title: "2027 Platform Roadmap", createdAt: "2026-03-01T00:00:00.000Z" },
   { id: "acme-primer", portal: "acme", title: "Technical Primer", createdAt: "2026-03-01T00:00:00.000Z" },
@@ -182,14 +201,26 @@ describe("what a single bucket says about itself", () => {
     expect(d.topDocs.map((t) => t.title)).toEqual(["Doc A", "Doc B", "Doc C"]);
   });
 
-  it("🔴 a bucket never carries referrers — they have no date to be narrowed by", () => {
-    // ADR-023 §5 stores referrer hosts per portal, all-time, precisely so a host cannot be
-    // correlated with a reader on a given day. Attaching byReferrer to a bucket would render an
-    // all-time total under a day's label. The surface split above is the honest substitute, and
-    // this test exists so nobody "improves" the tooltip by reaching for the wrong field.
-    const d = roll().byDay.find((x) => x.key === "2026-08-08")!;
-    expect(Object.keys(d).sort()).toEqual(["granularity", "key", "surfaces", "topDocs", "views"]);
-    expect(roll().scope.referrers).toBe("all-time");
+  it("names the linking sites for that bucket, direct excluded and reported apart", () => {
+    const d = roll(DATED).byDay.find((x) => x.key === "2026-08-08")!;
+    expect(d.topReferrers.map((x) => [x.host, x.views])).toEqual([
+      ["linkedin.com", 5],
+      ["news.ycombinator.com", 2],
+    ]);
+    // Direct is a real measurement and usually the largest single source — but it is not a site,
+    // so it gets its own field rather than a slot in the ranking.
+    expect(d.direct).toBe(3);
+    expect(d.topReferrers.some((x) => x.host === "")).toBe(false);
+  });
+
+  it("🔴 a bucket's referrers are its own, not the window's", () => {
+    // The whole point of the dated series. 08-09 has a different linking site from 08-08, and a
+    // per-bucket list that returned the window's total would show the same rows under every column.
+    const r = roll(DATED);
+    const a = r.byDay.find((x) => x.key === "2026-08-08")!;
+    const b = r.byDay.find((x) => x.key === "2026-08-09")!;
+    expect(a.topReferrers.map((x) => x.host)).toEqual(["linkedin.com", "news.ycombinator.com"]);
+    expect(b.topReferrers.map((x) => x.host)).toEqual(["t.co"]);
   });
 });
 
@@ -271,6 +302,61 @@ describe("grouping — and what the 90-day wall does to it (#218)", () => {
   });
 });
 
+describe("dated referrers narrow to the window (#221)", () => {
+  it("reports the window's linking sites, and says the numbers are windowed", () => {
+    const r = roll(DATED);
+    expect(r.scope.referrers).toBe("windowed");
+    // Views descending, ties by host. Direct ("") is 3 from acme + 2 from globex, and it stays in
+    // this list — Sources is where an operator wants to see how much traffic arrived with no
+    // referrer at all. It is only excluded from the per-bucket `topReferrers` ranking.
+    expect(r.byReferrer.map((x) => [x.host, x.views])).toEqual([
+      ["", 5],
+      ["linkedin.com", 5],
+      ["t.co", 4],
+      ["news.ycombinator.com", 2],
+    ]);
+  });
+
+  it("🔴 excludes a bucket outside the window — the thing the undated map could not do", () => {
+    // 2026-05-02 carries 99 linkedin views. If the window were ignored, linkedin would dominate.
+    const r = roll(DATED);
+    expect(r.byReferrer.find((x) => x.host === "linkedin.com")!.views).toBe(5);
+
+    const wide = roll(DATED, DOCS, { from: "2026-04-01", to: "2026-08-09" });
+    expect(wide.byReferrer.find((x) => x.host === "linkedin.com")!.views).toBe(104);
+  });
+
+  it("narrows by portal as well as by date", () => {
+    const r = roll(DATED, DOCS, { portal: "globex" });
+    expect(r.byReferrer.map((x) => x.host)).toEqual([""]);
+  });
+
+  it("🔴 a document filter suppresses referrers entirely, dated or not", () => {
+    // They aggregate at portal granularity. Printing a portal's linking sites beside one document's
+    // numbers would read as that document's — a wrong answer rather than a coarse one.
+    const r = roll(DATED, DOCS, { doc: "acme-roadmap" });
+    expect(r.byReferrer).toEqual([]);
+  });
+
+  it("weekly grouping merges each bucket's referrers", () => {
+    const w = roll(DATED, DOCS, { group: "week" }).byDay[0]!;
+    expect(w.key).toBe("2026-08-03");
+    expect(w.topReferrers.map((x) => [x.host, x.views])).toEqual([
+      ["linkedin.com", 5],
+      ["t.co", 4],
+      ["news.ycombinator.com", 2],
+    ]);
+    expect(w.direct).toBe(5);
+  });
+
+  it("a summary with no dated series still reports, and flags itself as undated", () => {
+    const r = roll(SUMMARY);
+    expect(r.scope.referrers).toBe("undated");
+    expect(r.byReferrer.length).toBeGreaterThan(0);
+    expect(r.byDay.every((d) => d.topReferrers.length === 0 && d.direct === 0)).toBe(true);
+  });
+});
+
 describe("what the shape cannot honour, stated rather than implied", () => {
   it("🔴 owner is null when unknown and a number when known — never zero for unknown", () => {
     const r = roll();
@@ -297,11 +383,12 @@ describe("what the shape cannot honour, stated rather than implied", () => {
     expect(r.byDoc.find((d) => d.id === "acme-primer")!.lastViewedAt).toBe("2026-04-01T00:00:00.000Z");
   });
 
-  it("🔴 referrers ignore the window, and the report says so", () => {
-    // Stored per portal, all-time (ADR-023 §5), so a date filter cannot narrow them. A caller that
-    // assumed otherwise would label an all-time figure "last 7 days".
+  it("🔴 an undated summary's referrers ignore the window, and the report says so", () => {
+    // A summary written before the dated series exists has only the legacy per-portal map, which
+    // has no date to filter on. The report must SAY that rather than let a caller label it with the
+    // window — the mislabel this scope field exists to prevent.
     const narrow = roll(SUMMARY, DOCS, { from: "2026-08-09", to: "2026-08-09" });
-    expect(narrow.scope.referrers).toBe("all-time");
+    expect(narrow.scope.referrers).toBe("undated");
     expect(narrow.byReferrer.find((x) => x.host === "news.ycombinator.com")!.views).toBe(4);
     expect(narrow.byReferrer[0]!.host).toBe(""); // direct leads, 6 + 2
     expect(narrow.byReferrer[0]!.views).toBe(8);

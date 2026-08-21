@@ -116,7 +116,23 @@ export interface DayRollup {
   surfaces: SurfaceCounts;
   /** The busiest documents in this bucket, largest first, capped at `MAX_DAY_DOCS`. */
   topDocs: DayDocRollup[];
+  /**
+   * The busiest LINKING SITES for this bucket, largest first, capped at `MAX_DAY_REFERRERS`.
+   *
+   * Direct is excluded here and reported separately as `direct` — for a `/p/` link pasted into
+   * Slack or an email, direct is usually the majority, and letting it take a slot would crowd out
+   * the only rows that answer "did the LinkedIn post work".
+   *
+   * Empty on a deployment whose summary predates the dated series (`ViewSummary.refs`), which is
+   * not the same as "nothing linked here" — see `Rollup.scope.referrers`.
+   */
+  topReferrers: ReferrerRollup[];
+  /** Views in this bucket with no referrer at all. Absent from `topReferrers` by design. */
+  direct: number;
 }
+
+/** How many linking sites a bucket names. Tooltip-sized, for the same reason as `MAX_DAY_DOCS`. */
+export const MAX_DAY_REFERRERS = 3;
 
 export interface ReferrerRollup {
   /** The linking host. `""` is direct — kept as the empty string; naming it is the formatter's job. */
@@ -167,12 +183,19 @@ export interface Rollup {
    */
   scope: {
     /**
-     * 🔴 Referrers are stored per portal, all-time — NOT per day (ADR-023 §5, which chose that so a
-     * referrer host can never be correlated with a specific reader on a specific day). So
-     * `byReferrer` ignores the window, and every caller must say so. Filtering by `portal` still
-     * works; filtering by date does not.
+     * Where the referrer numbers came from, because the two answer different questions.
+     *
+     * `windowed` — from the dated series, narrowed to this window like everything else.
+     * `undated` — this deployment has not synced a dated series yet, so `byReferrer` comes from the
+     *   legacy per-portal map and **ignores the window**. That map is also not all-time: each sync
+     *   replaces it wholesale from its own window, so it holds the last sync's window and has
+     *   silently dropped anything older. Every caller must say which of these it is showing.
+     *
+     * 🔴 ADR-023 §5 rules out per-DOCUMENT-per-day referrers on size grounds. Per-portal-per-day is
+     * a different and much smaller thing, and is what the dated series stores. The older claim that
+     * dates were withheld for correlation reasons was never in the ADR.
      */
-     referrers: "all-time";
+    referrers: "windowed" | "undated";
     /** Buckets in the window that are monthly, so their views cannot be attributed to a day. */
     monthlyBuckets: number;
     /**
@@ -325,7 +348,7 @@ export function rollup(
 ): Rollup {
   const { from, to, recording, risk } = opts;
   const window: Window = { from, to };
-  const scope = { referrers: "all-time", monthlyBuckets: 0, portalIndex: "not-stored" } as const;
+  const scope = { referrers: "undated", monthlyBuckets: 0, portalIndex: "not-stored" } as const;
 
   if (!summary) {
     return {
@@ -420,6 +443,41 @@ export function rollup(
     }
   }
 
+  // Referrers. The dated series is narrowed to the window like everything else; a deployment that
+  // has not synced one yet falls back to the undated map, which ignores the window and says so.
+  //
+  // 🔴 A document filter still suppresses them entirely, dated or not. Referrers aggregate at
+  // PORTAL granularity, so reporting a portal's linking sites beside one document's numbers would
+  // read as that document's — a wrong answer rather than a coarse one.
+  const referrers = new Map<string, number>();
+  const refsByBucket = new Map<string, Map<string, number>>();
+  const dated = summary.refs && Object.keys(summary.refs).length > 0;
+  const referrerScope: "windowed" | "undated" = dated ? "windowed" : "undated";
+
+  if (!opts.doc) {
+    if (dated) {
+      for (const [portal, byDay] of Object.entries(summary.refs ?? {})) {
+        if (opts.portal && portal !== opts.portal) continue;
+        for (const [key, hosts] of Object.entries(byDay)) {
+          if (!inWindow(key, from, to)) continue;
+          const bucket = refsByBucket.get(key) ?? new Map<string, number>();
+          for (const [host, views] of Object.entries(hosts)) {
+            referrers.set(host, (referrers.get(host) ?? 0) + views);
+            bucket.set(host, (bucket.get(host) ?? 0) + views);
+          }
+          refsByBucket.set(key, bucket);
+        }
+      }
+    } else {
+      for (const [portal, hosts] of Object.entries(summary.portals)) {
+        if (opts.portal && portal !== opts.portal) continue;
+        for (const [host, views] of Object.entries(hosts)) {
+          referrers.set(host, (referrers.get(host) ?? 0) + views);
+        }
+      }
+    }
+  }
+
   // Grouping, decided from the DATA rather than the calendar. The daily-retention horizon moves
   // with every sync, so "does this window already contain a month bucket" is the only reliable
   // question — a fixed 90-days-ago cutoff would disagree with the summary the moment a sync ran
@@ -431,13 +489,26 @@ export function rollup(
 
   const grouped = new Map<
     string,
-    { granularity: Grouping; views: number; surfaces: SurfaceCounts; docs: Map<string, DayDocRollup> }
+    {
+      granularity: Grouping;
+      views: number;
+      surfaces: SurfaceCounts;
+      docs: Map<string, DayDocRollup>;
+      refs: Map<string, number>;
+    }
   >();
+  const emptyGroup = (granularity: Grouping) => ({
+    granularity,
+    views: 0,
+    surfaces: emptySurfaces(),
+    docs: new Map<string, DayDocRollup>(),
+    refs: new Map<string, number>(),
+  });
   for (const [key, v] of days) {
     const g = groupKey(key, v.granularity, effective);
     let into = grouped.get(g.key);
     if (!into) {
-      into = { granularity: g.granularity, views: 0, surfaces: emptySurfaces(), docs: new Map() };
+      into = emptyGroup(g.granularity);
       grouped.set(g.key, into);
     }
     into.views += v.views;
@@ -452,17 +523,19 @@ export function rollup(
     }
   }
 
-  // Referrers are per portal and all-time — the window cannot narrow them, only `--portal` can.
-  const referrers = new Map<string, number>();
-  for (const [portal, hosts] of Object.entries(summary.portals)) {
-    if (opts.portal && portal !== opts.portal) continue;
-    // A document filter cannot narrow a portal-level aggregate. Reporting the portal's referrers
-    // beside one document's numbers would read as that document's, so there is nothing to report.
-    if (opts.doc) continue;
-    for (const [host, views] of Object.entries(hosts)) {
-      referrers.set(host, (referrers.get(host) ?? 0) + views);
+  // Referrer buckets ride the SAME regrouping, so a weekly column names the sites that drove that
+  // week. Keyed independently of `days` because a portal-index landing produces a referrer with no
+  // document view behind it — folding these through `days` would silently drop those dates.
+  for (const [key, hosts] of refsByBucket) {
+    const g = groupKey(key, key.length === 7 ? "month" : "day", effective);
+    let into = grouped.get(g.key);
+    if (!into) {
+      into = emptyGroup(g.granularity);
+      grouped.set(g.key, into);
     }
+    for (const [host, n] of hosts) into.refs.set(host, (into.refs.get(host) ?? 0) + n);
   }
+
 
   return {
     window,
@@ -486,11 +559,19 @@ export function rollup(
         topDocs: [...v.docs.values()]
           .sort((a, b) => b.views - a.views || a.title.localeCompare(b.title))
           .slice(0, MAX_DAY_DOCS),
+        // Direct is pulled out rather than ranked: for a link pasted into a chat or an email it is
+        // usually the largest single "source", and it is not a site anyone can act on.
+        topReferrers: [...v.refs.entries()]
+          .filter(([host]) => host !== "")
+          .map(([host, views]) => ({ host, views }))
+          .sort((a, b) => b.views - a.views || a.host.localeCompare(b.host))
+          .slice(0, MAX_DAY_REFERRERS),
+        direct: v.refs.get("") ?? 0,
       }))
       .sort((a, b) => a.key.localeCompare(b.key)),
     byReferrer: [...referrers.entries()]
       .map(([host, views]) => ({ host, views }))
       .sort((a, b) => b.views - a.views || a.host.localeCompare(b.host)),
-    scope: { ...scope, monthlyBuckets },
+    scope: { ...scope, referrers: referrerScope, monthlyBuckets },
   };
 }

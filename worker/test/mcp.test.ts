@@ -1097,11 +1097,22 @@ describe("/mcp — traffic (#163)", () => {
   const SYNCED = "2026-07-30T09:00:00.000Z";
   const today = new Date().toISOString().slice(0, 10);
 
-  const sync = (docs: Record<string, unknown>, portals: Record<string, unknown> = {}) =>
+  const sync = (
+    docs: Record<string, unknown>,
+    portals: Record<string, unknown> = {},
+    refs?: Record<string, unknown>,
+  ) =>
     SELF.fetch(`${HOST}/api/views/summary`, {
       method: "POST",
       headers: { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ v: 2, syncedAt: SYNCED, coverage: { from: "2026-05-01", to: today }, docs, portals }),
+      body: JSON.stringify({
+        v: 2,
+        syncedAt: SYNCED,
+        coverage: { from: "2026-05-01", to: today },
+        docs,
+        portals,
+        ...(refs ? { refs } : {}),
+      }),
     });
 
   async function publishBackdated(title: string): Promise<string> {
@@ -1166,14 +1177,29 @@ describe("/mcp — traffic (#163)", () => {
     expect(structured["total"]).toMatchObject({ surfaces: { link: 0, public: 0, portal: 4 } });
   });
 
-  it("--by referrer says the counts ignore the window", async () => {
-    // Referrers carry no date (ADR-023 §5). A model repeating a windowed heading over them would
-    // state a wrong number.
+  it("🔴 --by referrer warns when the counts ignore the window", async () => {
+    // An UNDATED summary — the legacy per-portal map, with no date to filter on. A model repeating
+    // a windowed heading over these would state a wrong number, so the prose has to contradict it.
     const id = await publishBackdated("Referred");
     await sync({ [id]: { [today]: { link: 1 } } }, { default: { "t.co": 9 } });
 
     const { text } = await callToolFull("traffic", { by: "referrer" });
-    expect(text).toContain("ALL-TIME");
+    expect(text).toContain("IGNORE the window");
+    expect(text).toContain("t.co: 9");
+  });
+
+  it("🔴 and says nothing of the sort once a dated series exists", async () => {
+    // The warning is conditional, not decoration. Emitting it unconditionally is how the old
+    // "ALL-TIME" claim survived so long being wrong about its own data (#221).
+    const id = await publishBackdated("Referred");
+    await sync(
+      { [id]: { [today]: { link: 1 } } },
+      { default: { "t.co": 9 } },
+      { default: { [today]: { "t.co": 9 } } },
+    );
+
+    const { text } = await callToolFull("traffic", { by: "referrer" });
+    expect(text).not.toContain("IGNORE the window");
     expect(text).toContain("t.co: 9");
   });
 
