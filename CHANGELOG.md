@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.42.0] — 2026-08-21
+
+Where your readers came from, in the period you are looking at.
+
 ### Added
 - **Traffic now shows where readers came from, in the period you are looking at.** Referrer hosts
   are stored per portal **per day**, so the Sources list narrows to the selected range and every
@@ -1961,7 +1965,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.41.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.42.0...HEAD
+[0.42.0]: https://github.com/danjamk/pagevault/compare/v0.41.0...v0.42.0
 [0.41.0]: https://github.com/danjamk/pagevault/compare/v0.40.0...v0.41.0
 [0.40.0]: https://github.com/danjamk/pagevault/compare/v0.39.1...v0.40.0
 [0.39.1]: https://github.com/danjamk/pagevault/compare/v0.39.0...v0.39.1
