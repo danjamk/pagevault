@@ -3,7 +3,7 @@ import { SignJWT, type JWK, exportJWK, generateKeyPair } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetJWKSCache } from "../src/auth.js";
 import { handlePortalRoute, handlePublicPortalRoute } from "../src/portal.js";
-import { type DocMeta, type Portal, type PortalKind, putDoc, putMembers, putPortal } from "../src/store.js";
+import { type DocMeta, type Portal, type PortalKind, putDoc, putMembers, putMoved, putPortal } from "../src/store.js";
 import { SHARED_LINK_DESCRIPTION, SHARED_PORTAL_DESCRIPTION } from "../src/viewer.js";
 
 /**
@@ -138,6 +138,28 @@ describe("🔴 cross-portal isolation, as a URL", () => {
     // No auth at all. If the route trusted the URL's slug over the document's own portal,
     // this would return a client's private report to an anonymous visitor.
     const res = await SELF.fetch(`${HOST}/v/marketing/rp1111111111`);
+    expect(res.status).toBe(404);
+  });
+
+  it("⭐ the cross-portal guard covers the ACTION paths too, not just the page (#223)", async () => {
+    // Download / PDF / raw-HTML hang off the document's own address now, so every one of them
+    // is a new way to ask for a document through a portal that does not own it. They route
+    // through the same handler and hit the same check — this test is what keeps that true.
+    for (const query of ["?download=1", "?pdf=1", "?html=1"]) {
+      const res = await SELF.fetch(`${HOST}/v/acme/rp1111111111${query}`, { headers: await as(ACME_CFO) });
+      expect(res.status, `\`${query}\` must not cross portals`).toBe(404);
+    }
+  });
+
+  it("⭐⭐ a private document cannot be DOWNLOADED through a public portal's URL (#223)", async () => {
+    // The laundering case, one step worse: not the page, the bytes. No auth at all.
+    await putPortal(env, portal("marketing", "public", "Marketing"));
+    expect((await SELF.fetch(`${HOST}/v/marketing/rp1111111111?download=1`)).status).toBe(404);
+    expect((await SELF.fetch(`${HOST}/pub/marketing/rp1111111111?download=1`)).status).toBe(404);
+  });
+
+  it("a stranger cannot download a restricted portal's document (#223)", async () => {
+    const res = await SELF.fetch(`${HOST}/v/realplus/rp1111111111?download=1`, { headers: await as(STRANGER) });
     expect(res.status).toBe(404);
   });
 
@@ -703,5 +725,89 @@ describe("portal index views are recorded, and carry nobody", () => {
 
     expect(points).toHaveLength(1);
     expect(points[0]!.blobs).toEqual(["ac1111111111", "acme report ac1111111111", "portal", ACME_CFO, "document", "t.co"]);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+
+describe("surface actions on /v/ and /pub/ (#223)", () => {
+  /** An env whose ANALYTICS binding records rather than ships. */
+  function watched() {
+    const points: unknown[] = [];
+    return {
+      points,
+      env: { ...env, ANALYTICS: { writeDataPoint: (p: unknown) => void points.push(p) } } as unknown as typeof env,
+    };
+  }
+
+  beforeEach(seedTwoClients);
+
+  it("a member downloads their own portal's document", async () => {
+    const res = await SELF.fetch(`${HOST}/v/realplus/rp1111111111?download=1`, { headers: await as(REALPLUS_CTO) });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("application/octet-stream");
+    expect(res.headers.get("Content-Disposition")).toMatch(/^attachment;/);
+    expect(new TextDecoder().decode(await res.arrayBuffer())).toBe(HTML);
+  });
+
+  it("🔴 /pub/ gets the actions too — the third surface, not an afterthought (#223)", async () => {
+    // The shell serves three surfaces and this one is easy to forget: /pub/ and /v/ share a
+    // handler, so omitting it here would leave public-portal readers with dead buttons.
+    await putPortal(env, portal("marketing", "public", "Marketing"));
+    await seedDoc("marketing", "mk1111111111");
+
+    const res = await SELF.fetch(`${HOST}/pub/marketing/mk1111111111?download=1`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Disposition")).toMatch(/^attachment;/);
+  });
+
+  it("🔴 a download is not a read — it records NO view (ADR-023, #223)", async () => {
+    // The trap in moving these actions onto the document's address: `renderShell` records a
+    // view, so an action that fell through to the shell would inflate every document's count
+    // by however many times its reader pressed a button. The branch must come first.
+    const { points, env: e } = watched();
+
+    const res = await handlePortalRoute(
+      new Request(`${HOST}/v/realplus/rp1111111111?download=1`, { headers: await as(REALPLUS_CTO) }),
+      e,
+      "realplus",
+      "rp1111111111",
+    );
+
+    expect(res.status).toBe(200);
+    expect(points).toHaveLength(0);
+  });
+
+  it("the page itself still records exactly one view", async () => {
+    // The other half of the assertion above: this is not a test that view recording broke.
+    const { points, env: e } = watched();
+
+    const res = await handlePortalRoute(
+      new Request(`${HOST}/v/realplus/rp1111111111`, { headers: await as(REALPLUS_CTO) }),
+      e,
+      "realplus",
+      "rp1111111111",
+    );
+
+    expect(res.status).toBe(200);
+    expect(points).toHaveLength(1);
+  });
+
+  it("🔴 the rename forwarder carries the query, so a renamed document still downloads (#223)", async () => {
+    // A rename moves a document to a new id (ADR-017) and `moved:{old}` forwards the link.
+    // Dropping the search string would answer a download with the viewer page — a renamed
+    // document whose buttons quietly stop being buttons.
+    await seedDoc("realplus", "rp2222222222");
+    await putMoved(env, "rp9999999999", "rp2222222222");
+
+    const res = await SELF.fetch(`${HOST}/v/realplus/rp9999999999?download=1`, {
+      headers: await as(REALPLUS_CTO),
+      redirect: "manual",
+    });
+
+    expect(res.status).toBe(301);
+    expect(res.headers.get("Location")).toContain("/v/realplus/rp2222222222?download=1");
   });
 });

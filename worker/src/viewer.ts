@@ -4,7 +4,7 @@ import type { Env } from "./env.js";
 import { fingerprint, log } from "./log.js";
 import { renderPdf } from "./pdf.js";
 import type { DocMeta } from "./store.js";
-import { getDoc, getMeta, getRawSource } from "./store.js";
+import { getDoc, getRawSource } from "./store.js";
 import { ATTRIBUTION_CSS, THEME, attribution } from "./theme.js";
 
 /**
@@ -57,11 +57,20 @@ const DEFAULT_DOC_CSP = [
 export const docCsp = (env: Env): string => env.DOC_CSP?.trim() || DEFAULT_DOC_CSP;
 
 /**
- * `/render/{id}?cap={token}` — the artifact bytes, and nothing else.
+ * `/render/{id}?cap={token}` — the artifact bytes for the IFRAME, and nothing else.
  *
  * No Access application in front of it. The capability token IS the authorization: it
  * was minted by a shell that had already been through `canView`, it names this one
  * document, and it expires in minutes.
+ *
+ * 🔴 This route serves the iframe and nothing but the iframe (#223). It used to carry
+ * `?download=1` and `?pdf=1` as well, which meant every control in the shell replayed a
+ * ten-minute token for as long as the tab stayed open — and then failed silently, with a bare
+ * 404 the reader saw as a download that did nothing. Those actions now hang off the document's
+ * own address on each surface (`serveDocumentAction`), where the real authorization re-runs on
+ * every click. Do not add a third action back here: the capability exists because an Access
+ * redirect inside a sandboxed iframe is a broken experience, and that argument covers the frame
+ * only. Everything with a button attached to it has a surface to ask instead.
  */
 export async function handleRender(request: Request, env: Env, id: string): Promise<Response> {
   const cap = new URL(request.url).searchParams.get("cap");
@@ -85,80 +94,64 @@ export async function handleRender(request: Request, env: Env, id: string): Prom
   const source = await getDoc(env, id);
   if (source === null) return new Response("Not found", { status: 404 });
 
-  // Raw download: the same capability guard, but the bytes come back as a file, not a render.
-  //
-  // 🔴 ADR-007. Serving artifact HTML from our origin with `text/html` and no attachment
-  // disposition renders hostile markup in our document context — the exact thing the sandbox
-  // exists to prevent. `Content-Disposition: attachment` forces a download; `application/
-  // octet-stream` + `nosniff` means that even if a disposition were ever dropped, the browser
-  // still will not execute it as HTML here. Three independent reasons it cannot render inline.
-  const params = new URL(request.url).searchParams;
+  return artifactBytes(env, source);
+}
 
-  if (params.get("download") === "1") {
-    const meta = await getMeta(env, id);
-    // A markdown doc stores rendered HTML at `doc:` but downloads as the original `.md`
-    // (#46) — else the bytes would contradict the `.md` filename `rawFilename` produces.
-    // `?? source` covers HTML docs and any pre-#46 markdown that has no `raw:` companion.
-    const bytes = meta?.sourceKind === "markdown" ? ((await getRawSource(env, id)) ?? source) : source;
-    return new Response(bytes, {
-      headers: {
-        "Content-Type": "application/octet-stream",
-        "Content-Disposition": contentDisposition(rawFilename(meta, id)),
-        "X-Content-Type-Options": "nosniff",
-        "Referrer-Policy": "no-referrer",
-        "X-Robots-Tag": "noindex, nofollow",
-        "Cache-Control": "private, no-store",
-      },
-    });
-  }
+/**
+ * What a surface URL is asking for beyond the page itself (#223).
+ *
+ * These hang off the DOCUMENT's own address — `/v/{portal}/{id}?download=1`,
+ * `/pub/{slug}/{id}?pdf=1`, `/p/{token}?download=1` — so every click re-runs the surface's real
+ * authorization instead of replaying a token minted when the page loaded.
+ */
+export type DocumentAction = "download" | "pdf" | "html";
 
-  // Single-page PDF (#50). The capability guard above has already run, so no document reaches
-  // the renderer without authorization. The browser binding is optional: a deployment that did
-  // not enable Browser Run answers 501, and the shell hides the button, so nothing half-works.
-  if (params.get("pdf") === "1") {
-    if (!env.BROWSER) {
-      return pdfError(501, "PDF export is not enabled on this deployment.");
-    }
-    try {
-      const meta = await getMeta(env, id);
-      const { pdf, blocked } = await renderPdf(env.BROWSER, source, new URL(request.url).hostname);
+/** The action this URL asks for, or null for the page itself. */
+export function documentAction(url: URL): DocumentAction | null {
+  const params = url.searchParams;
+  if (params.get("download") === "1") return "download";
+  if (params.get("pdf") === "1") return "pdf";
+  if (params.get("html") === "1") return "html";
+  return null;
+}
 
-      // A PDF with holes and no explanation was the original bug report (#147). Name what did not
-      // load: in a header a client can read, and in the log, where the operator will actually see
-      // it. Logged at `warn` because a document silently exporting differently from how it appears
-      // is a content problem the operator wants to know about, not an error in the deployment.
-      if (blocked.length) {
-        log("warn", "pdf_assets_blocked", {
-          request,
-          doc: id,
-          count: blocked.length,
-          assets: blocked.slice(0, 10).map((b) => `${b.reason}: ${b.url}`),
-        });
-      }
+/**
+ * Serve one document action, for a viewer the CALLER has already authorized.
+ *
+ * 🔴 Two rules, and they are the reason this function takes `meta` rather than an id.
+ *
+ * 1. **The caller authorizes.** `canView` on `/v/` and `/pub/`, the token checks on `/p/`. There
+ *    is no second authorization path in here — this is a dispatch, not a door (ADR-007, prime
+ *    directive #5). Calling it before those checks hands out a client's document.
+ * 2. **Call it BEFORE `renderShell`, never after.** `renderShell` records a view (ADR-023). A
+ *    download is not a read, and a PDF export is not a second read, so an action that fell through
+ *    to the shell first would inflate every document's view count by however many times its
+ *    reader pressed a button.
+ */
+export async function serveDocumentAction(
+  request: Request,
+  env: Env,
+  meta: DocMeta,
+  action: DocumentAction,
+): Promise<Response> {
+  const source = await getDoc(env, meta.id);
+  if (source === null) return new Response("Not found", { status: 404 });
 
-      return new Response(pdf, {
-        headers: {
-          "Content-Type": "application/pdf",
-          "Content-Disposition": contentDisposition(`${filenameBase(meta, id)}.pdf`),
-          "X-Content-Type-Options": "nosniff",
-          "Referrer-Policy": "no-referrer",
-          "X-Robots-Tag": "noindex, nofollow",
-          "Cache-Control": "private, no-store",
-          ...(blocked.length ? { "X-PageVault-Assets-Blocked": String(blocked.length) } : {}),
-        },
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      log("error", "pdf_render_failed", { request, doc: id, error: message });
-      // Free tier is 10 minutes of browser time per day; a burst returns 429. Surface that as
-      // its own status so the button can say "try again later" rather than a generic failure.
-      const rateLimited = /\b429\b|rate.?limit|too many|quota|exceeded/i.test(message);
-      return rateLimited
-        ? pdfError(429, "Daily PDF limit reached. Try again later.")
-        : pdfError(502, "Could not generate the PDF for this document.");
-    }
-  }
+  if (action === "download") return rawDownload(env, meta, source);
+  if (action === "pdf") return pdfExport(request, env, meta, source);
+  return artifactBytes(env, source);
+}
 
+/**
+ * The artifact, as HTML, in a CSP sandbox.
+ *
+ * 🔴 The `sandbox` directive in `docCsp` is what makes this safe to serve from our own origin: it
+ * gives the response an opaque origin even on a direct top-level navigation, so hostile markup
+ * never executes in our document context (ADR-007). That property is what lets the same bytes
+ * answer both the iframe (`/render?cap=`) and the Copy control's fetch on a surface URL — it is
+ * carried by the header, not by the path.
+ */
+function artifactBytes(env: Env, source: string): Response {
   return new Response(source, {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -166,10 +159,86 @@ export async function handleRender(request: Request, env: Env, id: string): Prom
       "X-Content-Type-Options": "nosniff",
       "Referrer-Policy": "no-referrer",
       "X-Robots-Tag": "noindex, nofollow",
-      // Never let the CDN cache an artifact that a capability token gated.
+      // Never let the CDN cache an artifact that authorization gated.
       "Cache-Control": "private, no-store",
     },
   });
+}
+
+/**
+ * The raw source, as a file.
+ *
+ * 🔴 ADR-007. Serving artifact HTML from our origin with `text/html` and no attachment
+ * disposition renders hostile markup in our document context — the exact thing the sandbox
+ * exists to prevent. `Content-Disposition: attachment` forces a download; `application/
+ * octet-stream` + `nosniff` means that even if a disposition were ever dropped, the browser
+ * still will not execute it as HTML here. Three independent reasons it cannot render inline.
+ */
+async function rawDownload(env: Env, meta: DocMeta, source: string): Promise<Response> {
+  // A markdown doc stores rendered HTML at `doc:` but downloads as the original `.md`
+  // (#46) — else the bytes would contradict the `.md` filename `rawFilename` produces.
+  // `?? source` covers HTML docs and any pre-#46 markdown that has no `raw:` companion.
+  const bytes = meta.sourceKind === "markdown" ? ((await getRawSource(env, meta.id)) ?? source) : source;
+  return new Response(bytes, {
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "Content-Disposition": contentDisposition(rawFilename(meta, meta.id)),
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      "X-Robots-Tag": "noindex, nofollow",
+      "Cache-Control": "private, no-store",
+    },
+  });
+}
+
+/**
+ * Single-page PDF (#50). The browser binding is optional: a deployment that did not enable
+ * Browser Run answers 501, and the shell hides the button, so nothing half-works.
+ */
+async function pdfExport(request: Request, env: Env, meta: DocMeta, source: string): Promise<Response> {
+  if (!env.BROWSER) {
+    return pdfError(501, "PDF export is not enabled on this deployment.");
+  }
+  try {
+    const { pdf, blocked } = await renderPdf(env.BROWSER, source, new URL(request.url).hostname);
+
+    // A PDF with holes and no explanation was the original bug report (#147). Name what did not
+    // load: in a header a client can read, and in the log, where the operator will actually see
+    // it. Logged at `warn` because a document silently exporting differently from how it appears
+    // is a content problem the operator wants to know about, not an error in the deployment.
+    if (blocked.length) {
+      log("warn", "pdf_assets_blocked", {
+        request,
+        doc: meta.id,
+        count: blocked.length,
+        assets: blocked.slice(0, 10).map((b) => `${b.reason}: ${b.url}`),
+      });
+    }
+
+    return new Response(pdf, {
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": contentDisposition(`${filenameBase(meta, meta.id)}.pdf`),
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "X-Robots-Tag": "noindex, nofollow",
+        "Cache-Control": "private, no-store",
+        ...(blocked.length ? { "X-PageVault-Assets-Blocked": String(blocked.length) } : {}),
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log("error", "pdf_render_failed", { request, doc: meta.id, error: message });
+    // Free tier is 10 minutes of browser time per day; a burst returns 429. Surface that as
+    // its own status so the button can say "try again later" rather than a generic failure.
+    // 🔴 This conflates a one-second concurrency rejection with an exhausted daily budget and
+    // tells the reader to come back tomorrow either way — see #207, which fixes the message and
+    // the missing retry. Left alone here on purpose: #223 moves this code, it does not reclassify.
+    const rateLimited = /\b429\b|rate.?limit|too many|quota|exceeded/i.test(message);
+    return rateLimited
+      ? pdfError(429, "Daily PDF limit reached. Try again later.")
+      : pdfError(502, "Could not generate the PDF for this document.");
+  }
 }
 
 /** The title, made filesystem-safe — no extension. Shared by the raw download and the PDF. */
@@ -259,6 +328,20 @@ export interface ShellOptions {
    * there rather than at the call sites (ADR-023, decision 5).
    */
   referer?: string | null;
+  /**
+   * This document's own address on THIS surface — `/v/{slug}/{id}`, `/pub/{slug}/{id}`, `/p/{token}`.
+   * The Download, PDF and Copy controls hang off it (`?download=1`, `?pdf=1`, `?html=1`), so each
+   * click re-enters the surface's own authorization (#223).
+   *
+   * 🔴 Required, with no default, and it must be the address the READER is on rather than any
+   * canonical form of it. On `/p/` the token in the path is the authorization: substitute the
+   * `/v/` address here and every control on a public link dead-ends at the Access wall.
+   *
+   * Not folded into `canonicalUrl`, which is absolute, optional, and answers a different question
+   * — what an unfurl bot should call this page. A surface may want no `og:url` and still needs
+   * working buttons.
+   */
+  selfHref: string;
   /** Where "back" goes. Absent on a `/p/` capability link — there is no collection. */
   backHref?: string;
   backLabel?: string;
@@ -333,9 +416,13 @@ export async function renderShell(
   // to degrade the page that holds the capability token.
   const nonce = crypto.randomUUID();
   const src = `/render/${encodeURIComponent(meta.id)}?cap=${encodeURIComponent(cap)}`;
-  // The download and PDF both reuse the same capability guard — no second auth path (ADR-007).
-  const downloadHref = `${src}&download=1`;
-  const pdfHref = `${src}&pdf=1`;
+  // 🔴 The controls hang off the SURFACE, not off `src` (#223). The capability above is ten
+  // minutes long and a reader's tab is not, so a Download built from `src` was a live button
+  // that silently 404'd once the reader had spent eleven minutes with the document — which is
+  // most of them. These re-enter `canView` (or the `/p/` token check) on every click instead.
+  const downloadHref = `${opts.selfHref}?download=1`;
+  const pdfHref = `${opts.selfHref}?pdf=1`;
+  const rawHtmlHref = `${opts.selfHref}?html=1`;
   const pdfName = `${filenameBase(meta, meta.id)}.pdf`;
 
   const back = opts.backHref
@@ -377,7 +464,7 @@ export async function renderShell(
   (function () {
     var b = document.getElementById("copy");
     if (!b) return;
-    var htmlUrl = ${JSON.stringify(src)}, mdUrl = ${JSON.stringify(downloadHref)}, label = b.textContent;
+    var htmlUrl = ${JSON.stringify(rawHtmlHref)}, mdUrl = ${JSON.stringify(downloadHref)}, label = b.textContent;
     // Re-type each body into a Blob whose MIME matches the ClipboardItem key: the rendered HTML
     // comes back as text/html, but the raw markdown downloads as octet-stream, and a strict
     // clipboard rejects a mismatch. .text() never renders — it is bytes, not a DOM.

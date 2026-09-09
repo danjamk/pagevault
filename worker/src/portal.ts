@@ -15,7 +15,7 @@ import {
 } from "./store.js";
 import { log } from "./log.js";
 import { PRODUCT_URL, THEME, showBranding } from "./theme.js";
-import { SHARED_PORTAL_DESCRIPTION, renderShell } from "./viewer.js";
+import { SHARED_PORTAL_DESCRIPTION, documentAction, renderShell, serveDocumentAction } from "./viewer.js";
 
 /**
  * `/v/{slug}` and `/v/{slug}/{id}` — the client-facing surface.
@@ -149,7 +149,12 @@ async function movedDocument(
   }
 
   log("info", "followed_moved_document", { portal: portal.slug, doc: meta.id, from: id });
-  return Response.redirect(new URL(documentPath(portal, target), requestUrl).toString(), 301);
+  // 🔴 Carry the query across (#223). The Download and PDF controls are `?download=1` / `?pdf=1`
+  // on the document's own address, so a forwarder that dropped the search string would answer a
+  // download with the viewer page — a renamed document whose buttons quietly stop being buttons.
+  const moved = new URL(documentPath(portal, target), requestUrl);
+  moved.search = new URL(requestUrl).search;
+  return Response.redirect(moved.toString(), 301);
 }
 
 async function portalIndex(
@@ -228,8 +233,20 @@ async function portalDocument(
     return notFound();
   }
 
+  // Download / PDF / raw-HTML, on the document's own address (#223).
+  //
+  // 🔴 After `canView` and BEFORE `renderShell`, and both halves matter. Above the gate it would
+  // serve a client's document to anyone; below `renderShell` it would record a view, and a
+  // download is not a read — every button press would inflate the count (ADR-023).
+  //
+  // This is also the reason the cross-portal check above cannot be skipped for actions: it runs
+  // on the way here, so `/v/{some-other-portal}/{id}?download=1` is the same 404 the page is.
+  const action = documentAction(new URL(request.url));
+  if (action) return serveDocumentAction(request, env, meta, action);
+
   return renderShell(env, meta, {
     email,
+    selfHref: documentPath(portal, meta.id),
     backHref: portalPath(portal),
     backLabel: portal.name,
     // Everything is noindex for now, including public portals.
