@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.42.2] — 2026-09-09
+
+A busy PDF renderer no longer tells your client to come back tomorrow.
+
 ### Fixed
 - **The PDF button told clients to come back tomorrow over a one-second queue.** Clicking PDF twice,
   or opening two documents at once, could exhaust Cloudflare's three-concurrent-browser allowance on
@@ -2000,7 +2004,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.42.1...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.42.2...HEAD
+[0.42.2]: https://github.com/danjamk/pagevault/compare/v0.42.1...v0.42.2
 [0.42.1]: https://github.com/danjamk/pagevault/compare/v0.42.0...v0.42.1
 [0.42.0]: https://github.com/danjamk/pagevault/compare/v0.41.0...v0.42.0
 [0.41.0]: https://github.com/danjamk/pagevault/compare/v0.40.0...v0.41.0
