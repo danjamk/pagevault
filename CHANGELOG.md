@@ -7,6 +7,10 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+## [0.42.1] — 2026-09-09
+
+The buttons in a document keep working for as long as the tab is open.
+
 ### Fixed
 - **Download and PDF stopped working after ten minutes on the page.** Every control in the viewer —
   Download, PDF, and Copy on a markdown document — was built from the short-lived token that gates
@@ -1976,7 +1980,8 @@ The foundation — the whole deploy ladder, working end to end.
   never appears in the codebase.
 - One authorization function, `canView()`, including for the read-side MCP tools.
 
-[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.42.0...HEAD
+[Unreleased]: https://github.com/danjamk/pagevault/compare/v0.42.1...HEAD
+[0.42.1]: https://github.com/danjamk/pagevault/compare/v0.42.0...v0.42.1
 [0.42.0]: https://github.com/danjamk/pagevault/compare/v0.41.0...v0.42.0
 [0.41.0]: https://github.com/danjamk/pagevault/compare/v0.40.0...v0.41.0
 [0.40.0]: https://github.com/danjamk/pagevault/compare/v0.39.1...v0.40.0
