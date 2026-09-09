@@ -2,7 +2,7 @@ import { SELF, env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { mintCapability, originAllowed, resetCapabilityKeyCache, verifyCapability } from "../src/capability.js";
 import { type DocMeta, putDoc, putPublicToken } from "../src/store.js";
-import { IFRAME_SANDBOX, SHARED_LINK_DESCRIPTION, docCsp, handleRender, renderShell } from "../src/viewer.js";
+import { IFRAME_SANDBOX, SHARED_LINK_DESCRIPTION, docCsp, renderShell, serveDocumentAction } from "../src/viewer.js";
 
 const HOST = "https://share.example.com";
 const HTML = "<!doctype html><h1>Q3</h1><script>console.log(1)</script>";
@@ -148,11 +148,14 @@ describe("/render — artifact bytes", () => {
   });
 });
 
-describe("/render?download=1 — raw file download (#49)", () => {
+describe("surface actions — ?download=1 (#49, #223)", () => {
+  // 🔴 These hang off the DOCUMENT's own address on each surface, not off `/render?cap=`.
+  // The capability is ten minutes long and a reader's tab is not, so a control built from it
+  // was a live button that silently 404'd for anyone who spent eleven minutes reading (#223).
+  const PUB = (meta: DocMeta) => `${HOST}/p/${meta.publicToken}?download=1`;
+
   it("🔴 returns the raw source as an attachment, never inline HTML (ADR-007)", async () => {
-    const meta = await publishPublic();
-    const cap = await mintCapability(env, meta.id, null);
-    const res = await SELF.fetch(`${HOST}/render/${meta.id}?cap=${cap}&download=1`);
+    const res = await SELF.fetch(PUB(await publishPublic()));
 
     expect(res.status).toBe(200);
     // Read as bytes, not text — the whole point is that this is not served as a text document.
@@ -164,17 +167,24 @@ describe("/render?download=1 — raw file download (#49)", () => {
     expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
   });
 
+  it("🔴 works with no capability anywhere in the request — that is the fix (#223)", async () => {
+    // The regression this issue exists for. The old control carried `?cap=`; when it expired the
+    // download 404'd and the browser fired no download event at all, so the reader saw a button
+    // that did nothing. Authorization now comes from the surface, which does not expire mid-read.
+    const res = await SELF.fetch(PUB(await publishPublic()));
+    expect(res.status).toBe(200);
+    expect(new TextDecoder().decode(await res.arrayBuffer())).toBe(HTML);
+  });
+
   it("names the file from the title with an html extension", async () => {
     const meta = await publishPublic({ title: "Q3 Review" });
-    const cap = await mintCapability(env, meta.id, null);
-    const cd = (await SELF.fetch(`${HOST}/render/${meta.id}?cap=${cap}&download=1`)).headers.get("Content-Disposition");
+    const cd = (await SELF.fetch(PUB(meta))).headers.get("Content-Disposition");
     expect(cd).toContain('filename="Q3 Review.html"');
   });
 
   it("honors sourceKind — a markdown document downloads as .md", async () => {
     const meta = await publishPublic({ sourceKind: "markdown" });
-    const cap = await mintCapability(env, meta.id, null);
-    const cd = (await SELF.fetch(`${HOST}/render/${meta.id}?cap=${cap}&download=1`)).headers.get("Content-Disposition");
+    const cd = (await SELF.fetch(PUB(meta))).headers.get("Content-Disposition");
     expect(cd).toContain(".md");
     expect(cd).not.toContain(".html");
   });
@@ -182,26 +192,64 @@ describe("/render?download=1 — raw file download (#49)", () => {
   it("🔴 serves the original .md source, not the rendered HTML body (#46)", async () => {
     // A markdown doc stores rendered HTML at doc: and the original at raw:. The download
     // must hand back the original, or the bytes contradict the .md filename.
-    const meta = doc({ id: "mdrawdoc123456", sourceKind: "markdown" });
+    const meta = doc({ id: "mdrawdoc123456", publicToken: "pubtoken4444444444444", sourceKind: "markdown" });
     const RENDERED = "<!doctype html><h1>Report</h1>";
     const ORIGINAL = "# Report\n\nBody text.";
     await putDoc(env, meta, RENDERED, ORIGINAL);
-    const cap = await mintCapability(env, meta.id, null);
-    const res = await SELF.fetch(`${HOST}/render/${meta.id}?cap=${cap}&download=1`);
+    await putPublicToken(env, meta.publicToken!, meta.id);
+    const res = await SELF.fetch(PUB(meta));
     expect(new TextDecoder().decode(await res.arrayBuffer())).toBe(ORIGINAL);
   });
 
-  it("🔴 obeys the same capability guard — a forged cap 404s", async () => {
+  it("🔴 a revoked /p/ token cannot download — the action obeys the surface's own gate", async () => {
     const meta = await publishPublic();
-    expect((await SELF.fetch(`${HOST}/render/${meta.id}?cap=notarealtoken&download=1`)).status).toBe(404);
+    // Rotate: the doc keeps a live token, but this one is no longer it.
+    await putDoc(env, { ...meta, publicToken: "pubtoken5555555555555" }, HTML);
+    expect((await SELF.fetch(PUB(meta))).status).toBe(404);
+  });
+
+  it("🔴 an owner-only draft cannot be downloaded through a /p/ link", async () => {
+    // ownerOnly is the one narrowing rule and it beats every grant, the action included.
+    const meta = await publishPublic({ id: "ownerdraft1234", publicToken: "pubtoken6666666666666", ownerOnly: true });
+    expect((await SELF.fetch(PUB(meta))).status).toBe(404);
+  });
+
+  it("🔴 /render no longer serves downloads at all — one route, one job (#223)", async () => {
+    // Deleting the action from /render is half the fix: leaving two live paths to the same
+    // bytes is what ADR-007 warns about. A capability still opens the iframe, and only that.
+    const meta = await publishPublic();
+    const cap = await mintCapability(env, meta.id, null);
+    const res = await SELF.fetch(`${HOST}/render/${meta.id}?cap=${cap}&download=1`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toContain("text/html");
+    expect(res.headers.get("Content-Disposition")).toBeNull();
   });
 });
 
-describe("viewer chrome — download + share (#49)", () => {
-  it("every shell offers a download control pointing at the guarded raw route", async () => {
-    const body = await (await SELF.fetch(`${HOST}/p/${(await publishPublic()).publicToken}`)).text();
-    expect(body).toMatch(/href="\/render\/[^"]*download=1"/);
+describe("viewer chrome — download + share (#49, #223)", () => {
+  it("🔴 the download control points at the SURFACE, carrying no capability (#223)", async () => {
+    const meta = await publishPublic();
+    const body = await (await SELF.fetch(`${HOST}/p/${meta.publicToken}`)).text();
+    expect(body).toContain(`href="/p/${meta.publicToken}?download=1"`);
     expect(body).toContain(">Download<");
+    // The control must not be built from the render URL — that is the ten-minute token.
+    expect(body).not.toMatch(/href="\/render\/[^"]*download=1"/);
+  });
+
+  it("🔴 a /v/ shell points at its own /v/ address, not the public one", async () => {
+    // Substituting a canonical or public address here would send a portal reader's Download
+    // to a link that opens for the wrong audience — or for nobody.
+    const body = await (
+      await renderShell(env, doc(), {
+        email: "cto@realplus.com",
+        selfHref: "/v/default/k3x9mq2vb7pd",
+        noindex: true,
+        shareable: false,
+        unfurl: "none",
+        surface: "portal",
+      })
+    ).text();
+    expect(body).toContain('href="/v/default/k3x9mq2vb7pd?download=1"');
   });
 
   it("a /p/ capability link is self-authorizing, so the share control is present", async () => {
@@ -212,7 +260,7 @@ describe("viewer chrome — download + share (#49)", () => {
   it("🔴 an Access-gated (non-shareable) shell hides share but keeps download", async () => {
     // A /v/ URL only opens for people already in the portal, so a share affordance there
     // would hand out a link that dead-ends at the Access wall. Download stays.
-    const secure = await renderShell(env, doc(), { email: "cto@realplus.com", noindex: true, shareable: false, unfurl: "none", surface: "portal" });
+    const secure = await renderShell(env, doc(), { email: "cto@realplus.com", selfHref: "/v/default/k3x9mq2vb7pd", noindex: true, shareable: false, unfurl: "none", surface: "portal" });
     const body = await secure.text();
     expect(body).not.toContain('id="share"');
     expect(body).toContain(">Download<");
@@ -269,40 +317,47 @@ describe("🔴 /p/ unfurl — the name, never the summary (#210)", () => {
   });
 });
 
-describe("/render?pdf=1 — PDF export (#50, ADR-027)", () => {
-  it("🔴 reuses the capability guard — a forged cap 404s before the browser is ever touched", async () => {
-    const meta = await publishPublic();
-    expect((await SELF.fetch(`${HOST}/render/${meta.id}?cap=notarealtoken&pdf=1`)).status).toBe(404);
+describe("surface actions — ?pdf=1 (#50, ADR-027, #223)", () => {
+  it("🔴 obeys the surface's gate — a revoked /p/ token 404s before the browser is touched", async () => {
+    const meta = await publishPublic({ id: "pdfrevoked1234", publicToken: "pubtoken7777777777777" });
+    await putDoc(env, { ...meta, publicToken: "pubtoken8888888888888" }, HTML);
+    expect((await SELF.fetch(`${HOST}/p/${meta.publicToken}?pdf=1`)).status).toBe(404);
   });
 
   it("501s when the Browser binding is absent — a deployment without Browser Run degrades off", async () => {
     // The test pool provides a stub BROWSER, so this path is exercised by a direct call with
     // the binding dropped — the same shape a fork that never enabled Browser Run produces.
-    const meta = await publishPublic();
-    const cap = await mintCapability(env, meta.id, null);
-    const req = new Request(`${HOST}/render/${meta.id}?cap=${cap}&pdf=1`);
+    const meta = await publishPublic({ id: "pdfnobrowser12", publicToken: "pubtoken9999999999999" });
+    const req = new Request(`${HOST}/p/${meta.publicToken}?pdf=1`);
 
     // Omit the binding entirely (not set it to undefined) — the shape a fork without Browser
     // Run produces. exactOptionalPropertyTypes forbids the explicit-undefined shortcut.
     const noBrowser = { ...env };
     delete (noBrowser as Partial<typeof env>).BROWSER;
 
-    const res = await handleRender(req, noBrowser, meta.id);
+    const res = await serveDocumentAction(req, noBrowser, meta, "pdf");
     expect(res.status).toBe(501);
     expect(((await res.json()) as { error: string }).error).toMatch(/not enabled/i);
+  });
+
+  it("🔴 /render no longer renders PDFs — the action lives on the surface now (#223)", async () => {
+    const meta = await publishPublic();
+    const cap = await mintCapability(env, meta.id, null);
+    const res = await SELF.fetch(`${HOST}/render/${meta.id}?cap=${cap}&pdf=1`);
+    expect(res.headers.get("Content-Type")).not.toContain("application/pdf");
   });
 });
 
 describe("viewer chrome — PDF control (#50)", () => {
   it("shows the PDF button and grants connect-src 'self' only when PDF is enabled", async () => {
-    const res = await renderShell(env, doc(), { email: null, noindex: true, unfurl: "title", pdfEnabled: true, surface: "link" });
+    const res = await renderShell(env, doc(), { email: null, selfHref: "/p/pubtoken2222222222222", noindex: true, unfurl: "title", pdfEnabled: true, surface: "link" });
     const body = await res.text();
     expect(body).toContain('id="pdf"');
     expect(res.headers.get("Content-Security-Policy")).toContain("connect-src 'self'");
   });
 
   it("🔴 hides the PDF button and keeps the tight CSP when PDF is disabled", async () => {
-    const res = await renderShell(env, doc(), { email: null, noindex: true, unfurl: "title", pdfEnabled: false, surface: "link" });
+    const res = await renderShell(env, doc(), { email: null, selfHref: "/p/pubtoken2222222222222", noindex: true, unfurl: "title", pdfEnabled: false, surface: "link" });
     const body = await res.text();
     expect(body).not.toContain('id="pdf"');
     // No fetch means no reason to widen the shell's CSP.
@@ -312,7 +367,7 @@ describe("viewer chrome — PDF control (#50)", () => {
 
 describe("viewer chrome — copy-as-rich-text (#93)", () => {
   it("shows the Copy control and grants connect-src 'self' for a markdown document", async () => {
-    const res = await renderShell(env, doc({ sourceKind: "markdown" }), { email: null, noindex: true, unfurl: "title", pdfEnabled: false, surface: "link" });
+    const res = await renderShell(env, doc({ sourceKind: "markdown" }), { email: null, selfHref: "/p/pubtoken2222222222222", noindex: true, unfurl: "title", pdfEnabled: false, surface: "link" });
     const body = await res.text();
     expect(body).toContain('id="copy"');
     expect(body).toContain(">Copy<");
@@ -322,7 +377,7 @@ describe("viewer chrome — copy-as-rich-text (#93)", () => {
   });
 
   it("🔴 hides the Copy control for an HTML document — it would paste as a blank rectangle", async () => {
-    const res = await renderShell(env, doc({ sourceKind: "html" }), { email: null, noindex: true, unfurl: "title", pdfEnabled: false, surface: "link" });
+    const res = await renderShell(env, doc({ sourceKind: "html" }), { email: null, selfHref: "/p/pubtoken2222222222222", noindex: true, unfurl: "title", pdfEnabled: false, surface: "link" });
     const body = await res.text();
     expect(body).not.toContain('id="copy"');
     // No copy control and no PDF → nothing fetches, so the CSP stays tight.
@@ -330,7 +385,7 @@ describe("viewer chrome — copy-as-rich-text (#93)", () => {
   });
 
   it("🔴 the copy control never introduces allow-same-origin (ADR-007)", async () => {
-    const res = await renderShell(env, doc({ sourceKind: "markdown" }), { email: null, noindex: true, unfurl: "title", pdfEnabled: true, surface: "link" });
+    const res = await renderShell(env, doc({ sourceKind: "markdown" }), { email: null, selfHref: "/p/pubtoken2222222222222", noindex: true, unfurl: "title", pdfEnabled: true, surface: "link" });
     expect(await res.text()).not.toContain("allow-same-origin");
   });
 });
@@ -374,6 +429,23 @@ describe("🔴 /render — the response headers ARE the sandbox", () => {
     expect(headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(headers.get("Referrer-Policy")).toBe("no-referrer");
     expect(headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+  });
+
+  it("🔴 ?html=1 on a SURFACE carries the identical sandbox — ADR-007 is not path-scoped (#223)", async () => {
+    // The Copy control fetches artifact bytes from `/p/{token}?html=1` rather than `/render`.
+    // Those bytes are just as hostile there, and the guarantee is carried by the header, not
+    // by the path. If these two responses ever diverge, the surface route is the unsafe one.
+    const meta = await publishPublic({ id: "htmlaction1234", publicToken: "pubtokenaaaaaaaaaaaaa" });
+    const viaSurface = await SELF.fetch(`${HOST}/p/${meta.publicToken}?html=1`);
+    const cap = await mintCapability(env, meta.id, null);
+    const viaRender = await SELF.fetch(`${HOST}/render/${meta.id}?cap=${cap}`);
+
+    expect(viaSurface.status).toBe(200);
+    for (const header of ["Content-Security-Policy", "Content-Type", "Cache-Control", "X-Content-Type-Options", "Referrer-Policy", "X-Robots-Tag"]) {
+      expect(viaSurface.headers.get(header), header).toBe(viaRender.headers.get(header));
+    }
+    expect(viaSurface.headers.get("Content-Security-Policy")).toContain("sandbox allow-scripts");
+    expect(viaSurface.headers.get("Content-Security-Policy")).not.toContain("allow-same-origin");
   });
 
   it("allows a CDN allowlist, because Claude artifacts pull Chart.js from one", () => {

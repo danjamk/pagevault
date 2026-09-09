@@ -7,6 +7,17 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **Download and PDF stopped working after ten minutes on the page.** Every control in the viewer —
+  Download, PDF, and Copy on a markdown document — was built from the short-lived token that gates
+  the artifact iframe. The token lives ten minutes; a reader with a long report does not. Past that,
+  clicking Download produced no download and no error, because the browser fires no download event
+  for a link that 404s: the button simply did nothing. The controls now hang off the document's own
+  address on whichever surface the reader is already on — `/v/`, `/pub/` or a `/p/` link — so each
+  click re-runs the same authorization that served the page, and nothing expires while a tab sits
+  open. A revoked `/p/` link now also stops downloading for a tab that was already open, which it
+  should have all along. ([#223](../../issues/223))
+
 ## [0.42.0] — 2026-08-21
 
 Where your readers came from, in the period you are looking at.

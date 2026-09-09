@@ -127,9 +127,10 @@ misfiling a client report, not a required flag:
 | `/health` | none | Unauthenticated liveness: name, `<version>+<sha>`, deploy time. |
 | `/v/{slug}` | **App A** (`host/v`) | Portal index. `canView` per doc. |
 | `/v/{slug}/{id}` | **App A** | Viewer shell. `canView`, then mint a capability token. |
-| `/render/{id}?cap=` | none | **Artifact bytes.** Capability token only. Framed, never navigated. |
-| `/p/{token}` | none | Capability link → shell. No auth, no seat burned. |
-| `/pub/{slug}`, `/pub/{slug}/{id}` | none | Public portal → shell. No auth, no seat burned. |
+| `/v/{slug}/{id}?download=1\|pdf=1\|html=1` | **App A** | **Document actions.** `canView` again, on every click — then the raw file, a PDF, or the artifact bytes. Records no view. |
+| `/render/{id}?cap=` | none | **Artifact bytes, for the iframe.** Capability token only. Framed, never navigated. |
+| `/p/{token}` | none | Capability link → shell. No auth, no seat burned. Takes the same three actions. |
+| `/pub/{slug}`, `/pub/{slug}/{id}` | none | Public portal → shell. No auth, no seat burned. Takes the same three actions. |
 | `/api/*` | none | Bearer token. |
 | `/mcp` | none | **Remote MCP**, Streamable HTTP. Bearer token. See ADR-006. |
 | `/admin`, `/admin/*` | **App B** (`host/admin`) | Owner console. |
@@ -326,6 +327,20 @@ viewer's `CF_Authorization` cookie riding along automatically, that is an open d
 `/render/{id}` serves artifact bytes with a strict CSP *and* the `sandbox` directive,
 so even a direct top-level navigation lands in an opaque origin. That is one better
 than sharehtml, which relies on the iframe attribute alone.
+
+**The capability is for the iframe, and only the iframe.** It lives ten minutes; a
+reader's tab lives longer. So Download, PDF and Copy hang off the *document's own
+address on the surface the reader is already on* — `?download=1`, `?pdf=1`, `?html=1`
+on `/v/{slug}/{id}`, `/pub/{slug}/{id}` or `/p/{token}` — and re-enter `canView` (or
+the `/p/` token checks) on every click. Before that they were built from the render
+URL, which meant every control on the page went dead once the token expired, with a
+bare 404 the reader saw as a button that did nothing (#223). Two consequences worth
+keeping in mind when touching this:
+
+- The cross-portal check has to cover the action paths, not just the page. Each one is
+  another way to ask for a document through a portal that does not own it.
+- The action must be served **before** `renderShell`, which records a view. A download
+  is not a read.
 
 > ⚠️ `sandbox="allow-scripts allow-same-origin"` is **functionally no sandbox at
 > all** — the frame can reach back into the parent and strip the attribute. It is

@@ -9,7 +9,7 @@ import { favicon, rootLanding, linkUnavailable } from "./pages.js";
 import { handlePortalRoute, handlePublicPortalRoute } from "./portal.js";
 import { getMeta, getPublicTokenTarget } from "./store.js";
 import { fingerprint, log } from "./log.js";
-import { handleRender, renderShell } from "./viewer.js";
+import { documentAction, handleRender, renderShell, serveDocumentAction } from "./viewer.js";
 
 /**
  * PageVault — the router.
@@ -214,15 +214,23 @@ async function handlePublicToken(request: Request, env: Env, token: string): Pro
     return notFound();
   }
 
+  const canonical = new URL(request.url);
+
+  // Download / PDF / raw-HTML, on the capability URL itself (#223). After all four refusals
+  // above — the token IS the authorization here, so an action served before them is a hole —
+  // and before `renderShell`, which records a view (a download is not a read, ADR-023).
+  const action = documentAction(canonical);
+  if (action) return serveDocumentAction(request, env, meta, action);
+
   // A /p/ capability link is self-authorizing — anyone with the URL can open it — so the
   // share control belongs here.
   // 🔴 `title`, never `full`. A /p/ link is shared deliberately but PRIVATELY, and an unfurl
   // renders whatever we emit to every member of the channel it lands in — including people this
   // document was never shared with — plus the platform doing the unfurling. The name gives the
   // card something to show; the summary stays here. See ShellOptions.unfurl (#210).
-  const canonical = new URL(request.url);
   return renderShell(env, meta, {
     email: null,
+    selfHref: `/p/${encodeURIComponent(token)}`,
     noindex: true,
     shareable: true,
     unfurl: "title",
