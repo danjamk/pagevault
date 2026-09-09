@@ -7,6 +7,26 @@ deployment reports `<version>+<shortsha>` for exactly what it's running.
 
 ## [Unreleased]
 
+### Fixed
+- **The PDF button told clients to come back tomorrow over a one-second queue.** Clicking PDF twice,
+  or opening two documents at once, could exhaust Cloudflare's three-concurrent-browser allowance on
+  the free tier — and every refusal of that shape was reported as "Daily PDF limit reached", a
+  condition that would clear in about a second. The two are now told apart from Browser Run's own
+  reported limits rather than from the wording of an error string, and the transient case is retried
+  once automatically before the reader is told anything, inside the "Generating…" state the button
+  already shows. What is left to see is either "the PDF renderer is busy, try again in a moment" or,
+  only when the day's allocation really is spent, a message that says so. The operator gets three
+  separate log events instead of one, so a double-tap and an exhausted budget no longer look
+  identical from a tail. ([#207](../../issues/207))
+
+### Changed
+- **A PDF export now reuses a browser that is already running, when one is free.** Acquiring a
+  browser is the rate-limited act, so joining an idle session avoids the refusal entirely and skips
+  the cold start. Each render gets its own isolated browser context, so two documents sharing a
+  browser share nothing else — no cookies, no cache, no storage. Browsers are still never held open
+  between exports: idle browser time is billed the same as working browser time, and the free tier
+  includes ten minutes a day. ([#207](../../issues/207))
+
 ## [0.42.1] — 2026-09-09
 
 The buttons in a document keep working for as long as the tab is open.

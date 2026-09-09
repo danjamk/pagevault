@@ -611,7 +611,10 @@ expired* — that split is the whole reason the levels exist.
 | `denied_cross_portal_document` | error | A portal was asked for a document it does not own. A 404 either way — but a *pattern* is someone walking ids across portals. |
 | `dangling_public_token` | error | A `pub:` key outlived its document. A KV inconsistency; nothing else reports it. |
 | `mcp_tool_failed` / `mcp_tool_misconfigured` | error | An MCP tool broke. The model used to get the text and the operator nothing. |
-| `pdf_render_failed` | error | Browser Run failed or hit its daily allocation. |
+| `pdf_render_failed` | error | Browser Run failed for a reason that is not capacity — a timeout, a crashed page. |
+| `pdf_renderer_busy` | warn | No browser was free, and the retry did not get one either. Concurrency or the new-instance rate limit, not the daily budget. |
+| `pdf_budget_exhausted` | warn | The account's daily browser-time allocation is spent. This is the one that really does mean tomorrow. |
+| `pdf_retry_succeeded` | info | A render was refused for capacity and the automatic retry got through. The reader saw nothing. |
 | `denied_portal_index` / `denied_document_view` | warn | `canViewPortal` / `canView` said no. |
 | `blocked_public_token_*` | warn | Which of the four `/p/` refusals it was — unknown, superseded, or owner-only. |
 | `blocked_public_portal_route` | warn | `/pub` against a non-public portal. `exists: true` means someone guessed a real client's slug. |

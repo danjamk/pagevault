@@ -2,7 +2,7 @@ import { type ViewSurface, recordView } from "./analytics.js";
 import { mintCapability, verifyCapability } from "./capability.js";
 import type { Env } from "./env.js";
 import { fingerprint, log } from "./log.js";
-import { renderPdf } from "./pdf.js";
+import { type BlockedRequest, classifyRenderFailure, readLimits, renderPdf, retryDelayMs } from "./pdf.js";
 import type { DocMeta } from "./store.js";
 import { getDoc, getRawSource } from "./store.js";
 import { ATTRIBUTION_CSS, THEME, attribution } from "./theme.js";
@@ -201,44 +201,106 @@ async function pdfExport(request: Request, env: Env, meta: DocMeta, source: stri
   }
   try {
     const { pdf, blocked } = await renderPdf(env.BROWSER, source, new URL(request.url).hostname);
-
-    // A PDF with holes and no explanation was the original bug report (#147). Name what did not
-    // load: in a header a client can read, and in the log, where the operator will actually see
-    // it. Logged at `warn` because a document silently exporting differently from how it appears
-    // is a content problem the operator wants to know about, not an error in the deployment.
-    if (blocked.length) {
-      log("warn", "pdf_assets_blocked", {
-        request,
-        doc: meta.id,
-        count: blocked.length,
-        assets: blocked.slice(0, 10).map((b) => `${b.reason}: ${b.url}`),
-      });
-    }
-
-    return new Response(pdf, {
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": contentDisposition(`${filenameBase(meta, meta.id)}.pdf`),
-        "X-Content-Type-Options": "nosniff",
-        "Referrer-Policy": "no-referrer",
-        "X-Robots-Tag": "noindex, nofollow",
-        "Cache-Control": "private, no-store",
-        ...(blocked.length ? { "X-PageVault-Assets-Blocked": String(blocked.length) } : {}),
-      },
-    });
+    logBlockedAssets(request, meta, blocked);
+    return pdfResponse(pdf, blocked, meta);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    const failure = classifyRenderFailure(await readLimits(env.BROWSER), message);
+
+    // 🔴 Retry the transient case ONCE, before the reader is told anything (#207).
+    //
+    // `busy` means no browser was free at that instant — three concurrent on Workers Free, or the
+    // new-instance rate limit. It clears in about a second. The button is already showing
+    // "Generating…" for the cold-launch latency, so the wait is invisible; what was visible was an
+    // alert telling a client to come back tomorrow over a one-second queue.
+    //
+    // Once, not a loop: if a second attempt a beat later still cannot get a browser, the deployment
+    // is genuinely saturated and the honest answer is to say so rather than hold the request open.
+    if (failure === "busy") {
+      const retried = await retryRender(request, env, meta, source);
+      if (retried) return retried;
+    }
+
+    // Separate events, so the operator can tell "someone double-tapped" from "the deployment is
+    // out of budget" from a tail, without opening the Cloudflare dashboard.
+    if (failure === "busy") {
+      // `warn`, not `error`: a saturated renderer is a capacity fact about the free tier, not a
+      // broken deployment. It should not page anyone reading `--status error`.
+      log("warn", "pdf_renderer_busy", { request, doc: meta.id, error: message });
+      return pdfError(429, "The PDF renderer is busy. Try again in a moment.");
+    }
+
+    if (failure === "exhausted") {
+      log("warn", "pdf_budget_exhausted", { request, doc: meta.id, error: message });
+      return pdfError(429, "This deployment's daily PDF allowance is used up. Try again tomorrow.");
+    }
+
     log("error", "pdf_render_failed", { request, doc: meta.id, error: message });
-    // Free tier is 10 minutes of browser time per day; a burst returns 429. Surface that as
-    // its own status so the button can say "try again later" rather than a generic failure.
-    // 🔴 This conflates a one-second concurrency rejection with an exhausted daily budget and
-    // tells the reader to come back tomorrow either way — see #207, which fixes the message and
-    // the missing retry. Left alone here on purpose: #223 moves this code, it does not reclassify.
-    const rateLimited = /\b429\b|rate.?limit|too many|quota|exceeded/i.test(message);
-    return rateLimited
-      ? pdfError(429, "Daily PDF limit reached. Try again later.")
-      : pdfError(502, "Could not generate the PDF for this document.");
+    return pdfError(502, "Could not generate the PDF for this document.");
   }
+}
+
+/**
+ * One more attempt at a render that was refused for capacity, after a short pause.
+ *
+ * Returns the response on success, or null to let the caller report the original failure — a retry
+ * that also fails must not replace the diagnosis with its own.
+ */
+async function retryRender(
+  request: Request,
+  env: Env,
+  meta: DocMeta,
+  source: string,
+): Promise<Response | null> {
+  const browser = env.BROWSER;
+  if (!browser) return null;
+
+  const delay = retryDelayMs(await readLimits(browser));
+  await new Promise((resolve) => setTimeout(resolve, delay));
+  try {
+    const { pdf, blocked } = await renderPdf(browser, source, new URL(request.url).hostname);
+    log("info", "pdf_retry_succeeded", { request, doc: meta.id });
+    // 🔴 The retry reports blocked assets too. A PDF delivered by the second attempt is still a
+    // PDF the reader will open, and #147 is about the operator hearing that it came out with
+    // holes — a signal that appeared or vanished depending on which attempt succeeded would be
+    // worse than none, because its absence would read as "nothing was blocked".
+    logBlockedAssets(request, meta, blocked);
+    return pdfResponse(pdf, blocked, meta);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Name what the render could not load (#147).
+ *
+ * In a header the client can read, and in the log, where the operator will actually see it. `warn`
+ * because a document silently exporting differently from how it appears is a content problem the
+ * operator wants to know about, not an error in the deployment.
+ */
+function logBlockedAssets(request: Request, meta: DocMeta, blocked: BlockedRequest[]): void {
+  if (!blocked.length) return;
+  log("warn", "pdf_assets_blocked", {
+    request,
+    doc: meta.id,
+    count: blocked.length,
+    assets: blocked.slice(0, 10).map((b) => `${b.reason}: ${b.url}`),
+  });
+}
+
+/** The rendered PDF, as a download. Shared by the first attempt and the retry. */
+function pdfResponse(pdf: Uint8Array, blocked: BlockedRequest[], meta: DocMeta): Response {
+  return new Response(pdf, {
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": contentDisposition(`${filenameBase(meta, meta.id)}.pdf`),
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      "X-Robots-Tag": "noindex, nofollow",
+      "Cache-Control": "private, no-store",
+      ...(blocked.length ? { "X-PageVault-Assets-Blocked": String(blocked.length) } : {}),
+    },
+  });
 }
 
 /** The title, made filesystem-safe — no extension. Shared by the raw download and the PDF. */

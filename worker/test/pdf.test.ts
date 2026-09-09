@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mayFetch, pdfOptions } from "../src/pdf.js";
+import { type BrowserLimits, classifyRenderFailure, mayFetch, pdfOptions, retryDelayMs } from "../src/pdf.js";
 
 /**
  * 🔴 The PDF render's fetch policy (ADR-022).
@@ -114,5 +114,89 @@ describe("what paper the PDF lands on", () => {
     for (const mode of ["paper", "canvas"] as const) {
       expect(pdfOptions(mode, DIMS), mode).not.toHaveProperty("format");
     }
+  });
+});
+
+/**
+ * 🔴 Busy is not exhausted (#207).
+ *
+ * The whole issue is one message that told a client to come back tomorrow for a condition that
+ * clears in about a second. Like `mayFetch`, this is a pure function over data, so the decision a
+ * reader actually sees is pinned without a Browser binding.
+ */
+describe("why a render could not start", () => {
+  const limits = (over: Partial<BrowserLimits> = {}): BrowserLimits => ({
+    activeSessions: [],
+    maxConcurrentSessions: 3,
+    allowedBrowserAcquisitions: 3,
+    timeUntilNextAllowedBrowserAcquisition: 0,
+    ...over,
+  });
+
+  const REFUSED = "Unable to create new browser: code: 429: message: too many requests";
+
+  it("🔴 reads the concurrency ceiling as busy, not as an exhausted budget", () => {
+    // Workers Free allows 3 concurrent. All three in use is the reported bug: a reader opened two
+    // documents, or clicked twice, and was told their day was over.
+    const full = limits({ activeSessions: [{ id: "a" }, { id: "b" }, { id: "c" }] });
+    expect(classifyRenderFailure(full, REFUSED)).toBe("busy");
+  });
+
+  it("reads a spent acquisition allowance as busy", () => {
+    expect(classifyRenderFailure(limits({ allowedBrowserAcquisitions: 0 }), REFUSED)).toBe("busy");
+  });
+
+  it("🔴 reads a long wait as the daily budget — the one case that really is 'tomorrow'", () => {
+    const spent = limits({ allowedBrowserAcquisitions: 0, timeUntilNextAllowedBrowserAcquisition: 6 * 60 * 60 * 1000 });
+    expect(classifyRenderFailure(spent, REFUSED)).toBe("exhausted");
+  });
+
+  it("🔴 a short wait is busy even at zero acquisitions — both conditions report zero", () => {
+    // The ordering that makes the two separable. An exhausted account and a rate-limited one both
+    // report no acquisitions left; only the time until the next one tells them apart.
+    const queued = limits({ allowedBrowserAcquisitions: 0, timeUntilNextAllowedBrowserAcquisition: 900 });
+    expect(classifyRenderFailure(queued, REFUSED)).toBe("busy");
+  });
+
+  it("a healthy account with an unrelated failure is neither", () => {
+    // A malformed document or a crashed page is not a capacity problem and must not be reported
+    // as one — telling a reader to wait would send them round a loop that never resolves.
+    expect(classifyRenderFailure(limits(), "Navigation timeout of 30000 ms exceeded")).toBe("failed");
+  });
+
+  it("🔴 falls back to busy — never to 'come back tomorrow' — when limits() is unreachable", () => {
+    // Without the structured answer we cannot tell the two apart, and the costly mistake runs one
+    // way: asking someone to wait a moment is recoverable, writing off their day is not.
+    expect(classifyRenderFailure(null, REFUSED)).toBe("busy");
+    expect(classifyRenderFailure(null, "Unable to create new browser: code: 429: message: anything")).toBe("busy");
+  });
+
+  it("does not invent a capacity problem from an unrecognised message", () => {
+    expect(classifyRenderFailure(null, "Protocol error (Page.printToPDF): Target closed")).toBe("failed");
+  });
+
+  it("🔴 does not depend on the wording Cloudflare puts after the status code", () => {
+    // The trailing text is Cloudflare's to change and we have never seen both variants. Only the
+    // code is relied on; if this starts failing, someone has coupled us to prose we do not own.
+    for (const text of ["message: too many requests", "message: ", "message: something new"]) {
+      expect(classifyRenderFailure(null, `Unable to create new browser: code: 429: ${text}`), text).toBe("busy");
+    }
+  });
+});
+
+describe("how long to wait before the one retry", () => {
+  it("uses the time Browser Run reports", () => {
+    expect(retryDelayMs({ timeUntilNextAllowedBrowserAcquisition: 900 })).toBe(900);
+  });
+
+  it("falls back to a fixed backoff when nothing is reported", () => {
+    expect(retryDelayMs(null)).toBeGreaterThan(0);
+    expect(retryDelayMs({ timeUntilNextAllowedBrowserAcquisition: 0 })).toBe(retryDelayMs(null));
+  });
+
+  it("🔴 caps the wait — a reader is watching a button, not a queue", () => {
+    // Without the cap, an exhausted-budget number (hours) would hold the request open until the
+    // Worker's own limit killed it, turning a clear message into a hang.
+    expect(retryDelayMs({ timeUntilNextAllowedBrowserAcquisition: 6 * 60 * 60 * 1000 })).toBeLessThanOrEqual(5_000);
   });
 });
